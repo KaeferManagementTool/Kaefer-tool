@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>KAEFER Safety Tool</title>
 <style>
@@ -599,8 +600,8 @@ function connSync(){
 }
 function setSS(s,m){document.getElementById('sd').className='sd '+s;document.getElementById('sm').textContent=m;}
 function setLS(){document.getElementById('syl').textContent='Synced: '+new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});}
-function ldSh(){var u=localStorage.getItem(UK);if(!u){setSS('er','Not connected');return;}setSS('bz','Loading...');fetch(u+'?action=load&month='+cM+'&year='+cY+'&t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).then(function(j){if(!j.ok)throw 0;wd=eWD();for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}ldLoc();dW();setLS();setSS('ok','Synced – '+MNS3[cM]+' '+cY);svLoc();}).catch(function(){ldLoc();setSS('er','Offline – local loaded');dW();});}
-function svSh(){var u=localStorage.getItem(UK);if(!u)return;setSS('bz','Saving...');var payload=JSON.stringify({action:'save',month:cM,year:cY,data:wd});fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload}).then(function(r){return r.text();}).then(function(t){try{var j=JSON.parse(t);if(!j.ok)throw 0;setLS();setSS('ok','Saved');}catch(e){setSS('er','Save error');}}).catch(function(){setSS('er','Save failed');});}
+function ldSh(){var u=localStorage.getItem(UK);if(!u){setSS('er','Not connected');return;}setSS('bz','Loading...');fetch(u+'?action=load_ccv&month='+cM+'&year='+cY+'&t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).then(function(j){if(!j.ok)throw 0;wd=eWD();for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}ldLoc();dW();setLS();setSS('ok','Synced – '+MNS3[cM]+' '+cY);svLoc();}).catch(function(){ldLoc();setSS('er','Offline – local loaded');dW();});}
+function svSh(){var u=localStorage.getItem(UK);if(!u)return;setSS('bz','Saving...');var payload=JSON.stringify({action:'save_ccv',month:cM,year:cY,data:wd});fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload}).then(function(r){return r.text();}).then(function(t){try{var j=JSON.parse(t);if(!j.ok)throw 0;setLS();setSS('ok','Saved');}catch(e){setSS('er','Save error');}}).catch(function(){setSS('er','Save failed');});}
 function svLoc(){sl('ccv_'+cY+'_'+cM,wd);}
 function ldLoc(){var s=glj('ccv_'+cY+'_'+cM,null);if(!s)return;s.forEach(function(seg,i){if(!wd[i])return;if(seg.entries&&seg.entries.length)wd[i].entries=seg.entries;if(!wd[i].ccc&&seg.ccc)wd[i].ccc=seg.ccc;if(!wd[i].ccfv&&seg.ccfv)wd[i].ccfv=seg.ccfv;if(!wd[i].red&&seg.red){wd[i].red=seg.red;wd[i].dl=seg.dl||'';}});}
 var HZ=['Vehicle impact on person','Vehicle collision or rollover','Contact with electricity','Confined spaces','Entanglement and crushing','Exposure to hazardous substances','Fall from height','Falling objects','Lifting operations','Exposure to thermal substances','Rope failure','Uncontrolled release of energy'];

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>KAEFER Safety Tool</title>
 <style>
@@ -189,7 +190,7 @@ tbody tr{border-bottom:1px solid #f0f0f0}tbody tr:hover{background:#fafafa}td{pa
   </div>
   <div id="t2-log" class="sub-panel">
     <div class="card">
-      <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Inspection Log</span><span class="cbg" id="lgbg">0</span></div>
+      <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Inspection Log</span><div style="display:flex;align-items:center;gap:8px"><button class="hb" style="font-size:11px;padding:3px 9px" onclick="syncLog()">&#8635; Sync</button><span class="cbg" id="lgbg">0</span></div></div>
       <div id="lge" class="le">No inspections saved yet.</div>
       <div style="overflow-x:auto"><table id="lgt" style="display:none"><thead><tr><th></th><th>Date</th><th>Inspector</th><th>Site</th><th>Area</th><th>Yes</th><th>No</th><th>N/A</th><th>Score</th><th class="np"></th></tr></thead><tbody id="lgb"></tbody></table></div>
     </div>
@@ -229,7 +230,7 @@ tbody tr{border-bottom:1px solid #f0f0f0}tbody tr:hover{background:#fafafa}td{pa
     </div>
   </div>
   <div class="card" style="margin-bottom:11px">
-    <div class="ch ch-g" style="justify-content:space-between"><span>Recognition Log</span><span class="cbg" id="rrbg">0</span></div>
+    <div class="ch ch-g" style="justify-content:space-between"><span>Recognition Log</span><div style="display:flex;align-items:center;gap:8px"><button class="hb" style="font-size:11px;padding:3px 9px" onclick="syncRR()">&#8635; Sync</button><span class="cbg" id="rrbg">0</span></div></div>
     <div id="rre" class="le">No entries yet.</div>
     <div style="overflow-x:auto"><table id="rrt" style="display:none"><thead><tr><th>Date</th><th>Name</th><th>Smart Choices</th><th>Description</th><th class="np"></th></tr></thead><tbody id="rrb"></tbody></table></div>
     <div style="display:flex;justify-content:flex-end;padding:8px 13px;border-top:1px solid var(--bd)" class="np"><button class="ob" onclick="clrRRLog()">Clear All</button></div>
@@ -253,7 +254,7 @@ tbody tr{border-bottom:1px solid #f0f0f0}tbody tr:hover{background:#fafafa}td{pa
 <!-- T7: Attendance -->
 <div class="tp" id="t7"><div class="w">
   <div class="card" style="margin-bottom:11px">
-    <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Attendance Register</span><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openAddEmp()">&#43; Add Employee</button></div>
+    <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Attendance Register</span><div style="display:flex;gap:7px"><button class="hb" style="font-size:11px;padding:3px 9px" onclick="syncAtt()" id="att-sync-btn">&#8635; Sync</button><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openAddEmp()">&#43; Add Employee</button></div></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;padding:9px 13px 6px">
       <div class="tf"><label>Month</label><select id="at-mon" onchange="rAtt()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select></div>
       <div class="tf"><label>Year</label><select id="at-yr" onchange="rAtt()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option></select></div>
@@ -283,7 +284,7 @@ tbody tr{border-bottom:1px solid #f0f0f0}tbody tr:hover{background:#fafafa}td{pa
 <div class="tp" id="t8"><div class="w">
   <div class="card" style="margin-bottom:11px">
     <div class="ch ch-r" style="justify-content:space-between"><span>&#128202; Planned vs Unplanned Work</span>
-      <button class="hb" style="font-size:11px;padding:3px 9px" onclick="openPVEntry()">&#43; Add / Edit Month</button>
+      <div style="display:flex;gap:7px"><button class="hb" style="font-size:11px;padding:3px 9px" onclick="syncPV()" id="pv-sync-btn">&#8635; Sync</button><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openPVEntry()">&#43; Add / Edit Month</button></div>
     </div>
     <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;padding:10px 13px" class="np">
       <div class="tf"><label>View</label>
@@ -868,6 +869,104 @@ function addBth(){var n=document.getElementById('bth-n').value.trim();if(!n){ale
 function editBth(id){var log=glj(BTH_KEY,[]),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit Breathalyser Record',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'time',label:'Time',type:'time',val:en.time},{key:'name',label:'Name',type:'text',val:en.name},{key:'result',label:'BAC Result',type:'text',val:en.result},{key:'outcome',label:'Outcome',type:'select',val:en.outcome,options:['Pass','Fail','Refused']},{key:'conductedBy',label:'Conducted By',type:'text',val:en.conductedBy}],onSave:function(v){var log2=glj(BTH_KEY,[]);log2.forEach(function(e){if(e.id===id)Object.assign(e,v);});sl(BTH_KEY,log2);rBth();}});}
 function dBth(id){if(!confirm('Delete?'))return;sl(BTH_KEY,glj(BTH_KEY,[]).filter(function(e){return e.id!==id;}));rBth();}
 function rBth(){var log=glj(BTH_KEY,[]);document.getElementById('bth-bg').textContent=log.length;var em=document.getElementById('bth-empty'),tbl=document.getElementById('bth-tbl'),tb=document.getElementById('bth-body');if(!log.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';log.forEach(function(en){var ocol=en.outcome==='Pass'?'bg':en.outcome==='Fail'?'br':'bam';var tr=document.createElement('tr');tr.innerHTML='<td style="font-size:11px">'+fd(en.date)+'</td><td>'+en.time+'</td><td style="font-weight:700">'+en.name+'</td><td style="font-family:monospace;font-weight:700">'+(en.result||'–')+'</td><td><span class="badge '+ocol+'">'+en.outcome+'</span></td><td style="font-size:11px">'+en.conductedBy+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editBth('+en.id+')">&#9998;</button></td><td class="np"><button class="db" onclick="dBth('+en.id+')">&#215;</button></td>';tb.appendChild(tr);});}
+
+// ── MULTI-TAB SYNC ──────────────────────────────────────────
+function getURL(){return localStorage.getItem('kaefer_url');}
+
+function syncAtt(){
+  var u=getURL();if(!u){alert('Set up sync URL first (Setup Sync button).');return;}
+  setSS('bz','Syncing attendance...');
+  // Save local data up first
+  var payload=JSON.stringify({
+    action:'save_att',
+    data:{
+      ov:glj('kaefer_att_ov',{}),
+      emps:glj('kaefer_att_emps',null),
+      arch:glj('kaefer_att_arch',[])
+    }
+  });
+  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  .then(function(r){return r.text();})
+  .then(function(t){
+    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    // Now load back
+    return fetch(u+'?action=load_att&t='+Date.now(),{redirect:'follow'});
+  })
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(!j.ok)throw new Error('Load failed');
+    if(j.ov)sl('kaefer_att_ov',j.ov);
+    if(j.emps)sl('kaefer_att_emps',j.emps);
+    if(j.arch&&j.arch.length)sl('kaefer_att_arch',j.arch);
+    rAtt();rFormer();setSS('ok','Attendance synced');
+  })
+  .catch(function(err){setSS('er','Attendance sync failed: '+err.message);});
+}
+
+function syncPV(){
+  var u=getURL();if(!u){alert('Set up sync URL first.');return;}
+  setSS('bz','Syncing PV data...');
+  var pvOv=glj('kaefer_pv_ov',{});
+  var payload=JSON.stringify({action:'save_pv',data:pvOv});
+  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  .then(function(r){return r.text();})
+  .then(function(t){
+    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    return fetch(u+'?action=load_pv&t='+Date.now(),{redirect:'follow'});
+  })
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(!j.ok)throw new Error('Load failed');
+    // Merge server data with local base
+    var merged={};
+    for(var k in j.data)merged[k]=j.data[k];
+    sl('kaefer_pv_ov',merged);
+    PV_MONTHS=Object.keys(getPVAll()).sort();
+    rPV();setSS('ok','PV data synced');
+  })
+  .catch(function(err){setSS('er','PV sync failed: '+err.message);});
+}
+
+function syncRR(){
+  var u=getURL();if(!u){alert('Set up sync URL first.');return;}
+  setSS('bz','Syncing R&R...');
+  var log=glj('kaefer_rr',[]);
+  var payload=JSON.stringify({action:'save_rr',data:log});
+  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  .then(function(r){return r.text();})
+  .then(function(t){
+    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    return fetch(u+'?action=load_rr&t='+Date.now(),{redirect:'follow'});
+  })
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(!j.ok)throw new Error('Load failed');
+    sl('kaefer_rr',j.data||[]);
+    rRR();setSS('ok','R&R synced');
+  })
+  .catch(function(err){setSS('er','R&R sync failed: '+err.message);});
+}
+
+function syncLog(){
+  var u=getURL();if(!u){alert('Set up sync URL first.');return;}
+  setSS('bz','Syncing inspection log...');
+  var log=glj('kaefer_log',[]);
+  var payload=JSON.stringify({action:'save_log',data:log});
+  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  .then(function(r){return r.text();})
+  .then(function(t){
+    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    return fetch(u+'?action=load_log&t='+Date.now(),{redirect:'follow'});
+  })
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(!j.ok)throw new Error('Load failed');
+    sl('kaefer_log',j.data||[]);
+    rLog();setSS('ok','Inspection log synced');
+  })
+  .catch(function(err){setSS('er','Log sync failed: '+err.message);});
+}
+
 var td2=new Date().toISOString().split('T')[0];
 ['ppe-d','purch-d','bth-d','cd','rd'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=td2;});
 (function(){var nm=new Date(),mo=nm.getMonth(),y=nm.getFullYear();

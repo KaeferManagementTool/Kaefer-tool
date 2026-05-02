@@ -573,33 +573,56 @@ function showReg(id,btn){
 var UK='kaefer_url';
 function openOv(){var u=localStorage.getItem(UK);if(u)document.getElementById('ovu').value=u;document.getElementById('ov').classList.add('on');}
 function closeOv(){document.getElementById('ov').classList.remove('on');}
+
+function jsonpFetch(url, onSuccess, onError){
+  // Use a script tag to bypass CORS - works with Google Apps Script
+  var cbName='__jsonp_cb_'+Date.now();
+  var script=document.createElement('script');
+  var timer=setTimeout(function(){
+    delete window[cbName];
+    if(script.parentNode)script.parentNode.removeChild(script);
+    // Fall back to regular fetch
+    fetch(url,{redirect:'follow'})
+      .then(function(r){return r.json();})
+      .then(onSuccess)
+      .catch(onError);
+  },3000);
+  window[cbName]=function(data){
+    clearTimeout(timer);
+    delete window[cbName];
+    if(script.parentNode)script.parentNode.removeChild(script);
+    onSuccess(data);
+  };
+  script.onerror=function(){
+    clearTimeout(timer);
+    delete window[cbName];
+    // Fall back to regular fetch on script error
+    fetch(url,{redirect:'follow'})
+      .then(function(r){return r.json();})
+      .then(onSuccess)
+      .catch(onError);
+  };
+  script.src=url+'&callback='+cbName;
+  document.head.appendChild(script);
+}
+
 function connSync(){
   var u=document.getElementById('ovu').value.trim();
   if(!u){alert('Paste the Web App URL first.');return;}
-  if(u.indexOf('script.google.com')<0){alert('That does not look like a Google Apps Script URL.\nIt should start with https://script.google.com/macros/s/...');return;}
+  if(u.indexOf('script.google.com')<0){alert('That does not look like a Google Apps Script URL.');return;}
   localStorage.setItem(UK,u);closeOv();
   setSS('bz','Testing connection...');
-  var testUrl=u+'?action=load&month=0&year=2025&t='+Date.now();
-  fetch(testUrl,{redirect:'follow'})
-    .then(function(r){
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      return r.text();
-    })
-    .then(function(t){
-      try{
-        var j=JSON.parse(t);
-        if(j.ok!==undefined){setSS('ok','Connected!');setLS();ldLoc();dW();}
-        else throw new Error('Unexpected response: '+t.slice(0,100));
-      }catch(e){setSS('er','Bad response – re-deploy the Apps Script');alert('Connected but got unexpected data.\n\nResponse: '+t.slice(0,200)+'\n\nMake sure you re-deployed after updating the script.');}
-    })
-    .catch(function(err){
-      setSS('er','Connection failed');
-      alert('Could not connect.\n\nError: '+err.message+'\n\nChecklist:\n1. Did you deploy as a Web App?\n2. Is "Who has access" set to Anyone?\n3. Did you copy the /exec URL (not /dev)?');
-    });
+  jsonpFetch(u+'?action=load_ccv&month=0&year=2025&t='+Date.now(),function(j){
+    if(j&&j.ok!==undefined){setSS('ok','Connected!');ldLoc();dW();}
+    else{setSS('er','Bad response');alert('Got unexpected response from Apps Script. Make sure you redeployed with the latest code.');}
+  },function(err){
+    setSS('er','Connection failed');
+    alert('Could not connect.\n\nThis is usually a CORS issue. Try opening the Apps Script URL directly in your browser first:\n\n'+u+'?action=load_ccv&month=0&year=2025\n\nIf it shows JSON data, the script is working and you can ignore this error — the sync will still save data.');
+  });
 }
 function setSS(s,m){document.getElementById('sd').className='sd '+s;document.getElementById('sm').textContent=m;}
 function setLS(){document.getElementById('syl').textContent='Synced: '+new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});}
-function ldSh(){var u=localStorage.getItem(UK);if(!u){setSS('er','Not connected');return;}setSS('bz','Loading...');fetch(u+'?action=load_ccv&month='+cM+'&year='+cY+'&t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).then(function(j){if(!j.ok)throw 0;wd=eWD();for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}ldLoc();dW();setLS();setSS('ok','Synced – '+MNS3[cM]+' '+cY);svLoc();}).catch(function(){ldLoc();setSS('er','Offline – local loaded');dW();});}
+function ldSh(){var u=localStorage.getItem(UK);if(!u){setSS('er','Not connected');return;}setSS('bz','Loading...');fetch(u+'?action=load_ccv&month='+cM+'&year='+cY+'&t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).then(function(j){if(!j.ok)throw 0;wd=eWD();for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}ldLoc();dW();setLS();setSS('ok','Synced – '+MNS3[cM]+' '+cY);svLoc();}).catch(function(){ldLoc();dW();var u2=localStorage.getItem(UK);if(u2)setSS('bz','Using local data – click Sync to refresh');});}
 function svSh(){var u=localStorage.getItem(UK);if(!u)return;setSS('bz','Saving...');var payload=JSON.stringify({action:'save_ccv',month:cM,year:cY,data:wd});fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload}).then(function(r){return r.text();}).then(function(t){try{var j=JSON.parse(t);if(!j.ok)throw 0;setLS();setSS('ok','Saved');}catch(e){setSS('er','Save error');}}).catch(function(){setSS('er','Save failed');});}
 function svLoc(){sl('ccv_'+cY+'_'+cM,wd);}
 function ldLoc(){var s=glj('ccv_'+cY+'_'+cM,null);if(!s)return;s.forEach(function(seg,i){if(!wd[i])return;if(seg.entries&&seg.entries.length)wd[i].entries=seg.entries;if(!wd[i].ccc&&seg.ccc)wd[i].ccc=seg.ccc;if(!wd[i].ccfv&&seg.ccfv)wd[i].ccfv=seg.ccfv;if(!wd[i].red&&seg.red){wd[i].red=seg.red;wd[i].dl=seg.dl||'';}});}

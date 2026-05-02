@@ -989,6 +989,7 @@ function syncLog(){
   .catch(function(err){setSS('er','Log sync failed: '+err.message);});
 }
 
+if(!localStorage.getItem(UK))localStorage.setItem(UK,'https://script.google.com/macros/s/AKfycbwnuWO64GNAWHqfECxCfivfxJYCo4YCcrd6c2Gr-IWIqg2SbVA0czJFoR50OSrxuw38/exec');
 var td2=new Date().toISOString().split('T')[0];
 ['ppe-d','purch-d','bth-d','cd','rd'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=td2;});
 (function(){var nm=new Date(),mo=nm.getMonth(),y=nm.getFullYear();

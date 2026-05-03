@@ -542,7 +542,7 @@ tbody tr{border-bottom:1px solid #f0f0f0}tbody tr:hover{background:#fafafa}td{pa
 <script>
 window.onerror=function(msg,src,line,col,err){
   var d=document.getElementById('__err');
-  if(!d){d=document.createElement('div');d.id='__err';d.style.cssText='position:fixed;top:0;left:0;right:0;background:#c62828;color:#fff;padding:8px 14px;font-size:12px;z-index:99999;font-family:monospace';document.body&&document.body.appendChild(d);}
+  if(!d){d=document.createElement('div');d.id='__err';d.style.cssText='position:fixed;top:40px;left:0;right:0;background:#c62828;color:#fff;padding:8px 14px;font-size:12px;z-index:99999;font-family:monospace;pointer-events:none';document.body&&document.body.appendChild(d);}
   d.innerHTML='<b>JS Error:</b> '+msg+' (line '+line+')';
   return false;
 };
@@ -580,51 +580,13 @@ var UK='kaefer_url';
 function openOv(){var u=localStorage.getItem(UK);if(u)document.getElementById('ovu').value=u;document.getElementById('ov').classList.add('on');}
 function closeOv(){document.getElementById('ov').classList.remove('on');}
 
-function jsonpFetch(url, onSuccess, onError){
-  // Use a script tag to bypass CORS - works with Google Apps Script
-  var cbName='__jsonp_cb_'+Date.now();
-  var script=document.createElement('script');
-  var timer=setTimeout(function(){
-    delete window[cbName];
-    if(script.parentNode)script.parentNode.removeChild(script);
-    // Fall back to regular fetch
-    fetch(url,{redirect:'follow'})
-      .then(function(r){return r.json();})
-      .then(onSuccess)
-      .catch(onError);
-  },3000);
-  window[cbName]=function(data){
-    clearTimeout(timer);
-    delete window[cbName];
-    if(script.parentNode)script.parentNode.removeChild(script);
-    onSuccess(data);
-  };
-  script.onerror=function(){
-    clearTimeout(timer);
-    delete window[cbName];
-    // Fall back to regular fetch on script error
-    fetch(url,{redirect:'follow'})
-      .then(function(r){return r.json();})
-      .then(onSuccess)
-      .catch(onError);
-  };
-  script.src=url+'&callback='+cbName;
-  document.head.appendChild(script);
-}
-
 function connSync(){
   var u=document.getElementById('ovu').value.trim();
   if(!u){alert('Paste the Web App URL first.');return;}
   if(u.indexOf('script.google.com')<0){alert('That does not look like a Google Apps Script URL.');return;}
   localStorage.setItem(UK,u);closeOv();
-  setSS('bz','Testing connection...');
-  jsonpFetch(u+'?action=load_ccv&month=0&year=2025&t='+Date.now(),function(j){
-    if(j&&j.ok!==undefined){setSS('ok','Connected!');ldLoc();dW();}
-    else{setSS('er','Bad response');alert('Got unexpected response from Apps Script. Make sure you redeployed with the latest code.');}
-  },function(err){
-    setSS('er','Connection failed');
-    alert('Could not connect.\n\nThis is usually a CORS issue. Try opening the Apps Script URL directly in your browser first:\n\n'+u+'?action=load_ccv&month=0&year=2025\n\nIf it shows JSON data, the script is working and you can ignore this error — the sync will still save data.');
-  });
+  setSS('ok','Connected – click Sync to load data');
+  ldLoc();dW();
 }
 function setSS(s,m){document.getElementById('sd').className='sd '+s;document.getElementById('sm').textContent=m;}
 function setLS(){document.getElementById('syl').textContent='Synced: '+new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});}
@@ -996,4 +958,31 @@ function syncRR(){
 
 function syncLog(){
   var u=getURL();if(!u){alert('Set up sync URL first.');return;}
-  setSS('bz',
+  setSS('bz','Syncing inspection log...');
+  var log=glj('kaefer_log',[]);
+  var payload=JSON.stringify({action:'save_log',data:log});
+  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  .then(function(r){return r.text();})
+  .then(function(t){
+    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    return fetch(u+'?action=load_log&t='+Date.now(),{redirect:'follow'});
+  })
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(!j.ok)throw new Error('Load failed');
+    sl('kaefer_log',j.data||[]);
+    rLog();setSS('ok','Inspection log synced');
+  })
+  .catch(function(err){setSS('er','Log sync failed: '+err.message);});
+}
+
+if(!localStorage.getItem(UK))localStorage.setItem(UK,'https://script.google.com/macros/s/AKfycbwnuWO64GNAWHqfECxCfivfxJYCo4YCcrd6c2Gr-IWIqg2SbVA0czJFoR50OSrxuw38/exec');
+var td2=new Date().toISOString().split('T')[0];
+['ppe-d','purch-d','bth-d','cd','rd'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=td2;});
+(function(){var nm=new Date(),mo=nm.getMonth(),y=nm.getFullYear();
+  ['at-mon','dm-mon'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=mo;});
+  ['at-yr','dm-yr'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=y;});
+  ['qfm','qtm','cfm','ctm'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=mo;});
+  ['qfy','qty','cfy','cty'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=y;});
+})();
+uML();dW();rRR();rAtt();rFormer();rPV();rDM();rPPEReg();rPurchReg();rVehReg();rToo

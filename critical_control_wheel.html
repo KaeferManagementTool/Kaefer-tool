@@ -813,16 +813,25 @@ function rAtt(){
       var enc=encodeURIComponent(emp.n);
       cells.push('<td style="position:sticky;left:0;background:#fff;padding:3px 9px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0f0f0;border-right:2px solid #e0e0e0;z-index:1;font-size:12px">'+emp.n+'</td>');
       days.forEach(function(dy){var wk=dy.w===0||dy.w===6,v=getStatus(emp.n,dy.dk);if(!wk){if(!v)p++;else if(v==='SL')sl++;else if(v==='AL')al++;else if(v==='X')x++;}var excd=!wk&&isExc(emp.n,dy.dk);
-var cellContent='';
+var td=document.createElement('td');
+td.style.cssText=aCS(v,wk)+';text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700;'+(excd?'opacity:0.4;':'');
 if(!wk){
-  var excCls='exc-btn'+(excd?' on':'');
-  var excClick='toggleExc(\''+enc+'\',\''+dy.dk+'\');event.stopPropagation()';
-  var celClick='openCE(decodeURIComponent(\''+enc+'\'),\''+dy.dk+'\')';
-  cellContent='<button onclick="'+excClick+'" class="'+excCls+'" title="Exclude from manning">&#10005;</button>'
-    +'<span onclick="'+celClick+'" style="cursor:pointer">'+(v||'&#10003;')+'</span>';
+  var xb=document.createElement('button');
+  xb.className='exc-btn'+(excd?' on':'');
+  xb.title='Exclude from manning count';
+  xb.innerHTML='&#10005;';
+  xb.setAttribute('data-enc',enc);
+  xb.setAttribute('data-dk',dy.dk);
+  xb.onclick=function(ev){ev.stopPropagation();toggleExc(this.getAttribute('data-enc'),this.getAttribute('data-dk'));};
+  var sp=document.createElement('span');
+  sp.style.cursor='pointer';
+  sp.innerHTML=v||'&#10003;';
+  sp.setAttribute('data-enc',enc);
+  sp.setAttribute('data-dk',dy.dk);
+  sp.onclick=function(){openCE(decodeURIComponent(this.getAttribute('data-enc')),this.getAttribute('data-dk'));};
+  td.appendChild(xb);td.appendChild(sp);
 }
-var cellStyle=aCS(v,wk)+';text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700;'+(excd?'opacity:0.4;':'');
-cells.push('<td style="'+cellStyle+'">'+cellContent+'</td>');});
+cells.push(td.outerHTML);});
       cells.push('<td style="text-align:center;font-weight:700;font-size:10px;color:#2e7d32;background:#f1f8f1;border-left:2px solid #e0e0e0">'+p+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#c62828;background:#fff5f5">'+sl+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#1565c0;background:#f0f7ff">'+al+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#880e4f;background:#fdf0f5">'+x+'</td>');
       cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0"><button onclick="removeEmpByEl(this)" data-name="'+enc+'" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
       H.push('<tr>'+cells.join('')+'</tr>');
@@ -997,10 +1006,3 @@ function syncLog(){
   var log=glj('kaefer_log',[]);
   var payload=JSON.stringify({action:'save_log',data:log});
   fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
-  .then(function(r){return r.text();})
-  .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
-    return fetch(u+'?action=load_log&t='+Date.now(),{redirect:'follow'});
-  })
-  .then(function(r){return r.json();})
-  .then(function(j)

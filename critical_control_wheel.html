@@ -540,6 +540,12 @@ tbody tr{border-bottom:1px solid #f0f0f0}tbody tr:hover{background:#fafafa}td{pa
   <div class="mft"><button class="ob" onclick="closeEdit()">Cancel</button><button class="rb" onclick="saveEdit()">&#10003; Save</button></div>
 </div></div>
 <script>
+window.onerror=function(msg,src,line,col,err){
+  var d=document.getElementById('__err');
+  if(!d){d=document.createElement('div');d.id='__err';d.style.cssText='position:fixed;top:0;left:0;right:0;background:#c62828;color:#fff;padding:8px 14px;font-size:12px;z-index:99999;font-family:monospace';document.body&&document.body.appendChild(d);}
+  d.innerHTML='<b>JS Error:</b> '+msg+' (line '+line+')';
+  return false;
+};
 function gl(k){try{return localStorage.getItem(k);}catch(e){return null;}}
 function sl(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
 function glj(k,d){try{var r=localStorage.getItem(k);return r?JSON.parse(r):d;}catch(e){return d;}}
@@ -813,25 +819,13 @@ function rAtt(){
       var enc=encodeURIComponent(emp.n);
       cells.push('<td style="position:sticky;left:0;background:#fff;padding:3px 9px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0f0f0;border-right:2px solid #e0e0e0;z-index:1;font-size:12px">'+emp.n+'</td>');
       days.forEach(function(dy){var wk=dy.w===0||dy.w===6,v=getStatus(emp.n,dy.dk);if(!wk){if(!v)p++;else if(v==='SL')sl++;else if(v==='AL')al++;else if(v==='X')x++;}var excd=!wk&&isExc(emp.n,dy.dk);
-var td=document.createElement('td');
-td.style.cssText=aCS(v,wk)+';text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700;'+(excd?'opacity:0.4;':'');
+var tdStyle=aCS(v,wk)+';text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700;'+(excd?'opacity:0.4;':'');
+var tdInner='';
 if(!wk){
-  var xb=document.createElement('button');
-  xb.className='exc-btn'+(excd?' on':'');
-  xb.title='Exclude from manning count';
-  xb.innerHTML='&#10005;';
-  xb.setAttribute('data-enc',enc);
-  xb.setAttribute('data-dk',dy.dk);
-  xb.onclick=function(ev){ev.stopPropagation();toggleExc(this.getAttribute('data-enc'),this.getAttribute('data-dk'));};
-  var sp=document.createElement('span');
-  sp.style.cursor='pointer';
-  sp.innerHTML=v||'&#10003;';
-  sp.setAttribute('data-enc',enc);
-  sp.setAttribute('data-dk',dy.dk);
-  sp.onclick=function(){openCE(decodeURIComponent(this.getAttribute('data-enc')),this.getAttribute('data-dk'));};
-  td.appendChild(xb);td.appendChild(sp);
+  tdInner='<button class="exc-btn'+(excd?' on':'')+'" data-enc="'+enc+'" data-dk="'+dy.dk+'" onclick="toggleExc(this.dataset.enc,this.dataset.dk);event.stopPropagation()" title="Exclude from manning">&#10005;</button>'
+    +'<span data-enc="'+enc+'" data-dk="'+dy.dk+'" onclick="openCE(decodeURIComponent(this.dataset.enc),this.dataset.dk)" style="cursor:pointer">'+(v||'&#10003;')+'</span>';
 }
-cells.push(td.outerHTML);});
+cells.push('<td style="'+tdStyle+'">'+tdInner+'</td>');});
       cells.push('<td style="text-align:center;font-weight:700;font-size:10px;color:#2e7d32;background:#f1f8f1;border-left:2px solid #e0e0e0">'+p+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#c62828;background:#fff5f5">'+sl+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#1565c0;background:#f0f7ff">'+al+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#880e4f;background:#fdf0f5">'+x+'</td>');
       cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0"><button onclick="removeEmpByEl(this)" data-name="'+enc+'" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
       H.push('<tr>'+cells.join('')+'</tr>');
@@ -1004,5 +998,4 @@ function syncLog(){
   var u=getURL();if(!u){alert('Set up sync URL first.');return;}
   setSS('bz','Syncing inspection log...');
   var log=glj('kaefer_log',[]);
-  var payload=JSON.stringify({action:'save_log',data:log});
-  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  var payl

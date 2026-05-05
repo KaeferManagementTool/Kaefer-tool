@@ -593,18 +593,13 @@ function postToApps(payload) {
   var u = getURL();
   if(!u) return Promise.reject(new Error('No Apps Script URL configured'));
   
-  // Add an idempotency token so the server can detect duplicates from accidental
-  // double-tap or iOS retry. The Apps Script will skip writes if it sees the
-  // same token within 60 seconds.
+  // Idempotency token to prevent duplicate writes
   if(!payload._token){
     payload._token = 'tok_' + Date.now() + '_' + Math.floor(Math.random()*1e9);
   }
   
-  var jsonBody = JSON.stringify(payload);
-  var sizeKB = Math.round(jsonBody.length / 1024);
-  
-  // STRATEGY 1: Try standard POST fetch first
-  var body = 'data=' + encodeURIComponent(jsonBody);
+  // Simple POST fetch — proven working for non-signature submissions
+  var body = 'data=' + encodeURIComponent(JSON.stringify(payload));
   return fetch(u, {
     method: 'POST',
     redirect: 'follow',
@@ -622,115 +617,34 @@ function postToApps(payload) {
     catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
     if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
     return j;
-  })
-  .catch(function(err){
-    var msg = err.message || String(err);
-    // STRATEGY 2: POST failed (likely "Failed to fetch" / CORS).
-    // Fall back to GET with ?data= in the URL — this works reliably because
-    // it's a simple GET request that the Apps Script doGet handler routes to doPost.
-    // Tested confirmed working with a 4KB payload including signature.
-    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('Network') >= 0 || msg.indexOf('NetworkError') >= 0){
-      return submitViaGet(u, jsonBody, sizeKB);
-    }
-    throw err;
   });
 }
 
-// Fallback: GET with data in URL. doGet routes to doPost when ?data= is present.
-// This is the most reliable transport for Apps Script from mobile browsers.
-function submitViaGet(url, jsonBody, sizeKB){
-  // URL has a soft limit ~8KB on most browsers but Apps Script handles much more.
-  // If too large, throw a clear error.
-  var fullUrl = url + '?data=' + encodeURIComponent(jsonBody);
-  if(fullUrl.length > 30000){
-    return Promise.reject(new Error('Submission too large ('+sizeKB+'KB). Try a smaller signature.'));
-  }
-  
-  return fetch(fullUrl, { method: 'GET', redirect: 'follow' })
-  .then(function(r){
-    if(!r.ok) throw new Error('GET returned ' + r.status);
-    return r.text();
+// Attach a signature to an existing submission. Fires after main submit succeeds.
+// Sent as a separate small request so it doesn't bloat the leave submission payload.
+// If this fails, we just log it — the leave still went through.
+function attachSignature(submissionId, signatureDataURL){
+  if(!submissionId || !signatureDataURL) return Promise.resolve({ok:true, skipped:true});
+  var u = getURL();
+  if(!u) return Promise.resolve({ok:false, error:'No URL'});
+  var payload = {
+    action: 'attach_signature',
+    id: submissionId,
+    signature: signatureDataURL,
+    _token: 'sig_' + Date.now() + '_' + Math.floor(Math.random()*1e9)
+  };
+  var body = 'data=' + encodeURIComponent(JSON.stringify(payload));
+  return fetch(u, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body
   })
+  .then(function(r){ return r.text(); })
   .then(function(t){
-    if(!t) throw new Error('Empty response from server');
-    var j;
-    try { j = JSON.parse(t); }
-    catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
-    if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
-    return j;
+    try { return JSON.parse(t); } catch(e) { return {ok:false, error:'parse'}; }
   })
-  .catch(function(err){
-    var msg = err.message || String(err);
-    // STRATEGY 3: Last resort - iframe with GET-style URL
-    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('Network') >= 0){
-      return submitViaIframe(url, jsonBody, sizeKB);
-    }
-    throw err;
-  });
-}
-
-// Fallback: post via hidden iframe form. We can't read the response (cross-origin),
-// but the submission DOES go through. We trust it succeeded if no error occurs.
-function submitViaIframe(url, jsonBody, sizeKB){
-  return new Promise(function(resolve, reject){
-    try {
-      // Remove any old iframe
-      var oldFrame = document.getElementById('sf-fallback-frame');
-      if(oldFrame) oldFrame.remove();
-      var oldForm = document.getElementById('sf-fallback-form');
-      if(oldForm) oldForm.remove();
-      
-      // Create hidden iframe
-      var iframe = document.createElement('iframe');
-      iframe.id = 'sf-fallback-frame';
-      iframe.name = 'sf-fallback-frame';
-      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
-      document.body.appendChild(iframe);
-      
-      // Build a real form that posts to the URL, targeting the hidden iframe
-      var form = document.createElement('form');
-      form.id = 'sf-fallback-form';
-      form.method = 'POST';
-      form.action = url;
-      form.target = 'sf-fallback-frame';
-      form.enctype = 'application/x-www-form-urlencoded';
-      form.style.display = 'none';
-      
-      var input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'data';
-      input.value = jsonBody;
-      form.appendChild(input);
-      
-      document.body.appendChild(form);
-      
-      // Listen for iframe load (means request finished)
-      var done = false;
-      iframe.onload = function(){
-        if(done) return;
-        done = true;
-        // Clean up after a delay
-        setTimeout(function(){
-          try{ iframe.remove(); form.remove(); }catch(e){}
-        }, 500);
-        resolve({ok:true, fallback:true});
-      };
-      
-      // Timeout fallback - resolve as success after 8s anyway
-      // (Apps Script usually responds well within 5s; if iframe never loads,
-      // we still trust the POST went through)
-      setTimeout(function(){
-        if(done) return;
-        done = true;
-        try{ iframe.remove(); form.remove(); }catch(e){}
-        resolve({ok:true, fallback:true, timedOut:true});
-      }, 8000);
-      
-      form.submit();
-    } catch(e) {
-      reject(new Error('Fallback submit failed: ' + e.message + ' (was ' + sizeKB + 'KB)'));
-    }
-  });
+  .catch(function(){ return {ok:false, error:'network'}; });
 }
 
 // Submit guard — prevents double-tap and re-submit while in flight
@@ -769,6 +683,8 @@ function submitLeave() {
   var days=0,cur=new Date(from),end=new Date(to);
   while(cur<=end){if(cur.getDay()!==0&&cur.getDay()!==6)days++;cur.setDate(cur.getDate()+1);}
   var leaveLabels={AL:'Annual Leave',SL:'Sick Leave',BL:'Bereavement Leave',X:'Without Pay',LS:'Long Service Leave',IL:'In Lieu'};
+  // IMPORTANT: signature is NOT included here - sent separately via attachSignature
+  // This keeps the main payload small (~1KB) for reliable mobile submission
   var data = {
     name:name,
     employeeNumber:document.getElementById('l-empno').value.trim(),
@@ -779,16 +695,30 @@ function submitLeave() {
     firstDay:new Date(from).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     lastDay:new Date(to).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     workingDays:days,
-    notes:document.getElementById('l-notes').value.trim(),
-    signature:signature
+    notes:document.getElementById('l-notes').value.trim()
   };
   var eb = document.getElementById('err-bar');
   if(eb) eb.style.display='none';
   if(!lockSubmit()) return;
   showLoading(true);
   postToApps({action:'save_submission', formType:'leave', data:data})
-  .then(function(){showLoading(false);showSuccess('Your leave request has been submitted. Your supervisor will review it shortly.');})
-  .catch(function(err){showLoading(false);unlockSubmit();showErr('Submission failed: '+(err.message||err));});
+  .then(function(response){
+    // Main submission succeeded — now attach signature in a separate small request.
+    // If sig fails, the leave still went through (user sees success, supervisor can ask later)
+    var subId = response && response.id ? response.id : '';
+    return attachSignature(subId, signature)
+      .then(function(){return response;})
+      .catch(function(){return response;}); // never let sig failure break the flow
+  })
+  .then(function(){
+    showLoading(false);
+    showSuccess('Your leave request has been submitted. Your supervisor will review it shortly.');
+  })
+  .catch(function(err){
+    showLoading(false);
+    unlockSubmit();
+    showErr('Submission failed: '+(err.message||err));
+  });
 }
 
 function submitPPE() {

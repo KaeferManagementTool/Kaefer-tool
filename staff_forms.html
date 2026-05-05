@@ -598,14 +598,17 @@ function postToApps(payload) {
     payload._token = 'tok_' + Date.now() + '_' + Math.floor(Math.random()*1e9);
   }
   
-  // Simple POST fetch — proven working for non-signature submissions
-  var body = 'data=' + encodeURIComponent(JSON.stringify(payload));
-  return fetch(u, {
-    method: 'POST',
-    redirect: 'follow',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body
-  })
+  // GET request with data in URL — most reliable approach across mobile browsers.
+  // Apps Script's doGet routes to doPost when ?data= is present.
+  // Confirmed working on iPhone Safari + Android Chrome (POST fetch fails CORS on mobile).
+  var jsonBody = JSON.stringify(payload);
+  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
+  
+  if(fullUrl.length > 30000){
+    return Promise.reject(new Error('Submission too large. Try again with a smaller signature.'));
+  }
+  
+  return fetch(fullUrl, { method: 'GET', redirect: 'follow' })
   .then(function(r){
     if(!r.ok) throw new Error('Server returned ' + r.status);
     return r.text();
@@ -633,13 +636,15 @@ function attachSignature(submissionId, signatureDataURL){
     signature: signatureDataURL,
     _token: 'sig_' + Date.now() + '_' + Math.floor(Math.random()*1e9)
   };
-  var body = 'data=' + encodeURIComponent(JSON.stringify(payload));
-  return fetch(u, {
-    method: 'POST',
-    redirect: 'follow',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body
-  })
+  var jsonBody = JSON.stringify(payload);
+  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
+  
+  // If signature URL is too long, skip it gracefully (leave still went through)
+  if(fullUrl.length > 30000){
+    return Promise.resolve({ok:false, error:'too_large', skipped:true});
+  }
+  
+  return fetch(fullUrl, { method: 'GET', redirect: 'follow' })
   .then(function(r){ return r.text(); })
   .then(function(t){
     try { return JSON.parse(t); } catch(e) { return {ok:false, error:'parse'}; }

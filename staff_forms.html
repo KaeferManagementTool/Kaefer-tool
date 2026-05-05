@@ -91,50 +91,6 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
 </style>
 </head><body>
 
-<!-- DIAGNOSTIC PANEL - Remove after testing -->
-<div id="diag" style="background:#fff3cd;border:2px solid #ffc107;padding:10px;font-family:monospace;font-size:12px;line-height:1.6">
-  <div style="font-weight:700;color:#856404;margin-bottom:6px">🔧 DIAGNOSTIC MODE — Tap each button below</div>
-  <button type="button" id="diag-btn-1" style="background:#1565c0;color:#fff;border:none;padding:14px 18px;font-size:15px;font-weight:700;border-radius:6px;width:100%;margin-bottom:6px;-webkit-appearance:none">TEST 1: Tap me (onclick)</button>
-  <button type="button" id="diag-btn-2" style="background:#2e7d32;color:#fff;border:none;padding:14px 18px;font-size:15px;font-weight:700;border-radius:6px;width:100%;margin-bottom:6px;-webkit-appearance:none">TEST 2: Tap me (addEventListener)</button>
-  <button type="button" id="diag-btn-3" style="background:#e65100;color:#fff;border:none;padding:14px 18px;font-size:15px;font-weight:700;border-radius:6px;width:100%;margin-bottom:6px;-webkit-appearance:none">TEST 3: Tap me (touchstart)</button>
-  <div id="diag-log" style="background:#000;color:#0f0;padding:8px;border-radius:4px;min-height:60px;white-space:pre-wrap;word-wrap:break-word"></div>
-  <div style="margin-top:6px;color:#856404;font-size:11px">Once you confirm which buttons work, screenshot this page and send it back.</div>
-</div>
-
-<script>
-// Diagnostic immediately - before any other JS
-(function(){
-  function dlog(msg){
-    try{
-      var l = document.getElementById('diag-log');
-      if(l) l.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n' + l.textContent;
-    }catch(e){}
-  }
-  dlog('Page loaded. UA: ' + navigator.userAgent.substring(0,80));
-  
-  function setupDiag(){
-    var b1 = document.getElementById('diag-btn-1');
-    var b2 = document.getElementById('diag-btn-2');
-    var b3 = document.getElementById('diag-btn-3');
-    
-    if(b1) b1.onclick = function(){ dlog('✓ TEST 1 onclick fired'); };
-    if(b2) b2.addEventListener('click', function(){ dlog('✓ TEST 2 addEventListener click fired'); });
-    if(b3) {
-      b3.addEventListener('touchstart', function(){ dlog('✓ TEST 3 touchstart fired'); });
-      b3.addEventListener('click', function(){ dlog('✓ TEST 3 click also fired'); });
-    }
-    dlog('Buttons wired. Ready to test.');
-  }
-  
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', setupDiag);
-  } else {
-    setupDiag();
-  }
-})();
-</script>
-<!-- END DIAGNOSTIC -->
-
 <header>
   <div class="logo"><div class="lt">K</div><div class="ls">KAEFER</div></div>
   <div class="hm">
@@ -195,12 +151,12 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
       <div class="card-hdr blue">Type of Leave *</div>
       <div class="card-body">
         <div class="leave-grid">
-          <label class="leave-opt" id="lopt-AL"><input type="radio" name="leavetype" value="AL" onchange="selLeave(this)"> <span>Annual Leave</span></label>
-          <label class="leave-opt" id="lopt-SL"><input type="radio" name="leavetype" value="SL" onchange="selLeave(this)"> <span>Sick Leave</span></label>
-          <label class="leave-opt" id="lopt-BL"><input type="radio" name="leavetype" value="BL" onchange="selLeave(this)"> <span>Bereavement Leave</span></label>
-          <label class="leave-opt" id="lopt-X"><input type="radio" name="leavetype" value="X" onchange="selLeave(this)"> <span>Without Pay</span></label>
-          <label class="leave-opt" id="lopt-LS"><input type="radio" name="leavetype" value="LS" onchange="selLeave(this)"> <span>Long Service Leave</span></label>
-          <label class="leave-opt" id="lopt-IL"><input type="radio" name="leavetype" value="IL" onchange="selLeave(this)"> <span>In Lieu</span></label>
+          <label class="leave-opt" id="lopt-AL" onclick="pickLeave('AL',this)"><input type="radio" name="leavetype" value="AL"> <span>Annual Leave</span></label>
+          <label class="leave-opt" id="lopt-SL" onclick="pickLeave('SL',this)"><input type="radio" name="leavetype" value="SL"> <span>Sick Leave</span></label>
+          <label class="leave-opt" id="lopt-BL" onclick="pickLeave('BL',this)"><input type="radio" name="leavetype" value="BL"> <span>Bereavement Leave</span></label>
+          <label class="leave-opt" id="lopt-X" onclick="pickLeave('X',this)"><input type="radio" name="leavetype" value="X"> <span>Without Pay</span></label>
+          <label class="leave-opt" id="lopt-LS" onclick="pickLeave('LS',this)"><input type="radio" name="leavetype" value="LS"> <span>Long Service Leave</span></label>
+          <label class="leave-opt" id="lopt-IL" onclick="pickLeave('IL',this)"><input type="radio" name="leavetype" value="IL"> <span>In Lieu</span></label>
         </div>
       </div>
     </div>
@@ -373,9 +329,23 @@ function selectForm(type) {
   document.getElementById('err-bar').style.display='none';
 }
 
+function pickLeave(code, label) {
+  // Track which leave type is picked in our own variable (most reliable on iOS)
+  window.LEAVE_PICKED = code;
+  // Visual: highlight the selected card
+  var opts = document.querySelectorAll('.leave-opt');
+  for(var i=0;i<opts.length;i++) opts[i].classList.remove('selected');
+  if(label) label.classList.add('selected');
+  // Also set the radio (so any DevTools-savvy person can verify)
+  var radio = label ? label.querySelector('input[type=radio]') : null;
+  if(radio){
+    try{ radio.checked = true; } catch(e){}
+  }
+}
+
+// Backwards compat
 function selLeave(radio) {
-  document.querySelectorAll('.leave-opt').forEach(function(o){o.classList.remove('selected');});
-  radio.closest('.leave-opt').classList.add('selected');
+  if(radio && radio.value) pickLeave(radio.value, radio.closest ? radio.closest('.leave-opt') : null);
 }
 
 function calcDays() {
@@ -400,9 +370,24 @@ function addPPERow() {
 }
 
 function showErr(msg){
+  // Update err-bar (existing)
   var e=document.getElementById('err-bar');
-  e.style.display='';e.textContent='⚠️ '+msg;
-  window.scrollTo(0,0);
+  if(e){e.style.display='';e.textContent='⚠️ '+msg;}
+  // Also show fixed-position toast that's impossible to miss
+  var t = document.getElementById('err-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'err-toast';
+    t.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c62828;color:#fff;padding:14px 16px;font-size:15px;font-weight:700;text-align:center;z-index:99999;box-shadow:0 2px 8px rgba(0,0,0,.3);font-family:Arial,sans-serif';
+    t.onclick = function(){t.style.display='none';};
+    document.body.appendChild(t);
+  }
+  t.style.display='';
+  t.textContent = '⚠️ '+msg+' (tap to dismiss)';
+  // Auto-hide after 6s
+  if(t._timer) clearTimeout(t._timer);
+  t._timer = setTimeout(function(){if(t)t.style.display='none';},6000);
+  try{window.scrollTo(0,0);}catch(_){}
 }
 
 function showLoading(v){document.getElementById('loading').style.display=v?'':'none';}
@@ -420,6 +405,7 @@ function resetForm(){
   document.getElementById('success-screen').style.display='none';
   document.getElementById('form-selector').style.display='';
   selectForm('leave');
+  window.LEAVE_PICKED = '';
   // Reset fields
   document.querySelectorAll('input[type=text],input[type=number],textarea').forEach(function(el){if(el.id!=='l-site')el.value='';});
   document.querySelectorAll('input[type=radio]').forEach(function(el){el.checked=false;});
@@ -461,11 +447,16 @@ function postToApps(payload) {
 
 function submitLeave() {
   var name = document.getElementById('l-name').value.trim();
-  var leaveType = document.querySelector('input[name=leavetype]:checked');
+  // Try our own state first (more reliable on iOS), fall back to checked radio
+  var leaveCode = window.LEAVE_PICKED || '';
+  if(!leaveCode){
+    var checked = document.querySelector('input[name=leavetype]:checked');
+    if(checked) leaveCode = checked.value;
+  }
   var from = document.getElementById('l-from').value;
   var to = document.getElementById('l-to').value;
   if(!name){showErr('Please enter your full name.');return;}
-  if(!leaveType){showErr('Please select a leave type.');return;}
+  if(!leaveCode){showErr('Please select a leave type.');return;}
   if(!from||!to){showErr('Please enter your leave dates.');return;}
   if(new Date(from)>new Date(to)){showErr('First day cannot be after last day.');return;}
   var days=0,cur=new Date(from),end=new Date(to);
@@ -476,19 +467,19 @@ function submitLeave() {
     employeeNumber:document.getElementById('l-empno').value.trim(),
     position:document.getElementById('l-pos').value.trim(),
     site:document.getElementById('l-site').value.trim(),
-    leaveType:leaveLabels[leaveType.value]||leaveType.value,
-    leaveCode:leaveType.value,
+    leaveType:leaveLabels[leaveCode]||leaveCode,
+    leaveCode:leaveCode,
     firstDay:new Date(from).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     lastDay:new Date(to).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     workingDays:days,
     notes:document.getElementById('l-notes').value.trim()
   };
-  document.getElementById('err-bar').style.display='none';
+  var eb = document.getElementById('err-bar');
+  if(eb) eb.style.display='none';
   showLoading(true);
-  // Save submission + send email
   postToApps({action:'save_submission', formType:'leave', data:data})
   .then(function(){showLoading(false);showSuccess('Your leave request has been submitted. Your supervisor will review it shortly.');})
-  .catch(function(err){showLoading(false);showErr('Submission failed: '+err.message);});
+  .catch(function(err){showLoading(false);showErr('Submission failed: '+(err.message||err));});
 }
 
 function submitPPE() {

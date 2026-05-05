@@ -2548,6 +2548,7 @@ function renderSubmissions(){
     }
     
     if(s.notes) html += '<div style="font-size:11px;color:#607d8b;margin-top:6px;font-style:italic;background:#f8f8f8;padding:6px 9px;border-radius:4px">"'+s.notes+'"</div>';
+    if(s.signature) html += '<div style="margin-top:8px"><div style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Signature</div><img src="'+s.signature+'" style="max-width:240px;max-height:80px;background:#fff;border:1px solid #e0e0e0;border-radius:4px;padding:4px"></div>';
     
     html += '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" class="np">';
     html += '<button class="rb" style="font-size:11px;padding:6px 12px" onclick="genPdfEmail(\''+escId(s.id)+'\')">&#128424; Generate PDF</button>';
@@ -2759,9 +2760,9 @@ function buildLeaveFormHTML(s){
     // Signature
     +'<table class="frm"><tr>'
     +'<td class="lbl" style="width:30%">Signature of Applicant:</td>'
-    +'<td class="val" style="width:40%">&nbsp;</td>'
+    +'<td class="val" style="width:40%;height:18mm;text-align:center;padding:2mm">'+(s.signature?'<img src="'+s.signature+'" style="max-height:14mm;max-width:65mm">':'&nbsp;')+'</td>'
     +'<td class="lbl" style="width:10%">Date:</td>'
-    +'<td class="val" style="width:20%">&nbsp;</td>'
+    +'<td class="val" style="width:20%;text-align:center">'+escHtml(String(s.submitted||'').split(',')[0]||'')+'</td>'
     +'</tr></table>'
     
     // Recommendation/Approval

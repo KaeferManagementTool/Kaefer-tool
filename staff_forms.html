@@ -173,6 +173,20 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-hdr blue">Signature *</div>
+      <div class="card-body">
+        <p style="font-size:12px;color:#607d8b;margin-bottom:8px">Sign in the box below using your finger.</p>
+        <div style="position:relative;border:2px dashed #b0bec5;border-radius:6px;background:#fafafa;overflow:hidden">
+          <canvas id="sig-pad" width="600" height="180" style="display:block;width:100%;height:180px;touch-action:none;background:#fafafa"></canvas>
+          <div id="sig-placeholder" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#b0bec5;font-size:13px;font-style:italic">Sign here</div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px">
+          <button type="button" onclick="clearSignature()" style="background:none;border:1px solid #b0bec5;color:#607d8b;padding:6px 14px;border-radius:5px;font-size:12px;font-family:inherit;cursor:pointer">↻ Clear</button>
+        </div>
+      </div>
+    </div>
+
     <button type="button" class="submit-btn blue" id="btn-submit-leave" onclick="submitLeave()">Submit Leave Request</button>
   </div>
 
@@ -304,6 +318,9 @@ function initStaffForm() {
     if(sp) sp.addEventListener('click', function(e){ e.preventDefault(); submitPPE(); });
     var su = document.getElementById('btn-submit-purch');
     if(su) su.addEventListener('click', function(e){ e.preventDefault(); submitPurch(); });
+    
+    // Initialize signature pad
+    initSignaturePad();
   } catch(err) {
     var bar = document.getElementById('err-bar');
     if (bar) {
@@ -360,6 +377,154 @@ function calcDays() {
   prev.textContent = days.length + ' working day' + (days.length!==1?'s':'') + ': ' + days.join(', ');
 }
 
+// ── SIGNATURE PAD ─────────────────────────────────────────────
+var SIG_HAS_DRAWING = false;
+
+function initSignaturePad(){
+  var canvas = document.getElementById('sig-pad');
+  if(!canvas) return;
+  // Set canvas internal resolution to match displayed size for sharp drawing
+  function resize(){
+    var rect = canvas.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = '#0d1a2e';
+  }
+  resize();
+  // Re-init on orientation change
+  window.addEventListener('resize', function(){
+    // Save current data, resize, restore
+    var data = SIG_HAS_DRAWING ? canvas.toDataURL('image/png') : null;
+    resize();
+    if(data){
+      var img = new Image();
+      img.onload = function(){
+        var ctx = canvas.getContext('2d');
+        var rect = canvas.getBoundingClientRect();
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      };
+      img.src = data;
+    }
+  });
+  
+  var ctx = canvas.getContext('2d');
+  var drawing = false;
+  var lastX = 0, lastY = 0;
+  
+  function getPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var clientX, clientY;
+    if(e.touches && e.touches.length){
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
+  
+  function start(e){
+    e.preventDefault();
+    drawing = true;
+    var p = getPos(e);
+    lastX = p.x; lastY = p.y;
+    // Hide placeholder on first stroke
+    var ph = document.getElementById('sig-placeholder');
+    if(ph) ph.style.display = 'none';
+    SIG_HAS_DRAWING = true;
+  }
+  function move(e){
+    if(!drawing) return;
+    e.preventDefault();
+    var p = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    lastX = p.x; lastY = p.y;
+  }
+  function end(e){
+    drawing = false;
+  }
+  
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', move);
+  canvas.addEventListener('mouseup', end);
+  canvas.addEventListener('mouseleave', end);
+  canvas.addEventListener('touchstart', start, {passive:false});
+  canvas.addEventListener('touchmove', move, {passive:false});
+  canvas.addEventListener('touchend', end);
+  canvas.addEventListener('touchcancel', end);
+}
+
+function clearSignature(){
+  var canvas = document.getElementById('sig-pad');
+  if(!canvas) return;
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  SIG_HAS_DRAWING = false;
+  var ph = document.getElementById('sig-placeholder');
+  if(ph) ph.style.display = '';
+}
+
+function getSignatureDataURL(){
+  if(!SIG_HAS_DRAWING) return '';
+  var canvas = document.getElementById('sig-pad');
+  if(!canvas) return '';
+  // Trim transparent edges? Easier: just return the full canvas. We'll return a smaller PNG.
+  // Use JPEG with white background for smaller payload size
+  var trimmed = trimSignature(canvas);
+  return trimmed || canvas.toDataURL('image/png');
+}
+
+// Trim transparent space around the signature so the image isn't huge whitespace
+function trimSignature(canvas){
+  try {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    var data = ctx.getImageData(0, 0, w, h).data;
+    var minX = w, minY = h, maxX = 0, maxY = 0;
+    var found = false;
+    for(var y = 0; y < h; y++){
+      for(var x = 0; x < w; x++){
+        var alpha = data[(y * w + x) * 4 + 3];
+        if(alpha > 0){
+          if(x < minX) minX = x;
+          if(x > maxX) maxX = x;
+          if(y < minY) minY = y;
+          if(y > maxY) maxY = y;
+          found = true;
+        }
+      }
+    }
+    if(!found) return '';
+    // Add small padding
+    var pad = 8;
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(w-1, maxX + pad);
+    maxY = Math.min(h-1, maxY + pad);
+    var tw = maxX - minX, th = maxY - minY;
+    var tmp = document.createElement('canvas');
+    tmp.width = tw; tmp.height = th;
+    var tctx = tmp.getContext('2d');
+    // White background then draw signature
+    tctx.fillStyle = '#fff';
+    tctx.fillRect(0, 0, tw, th);
+    tctx.drawImage(canvas, minX, minY, tw, th, 0, 0, tw, th);
+    return tmp.toDataURL('image/jpeg', 0.85);
+  } catch(e) {
+    return '';
+  }
+}
+
 function addPPERow() {
   var tb = document.getElementById('ppe-rows');
   var i = tb.rows.length;
@@ -407,6 +572,7 @@ function resetForm(){
   selectForm('leave');
   window.LEAVE_PICKED = '';
   unlockSubmit();
+  clearSignature();
   // Reset fields
   document.querySelectorAll('input[type=text],input[type=number],textarea').forEach(function(el){if(el.id!=='l-site')el.value='';});
   document.querySelectorAll('input[type=radio]').forEach(function(el){el.checked=false;});
@@ -483,6 +649,8 @@ function submitLeave() {
   if(!leaveCode){showErr('Please select a leave type.');return;}
   if(!from||!to){showErr('Please enter your leave dates.');return;}
   if(new Date(from)>new Date(to)){showErr('First day cannot be after last day.');return;}
+  var signature = getSignatureDataURL();
+  if(!signature){showErr('Please sign in the signature box.');return;}
   var days=0,cur=new Date(from),end=new Date(to);
   while(cur<=end){if(cur.getDay()!==0&&cur.getDay()!==6)days++;cur.setDate(cur.getDate()+1);}
   var leaveLabels={AL:'Annual Leave',SL:'Sick Leave',BL:'Bereavement Leave',X:'Without Pay',LS:'Long Service Leave',IL:'In Lieu'};
@@ -496,7 +664,8 @@ function submitLeave() {
     firstDay:new Date(from).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     lastDay:new Date(to).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     workingDays:days,
-    notes:document.getElementById('l-notes').value.trim()
+    notes:document.getElementById('l-notes').value.trim(),
+    signature:signature
   };
   var eb = document.getElementById('err-bar');
   if(eb) eb.style.display='none';

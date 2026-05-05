@@ -91,6 +91,50 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
 </style>
 </head><body>
 
+<!-- DIAGNOSTIC PANEL - Remove after testing -->
+<div id="diag" style="background:#fff3cd;border:2px solid #ffc107;padding:10px;font-family:monospace;font-size:12px;line-height:1.6">
+  <div style="font-weight:700;color:#856404;margin-bottom:6px">🔧 DIAGNOSTIC MODE — Tap each button below</div>
+  <button type="button" id="diag-btn-1" style="background:#1565c0;color:#fff;border:none;padding:14px 18px;font-size:15px;font-weight:700;border-radius:6px;width:100%;margin-bottom:6px;-webkit-appearance:none">TEST 1: Tap me (onclick)</button>
+  <button type="button" id="diag-btn-2" style="background:#2e7d32;color:#fff;border:none;padding:14px 18px;font-size:15px;font-weight:700;border-radius:6px;width:100%;margin-bottom:6px;-webkit-appearance:none">TEST 2: Tap me (addEventListener)</button>
+  <button type="button" id="diag-btn-3" style="background:#e65100;color:#fff;border:none;padding:14px 18px;font-size:15px;font-weight:700;border-radius:6px;width:100%;margin-bottom:6px;-webkit-appearance:none">TEST 3: Tap me (touchstart)</button>
+  <div id="diag-log" style="background:#000;color:#0f0;padding:8px;border-radius:4px;min-height:60px;white-space:pre-wrap;word-wrap:break-word"></div>
+  <div style="margin-top:6px;color:#856404;font-size:11px">Once you confirm which buttons work, screenshot this page and send it back.</div>
+</div>
+
+<script>
+// Diagnostic immediately - before any other JS
+(function(){
+  function dlog(msg){
+    try{
+      var l = document.getElementById('diag-log');
+      if(l) l.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n' + l.textContent;
+    }catch(e){}
+  }
+  dlog('Page loaded. UA: ' + navigator.userAgent.substring(0,80));
+  
+  function setupDiag(){
+    var b1 = document.getElementById('diag-btn-1');
+    var b2 = document.getElementById('diag-btn-2');
+    var b3 = document.getElementById('diag-btn-3');
+    
+    if(b1) b1.onclick = function(){ dlog('✓ TEST 1 onclick fired'); };
+    if(b2) b2.addEventListener('click', function(){ dlog('✓ TEST 2 addEventListener click fired'); });
+    if(b3) {
+      b3.addEventListener('touchstart', function(){ dlog('✓ TEST 3 touchstart fired'); });
+      b3.addEventListener('click', function(){ dlog('✓ TEST 3 click also fired'); });
+    }
+    dlog('Buttons wired. Ready to test.');
+  }
+  
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', setupDiag);
+  } else {
+    setupDiag();
+  }
+})();
+</script>
+<!-- END DIAGNOSTIC -->
+
 <header>
   <div class="logo"><div class="lt">K</div><div class="ls">KAEFER</div></div>
   <div class="hm">

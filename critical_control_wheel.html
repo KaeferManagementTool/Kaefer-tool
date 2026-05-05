@@ -1175,11 +1175,14 @@ function editEmp(oldName){
   emps.forEach(function(e){if(e.n===oldName) e.n = newName;});
   sl(ATT_EMP, emps);
   // Also migrate any attendance overrides under the old name to the new name
+  // (Attendance uses aKey() — normalized lowercase + underscores)
   try{
     var ov = glj('kaefer_att_ov', {});
-    if(ov[oldName]){
-      ov[newName] = ov[oldName];
-      delete ov[oldName];
+    var oldKey = (typeof aKey === 'function') ? aKey(oldName) : oldName;
+    var newKey = (typeof aKey === 'function') ? aKey(newName) : newName;
+    if(ov[oldKey] && oldKey !== newKey){
+      ov[newKey] = ov[oldKey];
+      delete ov[oldKey];
       sl('kaefer_att_ov', ov);
     }
   }catch(e){}
@@ -3110,14 +3113,16 @@ function applySubmissionToAttendance(id){
     var leaveCodeMap = {'Annual Leave':'AL','Sick Leave':'SL','Bereavement Leave':'BL','Without Pay':'X','Long Service Leave':'LS','In Lieu':'LATE'};
     var leaveCode = leaveCodeMap[s.leaveType] || 'AL';
     var ov = glj('kaefer_att_ov', {});
-    if(!ov[matchKey]) ov[matchKey] = {};
+    // CRITICAL: Attendance tab stores under aKey(name), so we must too
+    var storeKey = (typeof aKey === 'function') ? aKey(matchKey) : matchKey;
+    if(!ov[storeKey]) ov[storeKey] = {};
     var cur = new Date(fd), end = new Date(ld);
     var count = 0;
     while(cur<=end){
       var w = cur.getDay();
       if(w!==0&&w!==6){
         var dKey = cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
-        ov[matchKey][dKey] = leaveCode;
+        ov[storeKey][dKey] = leaveCode;
         count++;
       }
       cur.setDate(cur.getDate()+1);

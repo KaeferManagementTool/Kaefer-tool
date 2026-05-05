@@ -245,7 +245,7 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
 </div>
 
 <script>
-var APPS_URL = 'https://script.google.com/macros/s/AKfycbyWZvAcyMCRZme-w3GVi_GaGw9qIdztSmo758s8DzhRMDuJdmiVG7fJTq4gC-JigxMR/exec';
+var APPS_URL = 'https://script.google.com/macros/s/AKfycbxkQ4OrljFT0rxlSDV32Qsb7_4VyAyh0k5tLNpmmTR1LXEq4wVfN7BH6Qq8BeYxGLz8/exec';
 
 // Catch any JS error and show it on screen so we can debug iOS issues
 window.onerror = function(msg, url, line, col, err) {
@@ -602,9 +602,9 @@ function postToApps(payload) {
   
   var jsonBody = JSON.stringify(payload);
   var sizeKB = Math.round(jsonBody.length / 1024);
-  var body = 'data=' + encodeURIComponent(jsonBody);
   
-  // STRATEGY 1: Try standard fetch first - if it works we get the actual response
+  // STRATEGY 1: Try standard POST fetch first
+  var body = 'data=' + encodeURIComponent(jsonBody);
   return fetch(u, {
     method: 'POST',
     redirect: 'follow',
@@ -625,25 +625,45 @@ function postToApps(payload) {
   })
   .catch(function(err){
     var msg = err.message || String(err);
-    // STRATEGY 2: Fetch failed, try no-cors fetch.
-    // no-cors actually delivers the request to Apps Script but we can't read
-    // the response. We trust the idempotency token + retry to handle duplicates.
+    // STRATEGY 2: POST failed (likely "Failed to fetch" / CORS).
+    // Fall back to GET with ?data= in the URL — this works reliably because
+    // it's a simple GET request that the Apps Script doGet handler routes to doPost.
+    // Tested confirmed working with a 4KB payload including signature.
     if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('Network') >= 0 || msg.indexOf('NetworkError') >= 0){
-      return fetch(u, {
-        method: 'POST',
-        mode: 'no-cors',
-        redirect: 'follow',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
-      })
-      .then(function(){
-        // no-cors response is opaque - we can't read it, but the request went through
-        return {ok:true, opaque:true};
-      })
-      .catch(function(err2){
-        // STRATEGY 3: Both fetches failed - try iframe form submit as last resort
-        return submitViaIframe(u, jsonBody, sizeKB);
-      });
+      return submitViaGet(u, jsonBody, sizeKB);
+    }
+    throw err;
+  });
+}
+
+// Fallback: GET with data in URL. doGet routes to doPost when ?data= is present.
+// This is the most reliable transport for Apps Script from mobile browsers.
+function submitViaGet(url, jsonBody, sizeKB){
+  // URL has a soft limit ~8KB on most browsers but Apps Script handles much more.
+  // If too large, throw a clear error.
+  var fullUrl = url + '?data=' + encodeURIComponent(jsonBody);
+  if(fullUrl.length > 30000){
+    return Promise.reject(new Error('Submission too large ('+sizeKB+'KB). Try a smaller signature.'));
+  }
+  
+  return fetch(fullUrl, { method: 'GET', redirect: 'follow' })
+  .then(function(r){
+    if(!r.ok) throw new Error('GET returned ' + r.status);
+    return r.text();
+  })
+  .then(function(t){
+    if(!t) throw new Error('Empty response from server');
+    var j;
+    try { j = JSON.parse(t); }
+    catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
+    if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
+    return j;
+  })
+  .catch(function(err){
+    var msg = err.message || String(err);
+    // STRATEGY 3: Last resort - iframe with GET-style URL
+    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('Network') >= 0){
+      return submitViaIframe(url, jsonBody, sizeKB);
     }
     throw err;
   });

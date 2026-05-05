@@ -103,13 +103,13 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
 
   <!-- Form type selector -->
   <div class="form-btns" id="form-selector">
-    <button class="form-btn active-leave" id="btn-leave" onclick="selectForm('leave')">
+    <button type="button" class="form-btn active-leave" id="btn-leave" onclick="selectForm('leave')">
       <span class="icon">📋</span><span class="lbl">Leave Request</span>
     </button>
-    <button class="form-btn" id="btn-ppe" onclick="selectForm('ppe')">
+    <button type="button" class="form-btn" id="btn-ppe" onclick="selectForm('ppe')">
       <span class="icon">🦺</span><span class="lbl">PPE Request</span>
     </button>
-    <button class="form-btn" id="btn-purch" onclick="selectForm('purch')">
+    <button type="button" class="form-btn" id="btn-purch" onclick="selectForm('purch')">
       <span class="icon">🛒</span><span class="lbl">Purchase / Quote</span>
     </button>
   </div>
@@ -128,7 +128,7 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
     <div class="tick">✅</div>
     <h2>Form Submitted!</h2>
     <p id="success-msg">Your request has been sent to your supervisor for review.</p>
-    <button class="another" onclick="resetForm()">Submit Another Form</button>
+    <button type="button" class="another" onclick="resetForm()">Submit Another Form</button>
   </div>
 
   <!-- LEAVE FORM -->
@@ -173,7 +173,7 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
       </div>
     </div>
 
-    <button class="submit-btn blue" onclick="submitLeave()">Submit Leave Request</button>
+    <button type="button" class="submit-btn blue" id="btn-submit-leave" onclick="submitLeave()">Submit Leave Request</button>
   </div>
 
   <!-- PPE FORM -->
@@ -199,12 +199,12 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
           <thead><tr><th style="width:45%">Item Description</th><th style="width:30%">Size / Spec</th><th style="width:15%">Qty</th></tr></thead>
           <tbody id="ppe-rows"></tbody>
         </table>
-        <button onclick="addPPERow()" style="background:none;border:1px dashed #bbb;border-radius:4px;padding:6px 12px;font-size:12px;color:#607d8b;cursor:pointer;width:100%;font-family:inherit">+ Add another item</button>
+        <button type="button" onclick="addPPERow()" style="background:none;border:1px dashed #bbb;border-radius:4px;padding:6px 12px;font-size:12px;color:#607d8b;cursor:pointer;width:100%;font-family:inherit">+ Add another item</button>
         <div class="field" style="margin-top:12px"><label>Additional Notes</label><textarea id="p-notes" placeholder="Any specific requirements or urgency..."></textarea></div>
       </div>
     </div>
 
-    <button class="submit-btn orange" onclick="submitPPE()">Submit PPE Request</button>
+    <button type="button" class="submit-btn orange" id="btn-submit-ppe" onclick="submitPPE()">Submit PPE Request</button>
   </div>
 
   <!-- PURCHASING FORM -->
@@ -225,7 +225,7 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
         <div class="field"><label>Reason / Justification</label><textarea id="pu-notes" placeholder="Why is this needed?"></textarea></div>
       </div>
     </div>
-    <button class="submit-btn green" onclick="submitPurch()">Submit Purchase Request</button>
+    <button type="button" class="submit-btn green" id="btn-submit-purch" onclick="submitPurch()">Submit Purchase Request</button>
   </div>
 
 </div>
@@ -233,31 +233,92 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
 <script>
 var APPS_URL = 'https://script.google.com/macros/s/AKfycbwnuWO64GNAWHqfECxCfivfxJYCo4YCcrd6c2Gr-IWIqg2SbVA0czJFoR50OSrxuw38/exec';
 
+// Catch any JS error and show it on screen so we can debug iOS issues
+window.onerror = function(msg, url, line, col, err) {
+  try {
+    var bar = document.getElementById('err-bar');
+    if (bar) {
+      bar.style.display = '';
+      bar.textContent = '⚠️ Page error: ' + msg + ' (line ' + line + ')';
+    } else {
+      // err-bar not loaded yet - inject visible error
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c62828;color:#fff;padding:10px;font-size:13px;z-index:99999';
+      d.textContent = '⚠️ ' + msg + ' (line ' + line + ')';
+      document.body && document.body.appendChild(d);
+    }
+  } catch(e) {}
+  return false;
+};
+
 function getURL(){
-  // Try localStorage first (if user has used main tool on same device)
-  var u = localStorage.getItem('kaefer_url');
-  return u || APPS_URL;
+  try {
+    var u = localStorage.getItem('kaefer_url');
+    return u || APPS_URL;
+  } catch(e){ return APPS_URL; }
 }
 
-// Init
-(function(){
-  var td = new Date().toISOString().split('T')[0];
-  ['p-date','pu-date'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=td;});
-  addPPERow();addPPERow();addPPERow();
-  // Check URL params for auto-select
-  var params = new URLSearchParams(window.location.search);
-  var form = params.get('form');
-  if(form==='ppe') selectForm('ppe');
-  else if(form==='purch') selectForm('purch');
-  else selectForm('leave');
-  // Try to get site name from main tool localStorage
-  var site = localStorage.getItem('kaefer_site');
-  if(site) {
-    document.getElementById('hdr-site').textContent = site + ' | KAEFER Integrated Services';
-    var siteInputs = ['l-site'];
-    siteInputs.forEach(function(id){var el=document.getElementById(id);if(el&&!el.value)el.value=site;});
+// Helper: parse URL params without using URLSearchParams (older iOS Safari compatibility)
+function getQueryParam(name) {
+  try {
+    var search = window.location.search.replace(/^\?/, '');
+    var pairs = search.split('&');
+    for (var i = 0; i < pairs.length; i++) {
+      var kv = pairs[i].split('=');
+      if (decodeURIComponent(kv[0]) === name) return decodeURIComponent(kv[1] || '');
+    }
+  } catch(e){}
+  return null;
+}
+
+// Init - run after DOM ready, with error trapping
+function initStaffForm() {
+  try {
+    var td = new Date().toISOString().split('T')[0];
+    var dateIds = ['p-date','pu-date'];
+    for (var i=0;i<dateIds.length;i++){
+      var el = document.getElementById(dateIds[i]);
+      if (el) el.value = td;
+    }
+    addPPERow();addPPERow();addPPERow();
+    
+    var form = getQueryParam('form');
+    if(form==='ppe') selectForm('ppe');
+    else if(form==='purch') selectForm('purch');
+    else selectForm('leave');
+    
+    try {
+      var site = localStorage.getItem('kaefer_site');
+      if(site) {
+        var hdr = document.getElementById('hdr-site');
+        if(hdr) hdr.textContent = site + ' | KAEFER Integrated Services';
+        var lsite = document.getElementById('l-site');
+        if(lsite && !lsite.value) lsite.value = site;
+      }
+    } catch(e){ /* localStorage may be blocked */ }
+    
+    // Wire up Submit buttons via addEventListener as fallback for onclick
+    var sl = document.getElementById('btn-submit-leave');
+    if(sl) sl.addEventListener('click', function(e){ e.preventDefault(); submitLeave(); });
+    var sp = document.getElementById('btn-submit-ppe');
+    if(sp) sp.addEventListener('click', function(e){ e.preventDefault(); submitPPE(); });
+    var su = document.getElementById('btn-submit-purch');
+    if(su) su.addEventListener('click', function(e){ e.preventDefault(); submitPurch(); });
+  } catch(err) {
+    var bar = document.getElementById('err-bar');
+    if (bar) {
+      bar.style.display = '';
+      bar.textContent = '⚠️ Init error: ' + (err.message || err);
+    }
   }
-})();
+}
+
+// Run init when DOM is ready (safer than IIFE for iOS)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initStaffForm);
+} else {
+  initStaffForm();
+}
 
 function selectForm(type) {
   ['leave','ppe','purch'].forEach(function(t){

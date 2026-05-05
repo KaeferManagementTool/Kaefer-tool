@@ -406,6 +406,7 @@ function resetForm(){
   document.getElementById('form-selector').style.display='';
   selectForm('leave');
   window.LEAVE_PICKED = '';
+  unlockSubmit();
   // Reset fields
   document.querySelectorAll('input[type=text],input[type=number],textarea').forEach(function(el){if(el.id!=='l-site')el.value='';});
   document.querySelectorAll('input[type=radio]').forEach(function(el){el.checked=false;});
@@ -420,9 +421,15 @@ function postToApps(payload) {
   var u = getURL();
   if(!u) return Promise.reject(new Error('No Apps Script URL configured'));
   
+  // Add an idempotency token so the server can detect duplicates from accidental
+  // double-tap or iOS retry. The Apps Script will skip writes if it sees the
+  // same token within 60 seconds.
+  if(!payload._token){
+    payload._token = 'tok_' + Date.now() + '_' + Math.floor(Math.random()*1e9);
+  }
+  
   // iOS Safari has issues with fetch() + JSON body + Apps Script redirects.
   // Use form-encoded POST which iOS handles reliably.
-  // Send the JSON payload as a single 'data' field.
   var body = 'data=' + encodeURIComponent(JSON.stringify(payload));
   
   return fetch(u, {
@@ -442,6 +449,23 @@ function postToApps(payload) {
     catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
     if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
     return j;
+  });
+}
+
+// Submit guard — prevents double-tap and re-submit while in flight
+var SUBMITTING = false;
+function lockSubmit(){
+  if(SUBMITTING) return false;
+  SUBMITTING = true;
+  ['btn-submit-leave','btn-submit-ppe','btn-submit-purch'].forEach(function(id){
+    var b = document.getElementById(id); if(b){ b.disabled = true; b.style.opacity='0.5'; }
+  });
+  return true;
+}
+function unlockSubmit(){
+  SUBMITTING = false;
+  ['btn-submit-leave','btn-submit-ppe','btn-submit-purch'].forEach(function(id){
+    var b = document.getElementById(id); if(b){ b.disabled = false; b.style.opacity=''; }
   });
 }
 
@@ -476,10 +500,11 @@ function submitLeave() {
   };
   var eb = document.getElementById('err-bar');
   if(eb) eb.style.display='none';
+  if(!lockSubmit()) return;
   showLoading(true);
   postToApps({action:'save_submission', formType:'leave', data:data})
   .then(function(){showLoading(false);showSuccess('Your leave request has been submitted. Your supervisor will review it shortly.');})
-  .catch(function(err){showLoading(false);showErr('Submission failed: '+(err.message||err));});
+  .catch(function(err){showLoading(false);unlockSubmit();showErr('Submission failed: '+(err.message||err));});
 }
 
 function submitPPE() {
@@ -503,10 +528,11 @@ function submitPPE() {
     notes:document.getElementById('p-notes').value.trim()
   };
   document.getElementById('err-bar').style.display='none';
+  if(!lockSubmit()) return;
   showLoading(true);
   postToApps({action:'save_submission', formType:'ppe', data:data})
   .then(function(){showLoading(false);showSuccess('Your PPE request has been submitted. Your supervisor will review and action it shortly.');})
-  .catch(function(err){showLoading(false);showErr('Submission failed: '+err.message);});
+  .catch(function(err){showLoading(false);unlockSubmit();showErr('Submission failed: '+err.message);});
 }
 
 function submitPurch() {
@@ -526,10 +552,11 @@ function submitPurch() {
     notes:document.getElementById('pu-notes').value.trim()
   };
   document.getElementById('err-bar').style.display='none';
+  if(!lockSubmit()) return;
   showLoading(true);
   postToApps({action:'save_submission', formType:'purch', data:data})
   .then(function(){showLoading(false);showSuccess('Your purchase request has been submitted. Your supervisor will review it shortly.');})
-  .catch(function(err){showLoading(false);showErr('Submission failed: '+err.message);});
+  .catch(function(err){showLoading(false);unlockSubmit();showErr('Submission failed: '+err.message);});
 }
 </script>
 </body></html>

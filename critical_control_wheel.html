@@ -1160,6 +1160,32 @@ function closeCE(){document.getElementById('ce-ml').classList.remove('on');}
 function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-ml').classList.add('on');}
 function closeAddEmp(){document.getElementById('ae-ml').classList.remove('on');}
 function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value;if(!name){alert('Enter a name.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp});sl(ATT_EMP,emps);closeAddEmp();rAtt();}
+function editEmp(oldName){
+  var newName = prompt('Edit employee name:', oldName);
+  if(newName===null) return; // cancelled
+  newName = newName.trim();
+  if(!newName){alert('Name cannot be empty.');return;}
+  if(newName === oldName) return; // no change
+  var emps = getEmps();
+  // Check if new name already exists (case-insensitive, excluding this employee)
+  if(emps.some(function(e){return e.n!==oldName && e.n.toLowerCase()===newName.toLowerCase();})){
+    alert('An employee with that name already exists.');return;
+  }
+  // Update the name
+  emps.forEach(function(e){if(e.n===oldName) e.n = newName;});
+  sl(ATT_EMP, emps);
+  // Also migrate any attendance overrides under the old name to the new name
+  try{
+    var ov = glj('kaefer_att_ov', {});
+    if(ov[oldName]){
+      ov[newName] = ov[oldName];
+      delete ov[oldName];
+      sl('kaefer_att_ov', ov);
+    }
+  }catch(e){}
+  rAtt();
+}
+function editEmpByEl(btn){editEmp(decodeURIComponent(btn.getAttribute('data-name')));}
 function removeEmp(n){if(!confirm('Move '+n+' to No Longer Employed?'))return;var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'})});sl(ATT_ARCH,arch);}rAtt();rFormer();}
 function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}rAtt();rFormer();}
 function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+'</td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
@@ -1194,7 +1220,7 @@ if(!wk){
 }
 cells.push('<td style="'+tdStyle+'">'+tdInner+'</td>');});
       cells.push('<td style="text-align:center;font-weight:700;font-size:10px;color:#2e7d32;background:#f1f8f1;border-left:2px solid #e0e0e0">'+p+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#c62828;background:#fff5f5">'+sl+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#1565c0;background:#f0f7ff">'+al+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#880e4f;background:#fdf0f5">'+x+'</td>');
-      cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0"><button onclick="removeEmpByEl(this)" data-name="'+enc+'" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
+      cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0;white-space:nowrap"><button onclick="editEmpByEl(this)" data-name="'+enc+'" title="Edit name" style="background:none;border:none;color:#1565c0;cursor:pointer;font-size:13px;padding:0 3px;line-height:1">&#9998;</button> <button onclick="removeEmpByEl(this)" data-name="'+enc+'" title="Remove" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
       H.push('<tr>'+cells.join('')+'</tr>');
     });
   });
@@ -2945,6 +2971,103 @@ function genPdfEmail(id){
 
 // Auto-load submissions badge on init
 // ── APPLY SUBMISSION TO REGISTERS ────────────────────────────
+// Fuzzy similarity score between two names (0..1, higher = more similar)
+function nameScore(a, b){
+  a = String(a||'').toLowerCase().replace(/[,.\-_]/g,' ').replace(/\s+/g,' ').trim();
+  b = String(b||'').toLowerCase().replace(/[,.\-_]/g,' ').replace(/\s+/g,' ').trim();
+  if(!a || !b) return 0;
+  if(a === b) return 1;
+  // Exact substring match
+  if(b.indexOf(a) >= 0 || a.indexOf(b) >= 0) return 0.9;
+  // Token-based: split into words, count overlaps
+  var ta = a.split(' '), tb = b.split(' ');
+  var matched = 0, partial = 0;
+  ta.forEach(function(t1){
+    if(t1.length < 2) return;
+    var best = 0;
+    tb.forEach(function(t2){
+      if(t2.length < 2) return;
+      if(t1 === t2){ best = Math.max(best, 1); return; }
+      if(t1.indexOf(t2) === 0 || t2.indexOf(t1) === 0){ best = Math.max(best, 0.7); return; }
+      // Levenshtein-ish for typos: count matching chars in order
+      var common = 0, mx = Math.min(t1.length, t2.length);
+      for(var k=0;k<mx;k++){ if(t1[k] === t2[k]) common++; }
+      var ratio = common / Math.max(t1.length, t2.length);
+      if(ratio > 0.6) best = Math.max(best, ratio * 0.6);
+    });
+    if(best >= 0.7) matched++;
+    else if(best > 0) partial += best;
+  });
+  var totalScore = (matched + partial) / Math.max(ta.length, tb.length);
+  return totalScore;
+}
+
+// Build a sorted list of employee matches for a submitted name
+function findEmployeeMatches(submittedName){
+  var sel = document.getElementById('sf-leave-name');
+  if(!sel) return [];
+  var matches = [];
+  for(var i=0;i<sel.options.length;i++){
+    var opt = sel.options[i];
+    if(!opt.value) continue;
+    var score = nameScore(submittedName, opt.textContent);
+    matches.push({key:opt.value, label:opt.textContent, score:score});
+  }
+  matches.sort(function(a,b){return b.score - a.score;});
+  return matches;
+}
+
+// Show a modal to pick the right employee
+function showEmployeePicker(submittedName, matches, onPick){
+  // Build a simple modal inline
+  var existing = document.getElementById('emp-picker-ov');
+  if(existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'emp-picker-ov';
+  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px';
+  
+  var topMatches = matches.slice(0, 8);
+  var bestScore = topMatches.length ? topMatches[0].score : 0;
+  var hasGoodMatch = bestScore >= 0.6;
+  
+  var html = '<div style="background:#fff;border-radius:8px;width:480px;max-width:95vw;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;font-family:Arial,sans-serif">'
+    +'<div style="background:#1565c0;color:#fff;padding:14px 16px;font-weight:700;font-size:14px;display:flex;justify-content:space-between;align-items:center">'
+    +'<span>Match employee for "'+escHtml(submittedName)+'"</span>'
+    +'<button onclick="document.getElementById(\'emp-picker-ov\').remove()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0;line-height:1">&times;</button>'
+    +'</div>'
+    +'<div style="padding:14px 16px;overflow-y:auto;flex:1">';
+  
+  if(!matches.length){
+    html += '<p style="color:#c62828;margin-bottom:10px">No employees found in your list. Add employees in the Attendance tab first.</p>';
+  } else if(!hasGoodMatch) {
+    html += '<p style="color:#e65100;margin-bottom:10px;font-size:13px"><b>⚠ No close match found.</b> Pick the right employee from the list, or cancel and edit the employee name in Attendance to match.</p>';
+  } else {
+    html += '<p style="color:#607d8b;margin-bottom:10px;font-size:12px">Pick the correct employee. Best matches are at the top.</p>';
+  }
+  
+  html += '<div style="display:flex;flex-direction:column;gap:6px">';
+  topMatches.forEach(function(m, idx){
+    var pctColor = m.score >= 0.8 ? '#2e7d32' : m.score >= 0.6 ? '#e65100' : '#c62828';
+    var pct = Math.round(m.score * 100);
+    html += '<button onclick="window._empPicked(\''+escId(m.key)+'\')" style="background:#fff;border:1.5px solid '+(idx===0&&hasGoodMatch?'#1565c0':'#e0e0e0')+';border-radius:6px;padding:10px 12px;text-align:left;cursor:pointer;font-family:inherit;display:flex;justify-content:space-between;align-items:center">'
+      +'<span style="font-weight:600;font-size:13px;color:#1a1a1a">'+escHtml(m.label)+'</span>'
+      +'<span style="font-size:11px;font-weight:700;color:'+pctColor+'">'+pct+'%</span>'
+      +'</button>';
+  });
+  html += '</div></div>'
+    +'<div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:8px">'
+    +'<button onclick="document.getElementById(\'emp-picker-ov\').remove()" style="padding:8px 14px;border:1px solid #999;background:#fff;border-radius:5px;cursor:pointer;font-family:inherit">Cancel</button>'
+    +'</div></div>';
+  
+  ov.innerHTML = html;
+  document.body.appendChild(ov);
+  window._empPicked = function(key){
+    var picker = document.getElementById('emp-picker-ov');
+    if(picker) picker.remove();
+    onPick(key);
+  };
+}
+
 function applySubmissionToAttendance(id){
   var s = findSubmission(id); if(!s){alert('Not found');return;}
   if(s.type!=='leave'){alert('Not a leave submission.');return;}
@@ -2964,40 +3087,40 @@ function applySubmissionToAttendance(id){
   var fd = parseDate(s.firstDay), ld = parseDate(s.lastDay);
   if(!fd||!ld){alert('Could not parse leave dates.');return;}
   
-  // Find matching employee in dropdown (sf-leave-name has all employees)
-  var sel = document.getElementById('sf-leave-name');
-  var matchKey = '';
-  if(sel){
-    for(var i=0;i<sel.options.length;i++){
-      var optText = (sel.options[i].textContent||'').toLowerCase();
-      if(optText.indexOf(String(s.name||'').toLowerCase())>=0 && sel.options[i].value){matchKey = sel.options[i].value;break;}
+  // Try fuzzy matching first
+  var matches = findEmployeeMatches(s.name||'');
+  var bestScore = matches.length ? matches[0].score : 0;
+  
+  function doApply(matchKey){
+    if(!matchKey){return;}
+    var leaveCodeMap = {'Annual Leave':'AL','Sick Leave':'SL','Bereavement Leave':'BL','Without Pay':'X','Long Service Leave':'LS','In Lieu':'LATE'};
+    var leaveCode = leaveCodeMap[s.leaveType] || 'AL';
+    var ov = glj('kaefer_att_ov', {});
+    if(!ov[matchKey]) ov[matchKey] = {};
+    var cur = new Date(fd), end = new Date(ld);
+    var count = 0;
+    while(cur<=end){
+      var w = cur.getDay();
+      if(w!==0&&w!==6){
+        var dKey = cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
+        ov[matchKey][dKey] = leaveCode;
+        count++;
+      }
+      cur.setDate(cur.getDate()+1);
     }
-  }
-  if(!matchKey){
-    alert('Could not match employee "'+s.name+'" to your employee list.\n\nGo to Smart Forms → Manual Entry → Leave to apply manually.');
-    return;
+    sl('kaefer_att_ov', ov);
+    if(typeof rAtt==='function')rAtt();
+    alert('Applied '+count+' day(s) to Attendance for '+matchKey+'.');
+    markStatus(id,'Applied to Attendance');
   }
   
-  var leaveCodeMap = {'Annual Leave':'AL','Sick Leave':'SL','Bereavement Leave':'BL','Without Pay':'X','Long Service Leave':'LS','In Lieu':'LATE'};
-  var leaveCode = leaveCodeMap[s.leaveType] || 'AL';
-  
-  var ov = glj('kaefer_att_ov', {});
-  if(!ov[matchKey]) ov[matchKey] = {};
-  var cur = new Date(fd), end = new Date(ld);
-  var count = 0;
-  while(cur<=end){
-    var w = cur.getDay();
-    if(w!==0&&w!==6){
-      var dKey = cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
-      ov[matchKey][dKey] = leaveCode;
-      count++;
-    }
-    cur.setDate(cur.getDate()+1);
+  // Auto-apply if there's a very confident match (>= 90%)
+  if(bestScore >= 0.9 && matches.length){
+    doApply(matches[0].key);
+  } else {
+    // Show picker for manual selection
+    showEmployeePicker(s.name||'(no name)', matches, doApply);
   }
-  sl('kaefer_att_ov', ov);
-  if(typeof rAtt==='function')rAtt();
-  alert('Applied '+count+' day(s) to Attendance for '+s.name+'.');
-  markStatus(id,'Applied to Attendance');
 }
 
 function applySubmissionToPPE(id){

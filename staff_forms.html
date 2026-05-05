@@ -327,12 +327,31 @@ function resetForm(){
 
 function postToApps(payload) {
   var u = getURL();
+  if(!u) return Promise.reject(new Error('No Apps Script URL configured'));
+  
+  // iOS Safari has issues with fetch() + JSON body + Apps Script redirects.
+  // Use form-encoded POST which iOS handles reliably.
+  // Send the JSON payload as a single 'data' field.
+  var body = 'data=' + encodeURIComponent(JSON.stringify(payload));
+  
   return fetch(u, {
-    method:'POST',
-    redirect:'follow',
-    headers:{'Content-Type':'text/plain'},
-    body: JSON.stringify(payload)
-  }).then(function(r){return r.json();});
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body
+  })
+  .then(function(r){
+    if(!r.ok) throw new Error('Server returned ' + r.status);
+    return r.text();
+  })
+  .then(function(t){
+    if(!t) throw new Error('Empty response from server');
+    var j;
+    try { j = JSON.parse(t); }
+    catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
+    if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
+    return j;
+  });
 }
 
 function submitLeave() {

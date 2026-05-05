@@ -3004,14 +3004,28 @@ function nameScore(a, b){
 
 // Build a sorted list of employee matches for a submitted name
 function findEmployeeMatches(submittedName){
-  var sel = document.getElementById('sf-leave-name');
-  if(!sel) return [];
   var matches = [];
-  for(var i=0;i<sel.options.length;i++){
-    var opt = sel.options[i];
-    if(!opt.value) continue;
-    var score = nameScore(submittedName, opt.textContent);
-    matches.push({key:opt.value, label:opt.textContent, score:score});
+  // Read from the main employee list (kaefer_att_emps), with fallback to base
+  var emps;
+  try { emps = (typeof getEmps === 'function') ? getEmps() : []; } 
+  catch(e) { emps = glj('kaefer_att_emps', []) || []; }
+  if(!emps || !emps.length) {
+    // Try the dropdown as last resort
+    var sel = document.getElementById('sf-leave-name');
+    if(sel){
+      for(var i=0;i<sel.options.length;i++){
+        var opt = sel.options[i];
+        if(!opt.value) continue;
+        var score = nameScore(submittedName, opt.textContent);
+        matches.push({key:opt.value, label:opt.textContent, score:score});
+      }
+    }
+  } else {
+    emps.forEach(function(e){
+      if(!e || !e.n) return;
+      var score = nameScore(submittedName, e.n);
+      matches.push({key:e.n, label:e.n + (e.g ? ' ('+e.g+')' : ''), score:score});
+    });
   }
   matches.sort(function(a,b){return b.score - a.score;});
   return matches;

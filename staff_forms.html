@@ -749,8 +749,7 @@ function submitLeave() {
   var days=0,cur=new Date(from),end=new Date(to);
   while(cur<=end){if(cur.getDay()!==0&&cur.getDay()!==6)days++;cur.setDate(cur.getDate()+1);}
   var leaveLabels={AL:'Annual Leave',SL:'Sick Leave',BL:'Bereavement Leave',X:'Without Pay',LS:'Long Service Leave',IL:'In Lieu'};
-  // IMPORTANT: signature is NOT included here - sent separately via attachSignature
-  // This keeps the main payload small (~1KB) for reliable mobile submission
+  // Signature is now sent with the main submission (single request, simpler & more reliable)
   var data = {
     name:name,
     employeeNumber:document.getElementById('l-empno').value.trim(),
@@ -761,21 +760,14 @@ function submitLeave() {
     firstDay:new Date(from).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     lastDay:new Date(to).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}),
     workingDays:days,
-    notes:document.getElementById('l-notes').value.trim()
+    notes:document.getElementById('l-notes').value.trim(),
+    signature:signature
   };
   var eb = document.getElementById('err-bar');
   if(eb) eb.style.display='none';
   if(!lockSubmit()) return;
   showLoading(true);
   postToApps({action:'save_submission', formType:'leave', data:data})
-  .then(function(response){
-    // Main submission succeeded — now attach signature in a separate small request.
-    // If sig fails, the leave still went through (user sees success, supervisor can ask later)
-    var subId = response && response.id ? response.id : '';
-    return attachSignature(subId, signature)
-      .then(function(){return response;})
-      .catch(function(){return response;}); // never let sig failure break the flow
-  })
   .then(function(){
     showLoading(false);
     showSuccess('Your leave request has been submitted. Your supervisor will review it shortly.');

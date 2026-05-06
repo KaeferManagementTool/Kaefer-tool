@@ -245,7 +245,7 @@ header{background:var(--g);border-bottom:4px solid var(--r);display:flex;align-i
 </div>
 
 <script>
-var APPS_URL = 'https://script.google.com/macros/s/AKfycbxkQ4OrljFT0rxlSDV32Qsb7_4VyAyh0k5tLNpmmTR1LXEq4wVfN7BH6Qq8BeYxGLz8/exec';
+var APPS_URL = 'https://kaefer-forms.s-middleton.workers.dev';
 
 // Catch any JS error and show it on screen so we can debug iOS issues
 window.onerror = function(msg, url, line, col, err) {
@@ -591,22 +591,19 @@ function resetForm(){
 
 function postToApps(payload) {
   var u = getURL();
-  if(!u) return Promise.reject(new Error('No Apps Script URL configured'));
+  if(!u) return Promise.reject(new Error('No Worker URL configured'));
   
   // Idempotency token to prevent duplicate writes
   if(!payload._token){
     payload._token = 'tok_' + Date.now() + '_' + Math.floor(Math.random()*1e9);
   }
   
-  // GET request with data in URL — most reliable approach across mobile browsers.
-  var jsonBody = JSON.stringify(payload);
-  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
-  
-  if(fullUrl.length > 30000){
-    return Promise.reject(new Error('Submission too large. Try again with a smaller signature.'));
-  }
-  
-  return fetch(fullUrl, { method: 'GET', redirect: 'follow' })
+  // POST as JSON — Cloudflare Worker handles CORS properly so this works on every browser.
+  return fetch(u, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
   .then(function(r){
     if(!r.ok) throw new Error('Server returned ' + r.status);
     return r.text();
@@ -618,41 +615,6 @@ function postToApps(payload) {
     catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
     if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
     return j;
-  })
-  .catch(function(err){
-    var msg = err.message || String(err);
-    // Fallback: image-tag GET — bypasses ALL CORS restrictions because browsers
-    // don't enforce CORS on image loads. The Apps Script DOES execute the request.
-    // We can't read the response (because the response is JSON, not an image, so the
-    // image element fails to load), but the data IS saved server-side.
-    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('Network') >= 0 || msg.indexOf('NetworkError') >= 0){
-      return submitViaImage(fullUrl);
-    }
-    throw err;
-  });
-}
-
-// Image-tag GET request: bypasses CORS completely. Fire-and-forget.
-function submitViaImage(url){
-  return new Promise(function(resolve){
-    var img = new Image();
-    var done = false;
-    function finish(){
-      if(done) return;
-      done = true;
-      try{ img.src = ''; if(img.parentNode) img.parentNode.removeChild(img); }catch(e){}
-      // Wait a bit longer to make sure server has processed before resolving.
-      // We can't read response but server-side dedup token handles any retries.
-      setTimeout(function(){ resolve({ok:true, opaque:true, fallback:'image'}); }, 500);
-    }
-    // Both events mean the request reached the server
-    img.onload = finish;
-    img.onerror = finish;
-    // Safety timeout - 10s
-    setTimeout(finish, 10000);
-    img.style.display = 'none';
-    document.body.appendChild(img);
-    img.src = url;
   });
 }
 
@@ -669,23 +631,16 @@ function attachSignature(submissionId, signatureDataURL){
     signature: signatureDataURL,
     _token: 'sig_' + Date.now() + '_' + Math.floor(Math.random()*1e9)
   };
-  var jsonBody = JSON.stringify(payload);
-  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
-  
-  // If signature URL is too long, skip it gracefully (leave still went through)
-  if(fullUrl.length > 30000){
-    return Promise.resolve({ok:false, error:'too_large', skipped:true});
-  }
-  
-  return fetch(fullUrl, { method: 'GET', redirect: 'follow' })
+  return fetch(u, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
   .then(function(r){ return r.text(); })
   .then(function(t){
     try { return JSON.parse(t); } catch(e) { return {ok:false, error:'parse'}; }
   })
-  .catch(function(){
-    // Fall back to image-tag — same approach as main submit
-    return submitViaImage(fullUrl);
-  });
+  .catch(function(){ return {ok:false, error:'network'}; });
 }
 
 // Submit guard — prevents double-tap and re-submit while in flight

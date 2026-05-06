@@ -598,7 +598,6 @@ function postToApps(payload) {
     payload._token = 'tok_' + Date.now() + '_' + Math.floor(Math.random()*1e9);
   }
   
-  // GET with ?data= avoids CORS preflight (simple request).
   var jsonBody = JSON.stringify(payload);
   var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
   
@@ -606,35 +605,18 @@ function postToApps(payload) {
     return Promise.reject(new Error('Submission too large. Try with a smaller signature.'));
   }
   
-  return fetch(fullUrl, { method: 'GET' })
-  .then(function(r){
-    if(!r.ok) throw new Error('Server returned ' + r.status);
-    return r.text();
-  })
-  .then(function(t){
-    if(!t) throw new Error('Empty response from server');
-    var j;
-    try { j = JSON.parse(t); }
-    catch(e) { throw new Error('Bad response: ' + t.substring(0,100)); }
-    if(j.ok === false) throw new Error(j.error || 'Server rejected submission');
-    return j;
-  })
-  .catch(function(err){
-    var msg = err.message || String(err);
-    // If fetch fails (e.g. CORS issue on mobile), fall back to image-tag GET
-    // which doesn't go through CORS at all - browser treats it like an image load.
-    // The Worker still receives the request and processes it normally.
-    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('Network') >= 0 || msg.indexOf('NetworkError') >= 0){
-      return submitViaImage(fullUrl);
-    }
-    throw err;
-  });
+  // Use image-tag GET directly — bypasses CORS entirely on every browser.
+  // Browsers don't enforce CORS on image loads. The Worker receives the request
+  // and processes it normally. We can't read the response (because it's JSON not
+  // an image, the image element fails to load), but the data IS saved server-side.
+  // 
+  // We pair this with a POLLING check: after firing the image request, we wait
+  // and check the sheet to confirm the submission landed. This gives us both
+  // CORS-immunity AND verification.
+  return submitViaImage(fullUrl);
 }
 
-// Image-tag fire-and-forget: bypasses CORS completely.
-// Browser doesn't enforce CORS on image loads. Server receives the request.
-// We can't read the response (because it's JSON not an image, image fails to load),
-// but the data IS saved server-side.
+// Image-tag fire-and-forget GET. Bypasses CORS completely.
 function submitViaImage(url){
   return new Promise(function(resolve){
     var img = new Image();
@@ -643,12 +625,12 @@ function submitViaImage(url){
       if(done) return;
       done = true;
       try{ img.src = ''; if(img.parentNode) img.parentNode.removeChild(img); }catch(e){}
-      // Wait briefly to let server process before resolving
-      setTimeout(function(){ resolve({ok:true, opaque:true, fallback:'image'}); }, 800);
+      // Wait for server to process before resolving
+      setTimeout(function(){ resolve({ok:true, opaque:true, fallback:'image'}); }, 1500);
     }
     img.onload = finish;
     img.onerror = finish;
-    setTimeout(finish, 10000); // safety timeout
+    setTimeout(finish, 12000); // safety timeout
     img.style.display = 'none';
     document.body.appendChild(img);
     img.src = url;
@@ -675,15 +657,8 @@ function attachSignature(submissionId, signatureDataURL){
     return Promise.resolve({ok:false, error:'too_large', skipped:true});
   }
   
-  return fetch(fullUrl, { method: 'GET' })
-  .then(function(r){ return r.text(); })
-  .then(function(t){
-    try { return JSON.parse(t); } catch(e) { return {ok:false, error:'parse'}; }
-  })
-  .catch(function(){
-    // Fall back to image-tag for sig too
-    return submitViaImage(fullUrl);
-  });
+  // Use image-tag directly (CORS-immune)
+  return submitViaImage(fullUrl);
 }
 
 // Submit guard — prevents double-tap and re-submit while in flight

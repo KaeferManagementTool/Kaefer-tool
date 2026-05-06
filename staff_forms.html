@@ -653,15 +653,64 @@ function attachSignature(submissionId, signatureDataURL){
     signature: signatureDataURL,
     _token: 'sig_' + Date.now() + '_' + Math.floor(Math.random()*1e9)
   };
-  var jsonBody = JSON.stringify(payload);
-  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
-  
-  if(fullUrl.length > 30000){
-    return Promise.resolve({ok:false, error:'too_large', skipped:true});
-  }
-  
-  // Use image-tag directly (CORS-immune)
-  return submitViaImage(fullUrl);
+  // Use iframe form POST — supports large payloads (signatures), bypasses CORS
+  return submitViaIframeForm(u, payload);
+}
+
+// Hidden iframe form POST: handles large payloads (4KB+) reliably.
+// Doesn't trigger CORS preflight because Content-Type is 'text/plain' (simple request).
+// Browser submits the form, response goes to iframe (we can't read it but the
+// server processes the request). Server-side dedup handles retries.
+function submitViaIframeForm(url, payload){
+  return new Promise(function(resolve){
+    // Remove any old fallback frame/form
+    var oldFrame = document.getElementById('sf-iframe-frame');
+    if(oldFrame) oldFrame.remove();
+    var oldForm = document.getElementById('sf-iframe-form');
+    if(oldForm) oldForm.remove();
+    
+    // Hidden iframe to receive the response
+    var iframeName = 'sf-iframe-' + Date.now();
+    var iframe = document.createElement('iframe');
+    iframe.id = 'sf-iframe-frame';
+    iframe.name = iframeName;
+    iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(iframe);
+    
+    // Form that POSTs the payload to the iframe
+    var form = document.createElement('form');
+    form.id = 'sf-iframe-form';
+    form.method = 'POST';
+    form.action = url;
+    form.target = iframeName;
+    form.enctype = 'text/plain'; // critical — avoids CORS preflight
+    form.style.display = 'none';
+    
+    // Single hidden input containing the JSON payload as both name AND value
+    // (text/plain encoding is "name=value" so we put the whole payload after =)
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'data';
+    input.value = JSON.stringify(payload);
+    form.appendChild(input);
+    
+    document.body.appendChild(form);
+    
+    var done = false;
+    function finish(){
+      if(done) return;
+      done = true;
+      setTimeout(function(){
+        try{ iframe.remove(); form.remove(); }catch(e){}
+      }, 500);
+      resolve({ok:true, opaque:true, fallback:'iframe'});
+    }
+    
+    iframe.onload = finish;
+    setTimeout(finish, 12000); // safety timeout
+    
+    form.submit();
+  });
 }
 
 // Submit guard — prevents double-tap and re-submit while in flight

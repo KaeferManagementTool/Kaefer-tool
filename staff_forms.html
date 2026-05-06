@@ -598,12 +598,16 @@ function postToApps(payload) {
     payload._token = 'tok_' + Date.now() + '_' + Math.floor(Math.random()*1e9);
   }
   
-  // POST as JSON — Cloudflare Worker handles CORS properly so this works on every browser.
-  return fetch(u, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
+  // GET with ?data= avoids CORS preflight entirely (simple request).
+  // The Cloudflare Worker accepts both GET and POST.
+  var jsonBody = JSON.stringify(payload);
+  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
+  
+  if(fullUrl.length > 30000){
+    return Promise.reject(new Error('Submission too large. Try with a smaller signature.'));
+  }
+  
+  return fetch(fullUrl, { method: 'GET' })
   .then(function(r){
     if(!r.ok) throw new Error('Server returned ' + r.status);
     return r.text();
@@ -631,11 +635,14 @@ function attachSignature(submissionId, signatureDataURL){
     signature: signatureDataURL,
     _token: 'sig_' + Date.now() + '_' + Math.floor(Math.random()*1e9)
   };
-  return fetch(u, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
+  var jsonBody = JSON.stringify(payload);
+  var fullUrl = u + '?data=' + encodeURIComponent(jsonBody);
+  
+  if(fullUrl.length > 30000){
+    return Promise.resolve({ok:false, error:'too_large', skipped:true});
+  }
+  
+  return fetch(fullUrl, { method: 'GET' })
   .then(function(r){ return r.text(); })
   .then(function(t){
     try { return JSON.parse(t); } catch(e) { return {ok:false, error:'parse'}; }

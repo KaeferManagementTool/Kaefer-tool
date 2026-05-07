@@ -2754,6 +2754,12 @@ function closeSupEdit(){ document.getElementById('sup-edit-ml').classList.remove
 function initSupSigPad(){
   var canvas = document.getElementById('sup-sig-pad');
   if(!canvas) return;
+  
+  // Reset state
+  supSigHasDrawing = false;
+  var ph = document.getElementById('sup-sig-placeholder');
+  if(ph) ph.style.display = '';
+  
   // Set canvas internal resolution to match displayed size
   var rect = canvas.getBoundingClientRect();
   var dpr = window.devicePixelRatio || 1;
@@ -2766,9 +2772,21 @@ function initSupSigPad(){
   ctx.lineWidth = 2.2;
   ctx.strokeStyle = '#0d1a2e';
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  supSigHasDrawing = false;
-  var ph = document.getElementById('sup-sig-placeholder');
-  if(ph) ph.style.display = '';
+  
+  // Remove any prior listeners by replacing the element BEFORE we wire new ones.
+  // After replacing, we need to re-fetch the canvas + context.
+  var clone = canvas.cloneNode(false); // false = no children
+  canvas.parentNode.replaceChild(clone, canvas);
+  canvas = clone;
+  // Re-set internal resolution and context on the new element
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = '#0d1a2e';
   
   var drawing = false, lastX = 0, lastY = 0;
   function getPos(e){
@@ -2778,27 +2796,40 @@ function initSupSigPad(){
     else { cx = e.clientX; cy = e.clientY; }
     return { x: cx - r.left, y: cy - r.top };
   }
-  function start(e){ e.preventDefault(); drawing = true; var p = getPos(e); lastX = p.x; lastY = p.y; supSigHasDrawing = true; var ph2 = document.getElementById('sup-sig-placeholder'); if(ph2) ph2.style.display = 'none'; }
-  function move(e){ if(!drawing) return; e.preventDefault(); var p = getPos(e); ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke(); lastX = p.x; lastY = p.y; }
+  function start(e){
+    e.preventDefault();
+    drawing = true;
+    var p = getPos(e);
+    lastX = p.x; lastY = p.y;
+    // Draw a single dot so even a tap registers
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.1, 0, Math.PI*2);
+    ctx.fillStyle = '#0d1a2e';
+    ctx.fill();
+    supSigHasDrawing = true;
+    var ph2 = document.getElementById('sup-sig-placeholder');
+    if(ph2) ph2.style.display = 'none';
+  }
+  function move(e){
+    if(!drawing) return;
+    e.preventDefault();
+    var p = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    lastX = p.x; lastY = p.y;
+  }
   function end(){ drawing = false; }
   
-  // Remove old listeners by cloning the canvas
-  var newCanvas = canvas.cloneNode(true);
-  canvas.parentNode.replaceChild(newCanvas, canvas);
-  // Re-set context after clone
-  newCanvas.width = rect.width * dpr;
-  newCanvas.height = rect.height * dpr;
-  var nctx = newCanvas.getContext('2d');
-  nctx.scale(dpr, dpr);
-  nctx.lineCap = 'round'; nctx.lineJoin = 'round'; nctx.lineWidth = 2.2; nctx.strokeStyle = '#0d1a2e';
-  
-  newCanvas.addEventListener('mousedown', start);
-  newCanvas.addEventListener('mousemove', function(e){ if(!drawing) return; e.preventDefault(); var p = getPos(e); nctx.beginPath(); nctx.moveTo(lastX, lastY); nctx.lineTo(p.x, p.y); nctx.stroke(); lastX = p.x; lastY = p.y; });
-  newCanvas.addEventListener('mouseup', end);
-  newCanvas.addEventListener('mouseleave', end);
-  newCanvas.addEventListener('touchstart', start, {passive:false});
-  newCanvas.addEventListener('touchmove', function(e){ if(!drawing) return; e.preventDefault(); var p = getPos(e); nctx.beginPath(); nctx.moveTo(lastX, lastY); nctx.lineTo(p.x, p.y); nctx.stroke(); lastX = p.x; lastY = p.y; }, {passive:false});
-  newCanvas.addEventListener('touchend', end);
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', move);
+  canvas.addEventListener('mouseup', end);
+  canvas.addEventListener('mouseleave', end);
+  canvas.addEventListener('touchstart', start, {passive:false});
+  canvas.addEventListener('touchmove', move, {passive:false});
+  canvas.addEventListener('touchend', end);
+  canvas.addEventListener('touchcancel', end);
 }
 
 function clearSupSig(){

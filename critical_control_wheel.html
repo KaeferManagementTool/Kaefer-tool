@@ -225,7 +225,7 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="hr np">
     <span id="mlbl"></span>
     <button class="hb" id="pb">&#8592; Prev</button><button class="hb" id="nb">Next &#8594;</button>
-    <button class="hb" id="sb">&#8635; Sync All</button><button class="hb" id="install-btn" style="display:none;background:#2e7d32;border-color:#2e7d32" onclick="installApp()">&#8659; Install App</button><button class="hb hb-or" onclick="openOv()">&#9881; Setup Sync</button>
+    <button class="hb" id="sb">&#8635; Sync All</button><button class="hb" id="install-btn" style="display:none;background:#2e7d32;border-color:#2e7d32" onclick="installApp()">&#8659; Install App</button><button class="hb" onclick="openSettings()">&#9881; Settings</button><button class="hb hb-or" onclick="openOv()">&#9881; Setup Sync</button>
   </div>
 </header>
 <div class="sbar"><div class="sd" id="sd"></div><span id="sm">Not connected</span></div>
@@ -902,6 +902,46 @@ if(localStorage.getItem('kaefer_setup_done')){
     <div class="mf"><label>Group</label><select id="ae-grp"><option value="OFFICE STAFF">Office Staff</option><option value="YARD STAFF">Yard Staff</option><option value="SCAFFOLDERS" selected>Scaffolders</option></select></div>
   </div>
   <div class="mft"><button class="ob" onclick="closeAddEmp()">Cancel</button><button class="rb" onclick="saveAddEmp()">&#10003; Add</button></div>
+</div></div>
+
+<!-- SETTINGS / SUPERVISOR SIGNATURES -->
+<div class="ml" id="settings-ml"><div class="mb" style="width:560px;max-width:95vw"><div class="mhd" style="background:#1a2a4a"><h3>Settings</h3><button class="mc" onclick="closeSettings()">&#215;</button></div>
+  <div class="mbd">
+    <h4 style="margin:0 0 8px 0;font-size:13px;color:#37474f">Supervisor Signatures</h4>
+    <p style="font-size:11px;color:#607d8b;margin-bottom:10px">Set up supervisor signatures here. When approving a leave request, you'll pick which supervisor is approving and their signature is auto-applied to the PDF.</p>
+    <div id="sup-list" style="margin-bottom:12px"></div>
+    <button type="button" class="ob" onclick="openSupAdd()" style="font-size:12px">&#43; Add Supervisor</button>
+  </div>
+  <div class="mft"><button class="rb" onclick="closeSettings()">Done</button></div>
+</div></div>
+
+<!-- ADD/EDIT SUPERVISOR -->
+<div class="ml" id="sup-edit-ml"><div class="mb" style="width:520px;max-width:95vw"><div class="mhd" style="background:#1a2a4a"><h3 id="sup-edit-title">Add Supervisor</h3><button class="mc" onclick="closeSupEdit()">&#215;</button></div>
+  <div class="mbd">
+    <div class="mf"><label>Supervisor Name</label><input type="text" id="sup-name" placeholder="e.g. Steven Middleton" style="width:100%;padding:7px 9px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+    <div class="mf" style="margin-top:8px">
+      <label>Signature</label>
+      <p style="font-size:11px;color:#607d8b;margin:4px 0 6px 0">Sign with your finger or mouse in the box below.</p>
+      <div style="position:relative;border:2px dashed #b0bec5;border-radius:6px;background:#fafafa;overflow:hidden">
+        <canvas id="sup-sig-pad" width="600" height="180" style="display:block;width:100%;height:180px;touch-action:none;background:#fafafa;cursor:crosshair"></canvas>
+        <div id="sup-sig-placeholder" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#b0bec5;font-size:13px;font-style:italic">Sign here</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px">
+        <button type="button" onclick="clearSupSig()" style="background:none;border:1px solid #b0bec5;color:#607d8b;padding:5px 12px;border-radius:5px;font-size:11px;font-family:inherit;cursor:pointer">&#8635; Clear</button>
+      </div>
+    </div>
+  </div>
+  <div class="mft"><button class="ob" onclick="closeSupEdit()">Cancel</button><button class="rb" onclick="saveSupEdit()">&#10003; Save</button></div>
+</div></div>
+
+<!-- APPROVE LEAVE - PICK SUPERVISOR -->
+<div class="ml" id="approve-pick-ml"><div class="mb" style="width:480px;max-width:95vw"><div class="mhd" style="background:#1a2a4a"><h3>Approve Leave Request</h3><button class="mc" onclick="closeApprovePick()">&#215;</button></div>
+  <div class="mbd">
+    <p style="font-size:12px;color:#607d8b;margin-bottom:10px">Select which supervisor is approving this request. Their signature will be applied to the PDF.</p>
+    <div id="approve-pick-list"></div>
+    <p style="font-size:11px;color:#607d8b;margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">No supervisors set up yet? <a href="#" onclick="closeApprovePick();openSettings();return false;" style="color:#1565c0">Add one in Settings</a>.</p>
+  </div>
+  <div class="mft"><button class="ob" onclick="closeApprovePick()">Cancel</button></div>
 </div></div>
 
 <!-- CELL EDIT -->
@@ -2472,6 +2512,8 @@ function loadSubmissions(){
   }
   document.getElementById('sub-loading').style.display='';
   document.getElementById('sub-empty').style.display='none';
+  // Also pull supervisors from server (silent best-effort)
+  loadSupervisorsFromServer();
   fetch(u+'?action=load_submissions&t='+Date.now(),{redirect:'follow'})
     .then(function(r){return r.json();})
     .then(function(j){
@@ -2485,6 +2527,27 @@ function loadSubmissions(){
       var emp = document.getElementById('sub-empty');
       if(emp){emp.style.display='';emp.innerHTML='<div style="font-size:40px;margin-bottom:10px">&#9888;</div><p style="font-weight:700;color:#c62828">Failed to load submissions</p><p style="font-size:12px;margin-top:6px;color:#607d8b">'+err.message+'</p>';}
     });
+}
+
+// Pull supervisor list from server, merging with local
+function loadSupervisorsFromServer(){
+  try{
+    var u = getURL();
+    if(!u) return;
+    fetch(u+'?action=load_supervisors&t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(j && j.ok && Array.isArray(j.data)){
+          // Server data wins (treat as authoritative)
+          var local = getSupervisors();
+          if(JSON.stringify(local) !== JSON.stringify(j.data)){
+            try { localStorage.setItem('kaefer_supervisors', JSON.stringify(j.data)); }
+            catch(e) {}
+          }
+        }
+      })
+      .catch(function(){});
+  } catch(e){}
 }
 
 function renderSubmissions(){
@@ -2537,7 +2600,7 @@ function renderSubmissions(){
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-weight:700;font-size:14px;color:#1a1a1a">'+(s.name||'Unknown')+'</span><span style="font-size:10px;color:#607d8b">'+(s.submitted||'')+'</span></div>';
     
     if(s.type==='leave'){
-      html += '<div style="font-size:12px;color:#37474f;line-height:1.7"><b>Leave Type:</b> '+(s.leaveType||'')+' &nbsp;|&nbsp; <b>From:</b> '+(s.firstDay||'')+' &nbsp;<b>To:</b> '+(s.lastDay||'')+' &nbsp;|&nbsp; <b>Days:</b> '+(s.workingDays||'')+'</div>';
+      html += '<div style="font-size:12px;color:#37474f;line-height:1.7"><b>Leave Type:</b> '+(s.leaveType||'')+' &nbsp;|&nbsp; <b>From:</b> '+fmtDateAU(s.firstDay)+' &nbsp;<b>To:</b> '+fmtDateAU(s.lastDay)+' &nbsp;|&nbsp; <b>Days:</b> '+(s.workingDays||'')+'</div>';
       if(s.position) html += '<div style="font-size:11px;color:#607d8b;margin-top:3px">'+(s.position||'')+(s.site?' &middot; '+s.site:'')+'</div>';
     } else if(s.type==='ppe'){
       html += '<div style="font-size:12px;color:#37474f;line-height:1.6"><b>Items:</b> '+(s.items||'')+'</div>';
@@ -2549,6 +2612,7 @@ function renderSubmissions(){
     
     if(s.notes) html += '<div style="font-size:11px;color:#607d8b;margin-top:6px;font-style:italic;background:#f8f8f8;padding:6px 9px;border-radius:4px">"'+s.notes+'"</div>';
     if(s.signature) html += '<div style="margin-top:8px"><div style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Signature</div><img src="'+s.signature+'" style="max-width:240px;max-height:80px;background:#fff;border:1px solid #e0e0e0;border-radius:4px;padding:4px"></div>';
+    if(s.approverSignature) html += '<div style="margin-top:8px;padding:8px;background:#e8f5e9;border-left:3px solid #2e7d32;border-radius:4px"><div style="font-size:10px;font-weight:700;color:#2e7d32;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">&#10003; Approved by '+escHtml(s.approvedBy||'')+(s.approvedDate?' &middot; '+escHtml(s.approvedDate):'')+'</div><img src="'+s.approverSignature+'" style="max-width:200px;max-height:60px;background:#fff;border:1px solid #c8e6c9;border-radius:4px;padding:3px"></div>';
     
     html += '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" class="np">';
     html += '<button class="rb" style="font-size:11px;padding:6px 12px" onclick="genPdfEmail(\''+escId(s.id)+'\')">&#128424; Generate PDF</button>';
@@ -2576,6 +2640,14 @@ function findSubmission(id){
 }
 
 function markStatus(id, status){
+  // For Approved status on leave, show supervisor picker first
+  if(status === 'Approved'){
+    var s = findSubmission(id); if(!s){alert('Not found');return;}
+    if(s.type === 'leave'){
+      openApprovePick(id);
+      return;
+    }
+  }
   var s = findSubmission(id); if(!s){alert('Not found');return;}
   if(!confirm('Mark as '+status+'?'))return;
   var u = getURL(); if(!u){alert('Not connected.');return;}
@@ -2588,6 +2660,266 @@ function markStatus(id, status){
       s.status = status;
       renderSubmissions();
       setSS('ok','Status updated');
+    })
+    .catch(function(err){setSS('er','Update failed: '+err.message);});
+}
+
+// ── SUPERVISOR SIGNATURES ─────────────────────────────────────
+// Stored in localStorage (kaefer_supervisors) and synced to Sheet via Apps Script.
+function getSupervisors(){
+  try { return JSON.parse(localStorage.getItem('kaefer_supervisors') || '[]'); }
+  catch(e) { return []; }
+}
+function saveSupervisors(list){
+  try { localStorage.setItem('kaefer_supervisors', JSON.stringify(list)); }
+  catch(e) {}
+  // Best-effort sync to server (silent if fails)
+  try{
+    var u = getURL();
+    if(u){
+      var payload = JSON.stringify({action:'save_supervisors', data:list});
+      fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload}).catch(function(){});
+    }
+  }catch(e){}
+}
+
+function openSettings(){
+  renderSupervisorList();
+  document.getElementById('settings-ml').classList.add('on');
+}
+function closeSettings(){ document.getElementById('settings-ml').classList.remove('on'); }
+
+function renderSupervisorList(){
+  var sups = getSupervisors();
+  var list = document.getElementById('sup-list');
+  if(!list) return;
+  if(!sups.length){
+    list.innerHTML = '<p style="font-size:12px;color:#607d8b;font-style:italic;padding:12px;background:#f8f8f8;border-radius:4px;text-align:center">No supervisors added yet. Click "Add Supervisor" below to set one up.</p>';
+    return;
+  }
+  var html = '';
+  sups.forEach(function(s, i){
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:#fafafa;border:1px solid #e0e0e0;border-radius:6px;margin-bottom:6px">';
+    html += '<div style="flex:1"><div style="font-weight:700;font-size:13px;color:#1a2a4a">'+escHtml(s.name||'')+'</div>';
+    if(s.signature) html += '<img src="'+s.signature+'" style="max-height:42px;max-width:160px;background:#fff;border:1px solid #e0e0e0;border-radius:3px;padding:2px;margin-top:4px">';
+    else html += '<div style="font-size:11px;color:#c62828;margin-top:4px">No signature</div>';
+    html += '</div>';
+    html += '<button type="button" class="ob" style="font-size:11px;padding:4px 9px" onclick="openSupEdit('+i+')">Edit</button>';
+    html += '<button type="button" style="font-size:11px;padding:4px 9px;background:none;border:1px solid #c62828;color:#c62828;border-radius:4px;cursor:pointer;font-family:inherit" onclick="deleteSupervisor('+i+')">Remove</button>';
+    html += '</div>';
+  });
+  list.innerHTML = html;
+}
+
+var SUP_EDIT_INDEX = -1;
+var supSigPad = null;
+var supSigHasDrawing = false;
+
+function openSupAdd(){
+  SUP_EDIT_INDEX = -1;
+  document.getElementById('sup-edit-title').textContent = 'Add Supervisor';
+  document.getElementById('sup-name').value = '';
+  document.getElementById('sup-edit-ml').classList.add('on');
+  setTimeout(initSupSigPad, 100);
+}
+
+function openSupEdit(i){
+  var sups = getSupervisors();
+  if(i < 0 || i >= sups.length){ openSupAdd(); return; }
+  SUP_EDIT_INDEX = i;
+  document.getElementById('sup-edit-title').textContent = 'Edit Supervisor';
+  document.getElementById('sup-name').value = sups[i].name || '';
+  document.getElementById('sup-edit-ml').classList.add('on');
+  setTimeout(function(){
+    initSupSigPad();
+    // Pre-load existing signature
+    if(sups[i].signature){
+      var canvas = document.getElementById('sup-sig-pad');
+      var img = new Image();
+      img.onload = function(){
+        var ctx = canvas.getContext('2d');
+        var rect = canvas.getBoundingClientRect();
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+        supSigHasDrawing = true;
+        var ph = document.getElementById('sup-sig-placeholder');
+        if(ph) ph.style.display = 'none';
+      };
+      img.src = sups[i].signature;
+    }
+  }, 100);
+}
+
+function closeSupEdit(){ document.getElementById('sup-edit-ml').classList.remove('on'); }
+
+function initSupSigPad(){
+  var canvas = document.getElementById('sup-sig-pad');
+  if(!canvas) return;
+  // Set canvas internal resolution to match displayed size
+  var rect = canvas.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = '#0d1a2e';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  supSigHasDrawing = false;
+  var ph = document.getElementById('sup-sig-placeholder');
+  if(ph) ph.style.display = '';
+  
+  var drawing = false, lastX = 0, lastY = 0;
+  function getPos(e){
+    var r = canvas.getBoundingClientRect();
+    var cx, cy;
+    if(e.touches && e.touches.length){ cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
+    else { cx = e.clientX; cy = e.clientY; }
+    return { x: cx - r.left, y: cy - r.top };
+  }
+  function start(e){ e.preventDefault(); drawing = true; var p = getPos(e); lastX = p.x; lastY = p.y; supSigHasDrawing = true; var ph2 = document.getElementById('sup-sig-placeholder'); if(ph2) ph2.style.display = 'none'; }
+  function move(e){ if(!drawing) return; e.preventDefault(); var p = getPos(e); ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke(); lastX = p.x; lastY = p.y; }
+  function end(){ drawing = false; }
+  
+  // Remove old listeners by cloning the canvas
+  var newCanvas = canvas.cloneNode(true);
+  canvas.parentNode.replaceChild(newCanvas, canvas);
+  // Re-set context after clone
+  newCanvas.width = rect.width * dpr;
+  newCanvas.height = rect.height * dpr;
+  var nctx = newCanvas.getContext('2d');
+  nctx.scale(dpr, dpr);
+  nctx.lineCap = 'round'; nctx.lineJoin = 'round'; nctx.lineWidth = 2.2; nctx.strokeStyle = '#0d1a2e';
+  
+  newCanvas.addEventListener('mousedown', start);
+  newCanvas.addEventListener('mousemove', function(e){ if(!drawing) return; e.preventDefault(); var p = getPos(e); nctx.beginPath(); nctx.moveTo(lastX, lastY); nctx.lineTo(p.x, p.y); nctx.stroke(); lastX = p.x; lastY = p.y; });
+  newCanvas.addEventListener('mouseup', end);
+  newCanvas.addEventListener('mouseleave', end);
+  newCanvas.addEventListener('touchstart', start, {passive:false});
+  newCanvas.addEventListener('touchmove', function(e){ if(!drawing) return; e.preventDefault(); var p = getPos(e); nctx.beginPath(); nctx.moveTo(lastX, lastY); nctx.lineTo(p.x, p.y); nctx.stroke(); lastX = p.x; lastY = p.y; }, {passive:false});
+  newCanvas.addEventListener('touchend', end);
+}
+
+function clearSupSig(){
+  var canvas = document.getElementById('sup-sig-pad');
+  if(!canvas) return;
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  supSigHasDrawing = false;
+  var ph = document.getElementById('sup-sig-placeholder');
+  if(ph) ph.style.display = '';
+}
+
+function getSupSignatureDataURL(){
+  var canvas = document.getElementById('sup-sig-pad');
+  if(!canvas) return '';
+  if(!supSigHasDrawing) return '';
+  // Trim whitespace and compress to JPEG
+  try {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    var data = ctx.getImageData(0, 0, w, h).data;
+    var minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+    for(var y=0;y<h;y++)for(var x=0;x<w;x++){var a=data[(y*w+x)*4+3];if(a>0){if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;found=true;}}
+    if(!found) return '';
+    var pad = 8;
+    minX = Math.max(0, minX-pad); minY = Math.max(0, minY-pad);
+    maxX = Math.min(w-1, maxX+pad); maxY = Math.min(h-1, maxY+pad);
+    var srcW = maxX - minX, srcH = maxY - minY;
+    var MAX_W = 360, MAX_H = 120;
+    var scale = Math.min(MAX_W/srcW, MAX_H/srcH, 1);
+    var outW = Math.round(srcW*scale), outH = Math.round(srcH*scale);
+    var tmp = document.createElement('canvas');
+    tmp.width = outW; tmp.height = outH;
+    var tctx = tmp.getContext('2d');
+    tctx.fillStyle = '#fff'; tctx.fillRect(0,0,outW,outH);
+    tctx.drawImage(canvas, minX, minY, srcW, srcH, 0, 0, outW, outH);
+    return tmp.toDataURL('image/jpeg', 0.7);
+  } catch(e) { return ''; }
+}
+
+function saveSupEdit(){
+  var name = document.getElementById('sup-name').value.trim();
+  if(!name){ alert('Enter a supervisor name.'); return; }
+  var sig = getSupSignatureDataURL();
+  if(!sig){ alert('Please draw a signature.'); return; }
+  var sups = getSupervisors();
+  if(SUP_EDIT_INDEX >= 0 && SUP_EDIT_INDEX < sups.length){
+    sups[SUP_EDIT_INDEX].name = name;
+    sups[SUP_EDIT_INDEX].signature = sig;
+  } else {
+    sups.push({name:name, signature:sig});
+  }
+  saveSupervisors(sups);
+  closeSupEdit();
+  renderSupervisorList();
+}
+
+function deleteSupervisor(i){
+  var sups = getSupervisors();
+  if(i < 0 || i >= sups.length) return;
+  if(!confirm('Remove supervisor "'+sups[i].name+'"?')) return;
+  sups.splice(i, 1);
+  saveSupervisors(sups);
+  renderSupervisorList();
+}
+
+// ── APPROVE WITH SUPERVISOR PICKER ────────────────────────────
+var APPROVE_PENDING_ID = '';
+function openApprovePick(submissionId){
+  APPROVE_PENDING_ID = submissionId;
+  var sups = getSupervisors();
+  var list = document.getElementById('approve-pick-list');
+  if(!sups.length){
+    list.innerHTML = '<p style="color:#c62828;text-align:center;padding:14px;background:#ffebee;border-radius:4px;font-size:13px">No supervisors set up yet. Add at least one in Settings.</p>';
+  } else {
+    var html = '';
+    sups.forEach(function(s, i){
+      html += '<button type="button" onclick="confirmApprove('+i+')" style="display:block;width:100%;text-align:left;padding:12px;background:#fff;border:1.5px solid #e0e0e0;border-radius:6px;cursor:pointer;font-family:inherit;margin-bottom:6px;transition:background .15s">';
+      html += '<div style="display:flex;align-items:center;gap:12px">';
+      html += '<div style="flex:1"><div style="font-weight:700;color:#1a2a4a">'+escHtml(s.name||'')+'</div>';
+      if(s.signature) html += '<img src="'+s.signature+'" style="max-height:38px;max-width:160px;background:#fff;border:1px solid #e0e0e0;border-radius:3px;padding:2px;margin-top:4px">';
+      html += '</div>';
+      html += '<div style="color:#1565c0;font-weight:700;font-size:13px">Approve as &rarr;</div>';
+      html += '</div></button>';
+    });
+    list.innerHTML = html;
+  }
+  document.getElementById('approve-pick-ml').classList.add('on');
+}
+function closeApprovePick(){ document.getElementById('approve-pick-ml').classList.remove('on'); }
+
+function confirmApprove(supIndex){
+  var sups = getSupervisors();
+  if(supIndex < 0 || supIndex >= sups.length) return;
+  var sup = sups[supIndex];
+  var s = findSubmission(APPROVE_PENDING_ID); if(!s){closeApprovePick();return;}
+  var u = getURL(); if(!u){alert('Not connected.');closeApprovePick();return;}
+  
+  // Save the approval signature locally on the submission for PDF generation
+  s.approvedBy = sup.name;
+  s.approverSignature = sup.signature;
+  s.approvedDate = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});
+  s.status = 'Approved by ' + sup.name;
+  
+  setSS('bz','Updating status...');
+  closeApprovePick();
+  
+  var payload = JSON.stringify({
+    action:'update_submission_status',
+    sheetName:s.sheetName, rowNum:s.rowNum,
+    status: s.status,
+    approvedBy: sup.name,
+    approverSignature: sup.signature,
+    approvedDate: s.approvedDate
+  });
+  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j.ok)throw new Error(j.error||'Failed');
+      renderSubmissions();
+      setSS('ok','Approved by '+sup.name);
     })
     .catch(function(err){setSS('er','Update failed: '+err.message);});
 }
@@ -2767,13 +3099,13 @@ function buildLeaveFormHTML(s){
     
     // Recommendation/Approval
     +'<div class="sec-hdr">RECOMMENDATION / APPROVAL</div> <span style="font-style:italic">(Please tick)</span>'
-    +'<p style="margin:4mm 0 2mm 0"><span class="cb"></span> &nbsp; This application for <span class="field" style="min-width:50px">&nbsp;'+days+'&nbsp;</span> days is approved/recommended.</p>'
+    +'<p style="margin:4mm 0 2mm 0"><span class="cb"'+(s.approvedBy?' style="background:#000"':'')+'></span> &nbsp; This application for <span class="field" style="min-width:50px">&nbsp;'+days+'&nbsp;</span> days is approved/recommended.</p>'
     +'<p style="margin:2mm 0 4mm 0"><span class="cb"></span> &nbsp; This application for <span class="field" style="min-width:50px">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> days is not approved/recommended.</p>'
     +'<table class="frm"><tr>'
     +'<td class="lbl" style="width:30%">Manager/Supervisor</td>'
-    +'<td class="val" style="width:40%">&nbsp;</td>'
+    +'<td class="val" style="width:40%;height:18mm;text-align:center;padding:2mm">'+(s.approverSignature?'<img src="'+s.approverSignature+'" style="max-height:14mm;max-width:65mm"><div style="font-size:9pt;color:#1a2a4a;margin-top:1mm">'+escHtml(s.approvedBy||'')+'</div>':'&nbsp;')+'</td>'
     +'<td class="lbl" style="width:10%">Date:</td>'
-    +'<td class="val" style="width:20%">&nbsp;</td>'
+    +'<td class="val" style="width:20%;text-align:center">'+escHtml(s.approvedDate||'')+'</td>'
     +'</tr></table>'
     
     +'<p class="italic">Any comment/additional information should be recorded on the reverse side of this form.</p>'

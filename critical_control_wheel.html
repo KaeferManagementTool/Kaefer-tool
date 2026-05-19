@@ -5963,6 +5963,589 @@ SCF_AREA_COLORS['HYDRATE'] = '#ad1457';   // deep magenta - contrasts with the e
   rebuildBubbles();
 })();
   
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 8
+// 1) Long-term flag (boolean per scaffold)
+// 2) Stage 1/2 for DIGESTION, HYDRATE, CLARIFICATION
+// 3) Area picker modal expanded with stage + long-term controls
+// 4) Long-Term Total bubble added; staged areas show S1/S2 split
+// 5) Edit modal: stage select + long-term checkbox
+// 6) Detail view + PDF show stage/long-term
+// Paste this entire block at the bottom of the existing Stage 7
+// scaffold code, before the closing script tag.
+// ============================================================
+
+// Areas that require a stage
+var SCF_STAGED_AREAS = ['DIGESTION', 'HYDRATE', 'CLARIFICATION'];
+
+// State for what the area picker has currently selected
+var SCF_PICKER_AREA = '';
+var SCF_PICKER_STAGE = '';
+var SCF_PICKER_LONGTERM = false;
+
+// ============================================================
+// PART 1: Rebuild the area picker modal with stage + long-term
+// ============================================================
+(function(){
+  var ml = document.getElementById('scf-area-picker-ml');
+  if(!ml) return;
+  // Replace inner HTML with a richer layout
+  ml.innerHTML =
+      '<div class="mb" style="max-width:520px">'
+    +   '<div class="mhd" style="background:#1565c0">'
+    +     '<h3 id="scf-ap-title" style="color:#fff">Select Area</h3>'
+    +     '<button class="mcl" onclick="scfCloseAreaPicker()">&times;</button>'
+    +   '</div>'
+    +   '<div class="mc">'
+    +     '<p id="scf-ap-msg" style="margin:0 0 8px;font-size:13px;color:#555">Pick the area this scaffold belongs to:</p>'
+    +     '<div id="scf-ap-buttons" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>'
+    +     '<div id="scf-ap-stage-wrap" style="margin-top:14px;display:none">'
+    +       '<div style="font-size:12px;color:#555;font-weight:700;margin-bottom:6px">Stage (required)</div>'
+    +       '<div style="display:flex;gap:8px">'
+    +         '<button id="scf-ap-stage-1" onclick="scfPickStage(\'1\')" style="flex:1;padding:12px;background:#fff;border:2px solid #1565c0;color:#1565c0;border-radius:4px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">STAGE 1</button>'
+    +         '<button id="scf-ap-stage-2" onclick="scfPickStage(\'2\')" style="flex:1;padding:12px;background:#fff;border:2px solid #1565c0;color:#1565c0;border-radius:4px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">STAGE 2</button>'
+    +       '</div>'
+    +     '</div>'
+    +     '<div style="margin-top:14px;padding:10px;background:#fff8e1;border-radius:4px;border:1px solid #ffe082">'
+    +       '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;color:#5d4037">'
+    +         '<input type="checkbox" id="scf-ap-longterm" style="width:18px;height:18px;cursor:pointer" onchange="SCF_PICKER_LONGTERM = this.checked">'
+    +         '<span>Mark as long-term scaffold</span>'
+    +       '</label>'
+    +     '</div>'
+    +     '<div style="margin-top:14px;display:flex;gap:8px">'
+    +       '<button class="ob" style="flex:1" onclick="scfCloseAreaPicker()">Cancel</button>'
+    +       '<button class="rb" id="scf-ap-confirm" style="flex:2;background:#2e7d32;opacity:0.5;cursor:not-allowed" disabled onclick="scfConfirmAreaPicker()">Confirm</button>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>';
+})();
+
+// Replace scfOpenAreaPicker to use the new layout
+scfOpenAreaPicker = function(title, msg, callback){
+  SCF_AREA_PICKER_CALLBACK = callback;
+  SCF_PICKER_AREA = '';
+  SCF_PICKER_STAGE = '';
+  SCF_PICKER_LONGTERM = false;
+  document.getElementById('scf-ap-title').textContent = title || 'Select Area';
+  document.getElementById('scf-ap-msg').textContent = msg || 'Pick the area:';
+  document.getElementById('scf-ap-stage-wrap').style.display = 'none';
+  document.getElementById('scf-ap-longterm').checked = false;
+  document.getElementById('scf-ap-confirm').disabled = true;
+  document.getElementById('scf-ap-confirm').style.opacity = '0.5';
+  document.getElementById('scf-ap-confirm').style.cursor = 'not-allowed';
+
+  // Render area buttons - clicking sets state, doesn't auto-submit
+  var box = document.getElementById('scf-ap-buttons');
+  var html = '';
+  SCF_AREAS.forEach(function(area){
+    var color = SCF_AREA_COLORS[area] || '#607d8b';
+    html += '<button id="scf-ap-a-'+scfAreaKey(area)+'" onclick="scfPickerSelectArea(\''+area.replace(/\'/g,"\\\'")+'\')" '
+      + 'style="padding:14px 8px;background:#fff;color:'+color+';border:2px solid '+color+';border-radius:4px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'
+      + scfEscHtml(area) + '</button>';
+  });
+  box.innerHTML = html;
+
+  document.getElementById('scf-area-picker-ml').classList.add('on');
+};
+
+// User clicks an area button
+function scfPickerSelectArea(area){
+  SCF_PICKER_AREA = area;
+  SCF_PICKER_STAGE = '';
+  // Reset all area button styles
+  SCF_AREAS.forEach(function(a){
+    var btn = document.getElementById('scf-ap-a-'+scfAreaKey(a));
+    if(!btn) return;
+    var c = SCF_AREA_COLORS[a] || '#607d8b';
+    if(a === area){
+      btn.style.background = c;
+      btn.style.color = '#fff';
+    } else {
+      btn.style.background = '#fff';
+      btn.style.color = c;
+    }
+  });
+
+  // Show stage picker if needed
+  var stageWrap = document.getElementById('scf-ap-stage-wrap');
+  var isStaged = SCF_STAGED_AREAS.indexOf(area.toUpperCase()) !== -1;
+  stageWrap.style.display = isStaged ? 'block' : 'none';
+  // Reset stage buttons
+  ['1','2'].forEach(function(s){
+    var b = document.getElementById('scf-ap-stage-'+s);
+    if(b){ b.style.background = '#fff'; b.style.color = '#1565c0'; }
+  });
+  scfUpdatePickerConfirm();
+}
+
+// User picks Stage 1 or 2
+function scfPickStage(stage){
+  SCF_PICKER_STAGE = stage;
+  ['1','2'].forEach(function(s){
+    var b = document.getElementById('scf-ap-stage-'+s);
+    if(!b) return;
+    if(s === stage){
+      b.style.background = '#1565c0';
+      b.style.color = '#fff';
+    } else {
+      b.style.background = '#fff';
+      b.style.color = '#1565c0';
+    }
+  });
+  scfUpdatePickerConfirm();
+}
+
+// Enable/disable confirm button based on selection completeness
+function scfUpdatePickerConfirm(){
+  var btn = document.getElementById('scf-ap-confirm');
+  if(!btn) return;
+  var ok = !!SCF_PICKER_AREA;
+  if(ok && SCF_STAGED_AREAS.indexOf(SCF_PICKER_AREA.toUpperCase()) !== -1){
+    ok = !!SCF_PICKER_STAGE;
+  }
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '1' : '0.5';
+  btn.style.cursor = ok ? 'pointer' : 'not-allowed';
+}
+
+// User clicks Confirm
+function scfConfirmAreaPicker(){
+  var cb = SCF_AREA_PICKER_CALLBACK;
+  var payload = {
+    area: SCF_PICKER_AREA,
+    stage: SCF_PICKER_STAGE,
+    longTerm: SCF_PICKER_LONGTERM
+  };
+  scfCloseAreaPicker();
+  if(cb) cb(payload);
+}
+
+// ============================================================
+// PART 2: Update approve flow to send stage + longTerm
+// ============================================================
+// Re-wrap scfConfirmAction with new signature (callback now receives an object)
+var _stage8OrigConfirmAction = scfConfirmAction;
+scfConfirmAction = function(action){
+  if(action !== 'approve'){
+    _stage8OrigConfirmAction.apply(this, arguments);
+    return;
+  }
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var scaffold = SCF_OPEN_SCAFFOLD.scaffold;
+  scfOpenAreaPicker('Approve Scaffold', 'Set area / stage / long-term for ' + scaffold.tag + ':', function(picked){
+    setSS('bz', 'Approving for ' + picked.area + '...');
+    var payload = JSON.stringify({
+      action: 'scaffold_action',
+      subAction: 'approve',
+      id: scaffold.id,
+      fromTab: SCF_OPEN_SCAFFOLD.tab,
+      area: picked.area,
+      stage: picked.stage || '',
+      longTerm: picked.longTerm === true
+    });
+    fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j.ok) throw new Error(j.error || 'Approve failed');
+        scfCloseDetail();
+        setSS('ok','Approved');
+        scfLoad();
+      })
+      .catch(function(err){
+        setSS('er','Approve failed: '+err.message);
+        alert('Approve failed: '+err.message);
+      });
+  });
+};
+
+// ============================================================
+// PART 3: Rebuild bubbles - add Long-Term Total + S1/S2 splits
+// ============================================================
+(function(){
+  function rebuildStage8(){
+    var container = document.getElementById('scf-stat-cards');
+    if(!container){ setTimeout(rebuildStage8, 300); return; }
+    container.className = '';
+    container.style.cssText =
+      'display:flex;flex-wrap:wrap;gap:12px;justify-content:center;'
+      + 'margin:0 0 14px;padding:6px 0';
+
+    function bubble(opts){
+      var color = opts.color;
+      var border = '3px solid ' + (opts.borderColor || color);
+      var labelBg = opts.labelBg || color;
+      var width = opts.size || '150px';
+      var height = opts.size || '150px';
+      var valSize = opts.valueSize || '20px';
+      var valColor = opts.valueColor || color;
+      var splitHtml = '';
+      if(opts.split){
+        splitHtml = '<div style="margin-top:3px;font-size:9.5px;color:#555;line-height:1.2;font-weight:600">'
+          + 'S1 <span id="' + opts.valueId + '-s1" style="color:' + color + '">0.0 t</span>'
+          + ' &middot; '
+          + 'S2 <span id="' + opts.valueId + '-s2" style="color:' + color + '">0.0 t</span>'
+          + '</div>';
+      }
+      return ''
+        + '<div style="display:flex;flex-direction:column;align-items:center;'
+        +    'justify-content:center;width:'+width+';height:'+height+';'
+        +    'border-radius:50%;background:#fff;border:'+border+';'
+        +    'box-shadow:0 3px 10px rgba(0,0,0,0.08);position:relative;'
+        +    'transition:transform 0.15s ease" '
+        +    'onmouseover="this.style.transform=\'scale(1.04)\'" '
+        +    'onmouseout="this.style.transform=\'scale(1)\'">'
+        + '  <div style="position:absolute;top:-10px;background:'+labelBg+';color:#fff;'
+        +    'padding:3px 10px;border-radius:12px;font-size:10px;font-weight:800;'
+        +    'letter-spacing:0.5px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.15)" '
+        +    'class="sl2">'+scfEscHtml(opts.label)+'</div>'
+        + '  <div style="font-size:'+valSize+';font-weight:800;color:'+valColor+';'
+        +    'margin-top:4px;line-height:1" id="'+opts.valueId+'">0.000 t</div>'
+        + '  <div style="font-size:10px;color:#888;margin-top:4px">'
+        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        +    splitHtml
+        + '</div>';
+    }
+
+    var html = '';
+    // Total Active - dark
+    html += bubble({
+      label: 'TOTAL ACTIVE',
+      color: '#1a1a1a',
+      size: '170px',
+      valueSize: '24px',
+      valueId: 'scf-stat-total',
+      itemsId: 'scf-stat-total-items'
+    });
+    // Long-Term Total - yellow/amber so it stands out
+    html += bubble({
+      label: 'LONG-TERM',
+      color: '#f57f17',
+      size: '170px',
+      valueSize: '24px',
+      valueId: 'scf-stat-longterm',
+      itemsId: 'scf-stat-longterm-items'
+    });
+    // Each area
+    SCF_AREAS.forEach(function(area){
+      var color = SCF_AREA_COLORS[area] || '#607d8b';
+      var key = scfAreaKey(area);
+      var split = SCF_STAGED_AREAS.indexOf(area.toUpperCase()) !== -1;
+      html += bubble({
+        label: area,
+        color: color,
+        valueId: 'scf-stat-'+key,
+        itemsId: 'scf-stat-'+key+'-items',
+        split: split
+      });
+    });
+    container.innerHTML = html;
+    if(typeof scfUpdateStats === 'function') scfUpdateStats();
+  }
+  rebuildStage8();
+})();
+
+// ============================================================
+// PART 4: Update scfUpdateStats - compute long-term + per-stage totals
+// ============================================================
+scfUpdateStats = function(){
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+
+  var active = SCF_CACHE['active'] || [];
+  if(areaPrefix){
+    active = active.filter(function(s){
+      return (s.location || '').toLowerCase().indexOf(areaPrefix) === 0;
+    });
+  }
+
+  // Per-area buckets with stage split
+  var buckets = {};
+  SCF_AREAS.forEach(function(a){
+    buckets[a] = { kg: 0, items: 0, s1: 0, s2: 0 };
+  });
+  var totalKg = 0, totalItems = 0;
+  var ltKg = 0, ltItems = 0;
+
+  active.forEach(function(s){
+    var kg = s.totalWeightKg || 0;
+    var items = s.totalItems || 0;
+    totalKg += kg; totalItems += items;
+    if(s.longTerm){ ltKg += kg; ltItems += items; }
+    if(s.area && buckets[s.area]){
+      buckets[s.area].kg += kg;
+      buckets[s.area].items += items;
+      if(s.stage === '1') buckets[s.area].s1 += kg;
+      else if(s.stage === '2') buckets[s.area].s2 += kg;
+    }
+  });
+
+  // Update Total Active
+  var totEl = document.getElementById('scf-stat-total');
+  var totItemsEl = document.getElementById('scf-stat-total-items');
+  if(totEl) totEl.textContent = (totalKg/1000).toFixed(3) + ' t';
+  if(totItemsEl) totItemsEl.textContent = totalItems;
+
+  // Update Long-Term
+  var ltEl = document.getElementById('scf-stat-longterm');
+  var ltItemsEl = document.getElementById('scf-stat-longterm-items');
+  if(ltEl) ltEl.textContent = (ltKg/1000).toFixed(3) + ' t';
+  if(ltItemsEl) ltItemsEl.textContent = ltItems;
+
+  // Update each area card (with stage split)
+  SCF_AREAS.forEach(function(area){
+    var key = scfAreaKey(area);
+    var b = buckets[area];
+    var el = document.getElementById('scf-stat-'+key);
+    var itemsEl = document.getElementById('scf-stat-'+key+'-items');
+    if(el) el.textContent = (b.kg / 1000).toFixed(3) + ' t';
+    if(itemsEl) itemsEl.textContent = b.items;
+    var s1 = document.getElementById('scf-stat-'+key+'-s1');
+    var s2 = document.getElementById('scf-stat-'+key+'-s2');
+    if(s1) s1.textContent = (b.s1 / 1000).toFixed(1) + ' t';
+    if(s2) s2.textContent = (b.s2 / 1000).toFixed(1) + ' t';
+  });
+
+  // Filter indicator
+  var cards = document.getElementById('scf-stat-cards');
+  if(cards && areaPrefix){
+    var labels = cards.querySelectorAll('.sl2');
+    labels.forEach(function(lbl){
+      var t = lbl.textContent;
+      if(t.indexOf('[') === -1){
+        lbl.innerHTML = scfEscHtml(t) + ' <span style="color:#cc0000;font-size:9px;font-weight:700">[' + areaPrefix.toUpperCase() + '*]</span>';
+      }
+    });
+  }
+};
+
+// ============================================================
+// PART 5: Add Stage + Long-Term controls to the edit modal
+// ============================================================
+(function(){
+  function inject(){
+    var modal = document.getElementById('scf-edit-ml');
+    if(!modal){ setTimeout(inject, 300); return; }
+    if(document.getElementById('scf-e-stage')) return;
+    var areaSelect = document.getElementById('scf-e-area');
+    if(!areaSelect){ setTimeout(inject, 300); return; }
+    var areaWrapper = areaSelect.closest('.mf');
+    if(!areaWrapper) return;
+
+    // Stage select
+    var stageWrapper = document.createElement('div');
+    stageWrapper.className = 'mf';
+    stageWrapper.innerHTML = '<label>Stage <span id="scf-e-stage-hint" style="color:#bbb;font-weight:400">(only for Digestion, Hydrate, Clarification)</span></label>'
+      + '<select id="scf-e-stage" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit;background:#fff">'
+      + '<option value="">— none —</option>'
+      + '<option value="1">Stage 1</option>'
+      + '<option value="2">Stage 2</option>'
+      + '</select>';
+    areaWrapper.parentNode.insertBefore(stageWrapper, areaWrapper.nextSibling);
+
+    // Long-term checkbox
+    var ltWrapper = document.createElement('div');
+    ltWrapper.className = 'mf';
+    ltWrapper.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 10px;background:#fff8e1;border-radius:4px;border:1px solid #ffe082">'
+      + '<input type="checkbox" id="scf-e-longterm" style="width:18px;height:18px;cursor:pointer">'
+      + '<span style="font-weight:600;color:#5d4037">Long-term scaffold</span>'
+      + '</label>';
+    stageWrapper.parentNode.insertBefore(ltWrapper, stageWrapper.nextSibling);
+
+    // When area changes, gray out / un-gray out the stage select
+    function refreshStageEnable(){
+      var sel = document.getElementById('scf-e-stage');
+      var hint = document.getElementById('scf-e-stage-hint');
+      if(!sel) return;
+      var areaVal = (areaSelect.value || '').toUpperCase();
+      var isStaged = SCF_STAGED_AREAS.indexOf(areaVal) !== -1;
+      sel.disabled = !isStaged;
+      sel.style.background = isStaged ? '#fff' : '#f5f5f5';
+      sel.style.color = isStaged ? '#000' : '#999';
+      if(hint){
+        hint.style.color = isStaged ? '#cc0000' : '#bbb';
+        hint.textContent = isStaged ? '(required for this area)' : '(only for Digestion, Hydrate, Clarification)';
+      }
+      if(!isStaged) sel.value = '';
+    }
+    areaSelect.addEventListener('change', refreshStageEnable);
+  }
+  inject();
+})();
+
+// Populate stage + long-term when edit modal opens
+var _stage8OrigOpenEdit = scfOpenEdit;
+scfOpenEdit = function(){
+  _stage8OrigOpenEdit.apply(this, arguments);
+  setTimeout(function(){
+    var s = SCF_OPEN_SCAFFOLD && SCF_OPEN_SCAFFOLD.scaffold;
+    if(!s) return;
+    var stageSel = document.getElementById('scf-e-stage');
+    var ltChk = document.getElementById('scf-e-longterm');
+    if(stageSel) stageSel.value = s.stage || '';
+    if(ltChk) ltChk.checked = !!s.longTerm;
+    // Trigger the disable/enable logic
+    var areaSel = document.getElementById('scf-e-area');
+    if(areaSel) areaSel.dispatchEvent(new Event('change'));
+  }, 10);
+};
+
+// Blank when manual add opens
+var _stage8OrigOpenManualAdd = scfOpenManualAdd;
+scfOpenManualAdd = function(){
+  _stage8OrigOpenManualAdd.apply(this, arguments);
+  setTimeout(function(){
+    var stageSel = document.getElementById('scf-e-stage');
+    var ltChk = document.getElementById('scf-e-longterm');
+    if(stageSel) stageSel.value = '';
+    if(ltChk) ltChk.checked = false;
+    var areaSel = document.getElementById('scf-e-area');
+    if(areaSel) areaSel.dispatchEvent(new Event('change'));
+  }, 10);
+};
+
+// ============================================================
+// PART 6: Inject stage + longTerm into the save payload
+// ============================================================
+// Stage 4 + 6 monkey-patched fetch for workOrder + area. Wrap again.
+var _stage8PrevFetch = window.fetch;
+window.fetch = function(url, opts){
+  try {
+    if(opts && opts.body && typeof opts.body === 'string'){
+      var body = JSON.parse(opts.body);
+      if(body && (body.action === 'scaffold_edit' || body.action === 'scaffold_manual_add')){
+        var stageSel = document.getElementById('scf-e-stage');
+        var ltChk = document.getElementById('scf-e-longterm');
+        var stageVal = stageSel ? (stageSel.value || '') : '';
+        var ltVal = ltChk ? !!ltChk.checked : false;
+        if(body.action === 'scaffold_edit'){
+          body.fields = body.fields || {};
+          body.fields.stage = stageVal;
+          body.fields.longTerm = ltVal;
+        } else {
+          body.data = body.data || {};
+          body.data.stage = stageVal;
+          body.data.longTerm = ltVal;
+        }
+        opts = Object.assign({}, opts, { body: JSON.stringify(body) });
+      }
+    }
+  } catch(e){}
+  return _stage8PrevFetch.apply(this, [url, opts]);
+};
+
+// ============================================================
+// PART 7: Show stage + long-term badges on cards
+// ============================================================
+var _stage8OrigRender = scfRender;
+scfRender = function(){
+  _stage8OrigRender.apply(this, arguments);
+
+  // Walk visible cards and tag with stage + long-term chips
+  var items = (SCF_CACHE[SCF_CURRENT_TAB] || []);
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+  var search = (document.getElementById('scf-filter')||{}).value || '';
+  search = search.trim().toLowerCase();
+  var filtered = items.filter(function(s){
+    if(areaPrefix && (s.location || '').toLowerCase().indexOf(areaPrefix) !== 0) return false;
+    if(!search) return true;
+    return (s.tag||'').toLowerCase().indexOf(search) >= 0
+        || (s.location||'').toLowerCase().indexOf(search) >= 0
+        || (s.erectedBy||'').toLowerCase().indexOf(search) >= 0;
+  });
+  var cards = document.querySelectorAll('#scf-list .scf-card');
+  cards.forEach(function(card, idx){
+    var s = filtered[idx];
+    if(!s) return;
+    var firstChild = card.firstElementChild;
+    if(!firstChild) return;
+
+    // Stage chip
+    if(s.stage && !card.querySelector('.scf-stage-chip')){
+      var stageChip = document.createElement('span');
+      stageChip.className = 'scf-stage-chip';
+      stageChip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+        + 'background:#455a64;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px';
+      stageChip.textContent = 'S' + s.stage;
+      firstChild.appendChild(stageChip);
+    }
+    // Long-term chip
+    if(s.longTerm && !card.querySelector('.scf-lt-chip')){
+      var ltChip = document.createElement('span');
+      ltChip.className = 'scf-lt-chip';
+      ltChip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+        + 'background:#f57f17;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px';
+      ltChip.textContent = 'LONG-TERM';
+      firstChild.appendChild(ltChip);
+    }
+  });
+};
+
+// ============================================================
+// PART 8: Show stage + long-term in detail view
+// ============================================================
+var _stage8OrigOpenDetail = scfOpenDetail;
+scfOpenDetail = function(id){
+  _stage8OrigOpenDetail.apply(this, arguments);
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  var tbody = document.querySelector('#scf-detail-body table tbody');
+  if(!tbody) return;
+
+  if(s.stage && !tbody.querySelector('.scf-stage-row')){
+    var tr = document.createElement('tr');
+    tr.className = 'scf-stage-row';
+    tr.innerHTML = '<td style="padding:3px 0;color:#607d8b;width:120px">Stage</td>'
+      + '<td><b>Stage ' + scfEscHtml(s.stage) + '</b></td>';
+    // Insert after the area row if present
+    var areaRow = tbody.querySelector('.scf-area-row');
+    if(areaRow) areaRow.parentNode.insertBefore(tr, areaRow.nextSibling);
+    else tbody.insertBefore(tr, tbody.firstChild);
+  }
+  if(s.longTerm && !tbody.querySelector('.scf-lt-row')){
+    var tr2 = document.createElement('tr');
+    tr2.className = 'scf-lt-row';
+    tr2.innerHTML = '<td style="padding:3px 0;color:#607d8b;width:120px">Long-term</td>'
+      + '<td><span style="display:inline-block;background:#f57f17;color:#fff;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px">YES</span></td>';
+    var stageRow = tbody.querySelector('.scf-stage-row');
+    var areaRow = tbody.querySelector('.scf-area-row');
+    var anchor = stageRow || areaRow;
+    if(anchor) anchor.parentNode.insertBefore(tr2, anchor.nextSibling);
+    else tbody.insertBefore(tr2, tbody.firstChild);
+  }
+};
+
+// ============================================================
+// PART 9: PDF includes stage + long-term
+// ============================================================
+var _stage8OrigPDF = scfPrintPDF;
+scfPrintPDF = function(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  var _origOpen = window.open;
+  window.open = function(){
+    var w = _origOpen.apply(window, arguments);
+    if(!w) return w;
+    var _origWrite = w.document.write;
+    w.document.write = function(html){
+      var extraRows = '';
+      if(s.stage){
+        extraRows += '<tr><td class="lbl">Stage</td><td class="val" colspan="3"><b>Stage ' + scfEscHtml(s.stage) + '</b></td></tr>';
+      }
+      if(s.longTerm){
+        extraRows += '<tr><td class="lbl">Long-term</td><td class="val" colspan="3"><b style="color:#f57f17">YES</b></td></tr>';
+      }
+      if(extraRows){
+        // Insert before the closing </tbody> of the info table
+        html = html.replace(/(<table class="info">[\s\S]*?)(<\/tbody>\s*<\/table>)/, '$1' + extraRows + '$2');
+      }
+      _origWrite.call(this, html);
+    };
+    return w;
+  };
+  _stage8OrigPDF.apply(this, arguments);
+  setTimeout(function(){ window.open = _origOpen; }, 100);
+};
 
   
 

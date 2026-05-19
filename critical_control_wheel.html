@@ -4807,6 +4807,226 @@ function scfPrintPDF(){
   w.document.write(html);
   w.document.close();
 }
+
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 3
+// Manual entry of scaffolds + Sync All integration.
+// Paste this entire block at the bottom of the existing
+// Stage 1/2 scaffold code, before the closing script tag.
+// ============================================================
+
+// Reuse the edit modal for manual entry. We track whether the open
+// modal is in "edit" or "add" mode so Save knows which endpoint to hit.
+var SCF_EDIT_MODE = 'edit'; // 'edit' or 'add'
+
+// ============================================================
+// Add a "+ Add Manually" button to the scaffold register UI
+// ============================================================
+(function(){
+  // Wait until the t15 panel exists, then inject the Add button.
+  function inject(){
+    var panel = document.getElementById('t15');
+    if(!panel) { setTimeout(inject, 200); return; }
+    // Don't double-inject
+    if(document.getElementById('scf-add-btn')) return;
+    var filterBar = panel.querySelector('.filter-bar');
+    if(!filterBar) { setTimeout(inject, 200); return; }
+    var btn = document.createElement('button');
+    btn.id = 'scf-add-btn';
+    btn.className = 'rb';
+    btn.style.cssText = 'font-size:11px;padding:4px 10px;margin-left:auto;background:#2e7d32';
+    btn.innerHTML = '&#43; Add Manually';
+    btn.onclick = scfOpenManualAdd;
+    filterBar.appendChild(btn);
+  }
+  inject();
+})();
+
+// ============================================================
+// Open the edit modal in "add" mode with a blank scaffold
+// ============================================================
+function scfOpenManualAdd(){
+  SCF_EDIT_MODE = 'add';
+  // Create a stub "open scaffold" object so existing helpers work
+  SCF_OPEN_SCAFFOLD = {
+    tab: 'active',
+    scaffold: {
+      id: null,           // null id = new
+      tag: '',
+      location: '',
+      erectedBy: '',
+      dateErected: new Date().toISOString().split('T')[0],
+      notes: '',
+      quantities: {},
+      totalItems: 0,
+      totalWeightKg: 0
+    }
+  };
+
+  // Pre-fill fields (similar to scfOpenEdit but blank)
+  document.getElementById('scf-e-tag').value     = '';
+  document.getElementById('scf-e-loc').value     = '';
+  document.getElementById('scf-e-erector').value = '';
+  document.getElementById('scf-e-date').value    = SCF_OPEN_SCAFFOLD.scaffold.dateErected;
+  document.getElementById('scf-e-notes').value   = '';
+
+  SCF_EDIT_QTYS = {};
+  scfRenderEditComponents();
+  scfUpdateEditTotals();
+
+  // Customize the modal header for add mode
+  var hdr = document.querySelector('#scf-edit-ml .mhd h3');
+  if(hdr) hdr.textContent = 'Add Scaffold Manually';
+  var hdrBar = document.querySelector('#scf-edit-ml .mhd');
+  if(hdrBar) hdrBar.style.background = '#2e7d32';
+  var saveBtn = document.getElementById('scf-e-save-btn');
+  if(saveBtn) saveBtn.innerHTML = '&#10003; Add to Active Register';
+
+  document.getElementById('scf-edit-ml').classList.add('on');
+}
+
+// ============================================================
+// Override scfSaveEdit to handle both edit and add modes
+// ============================================================
+var _origScfSaveEdit = scfSaveEdit;
+scfSaveEdit = function(){
+  if(SCF_EDIT_MODE === 'edit'){
+    _origScfSaveEdit();
+    return;
+  }
+
+  // ADD MODE
+  var tag = document.getElementById('scf-e-tag').value.trim();
+  var loc = document.getElementById('scf-e-loc').value.trim();
+  var erector = document.getElementById('scf-e-erector').value.trim();
+  var date = document.getElementById('scf-e-date').value;
+  var notes = document.getElementById('scf-e-notes').value.trim();
+
+  if(!tag || !loc || !erector || !date){
+    alert('Tag, Location, Erected By and Date are required.');
+    return;
+  }
+  if(Object.keys(SCF_EDIT_QTYS).length === 0){
+    alert('Please add at least one component before saving.');
+    return;
+  }
+
+  var totalItems = 0, totalKg = 0;
+  Object.keys(SCF_EDIT_QTYS).forEach(function(id){
+    var q = SCF_EDIT_QTYS[id]; if(!q) return;
+    var comp = SCF_LOOKUP[id]; if(!comp) return;
+    totalItems += q;
+    totalKg += q * comp.kg;
+  });
+
+  var btn = document.getElementById('scf-e-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  setSS('bz', 'Adding scaffold...');
+
+  var payload = JSON.stringify({
+    action: 'scaffold_manual_add',
+    data: {
+      tag: tag,
+      location: loc,
+      erectedBy: erector,
+      dateErected: date,
+      notes: notes,
+      quantities: SCF_EDIT_QTYS,
+      totalItems: totalItems,
+      totalWeightKg: parseFloat(totalKg.toFixed(2))
+    }
+  });
+
+  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false; btn.innerHTML = '\u2713 Add to Active Register';
+      if(!j.ok) throw new Error(j.error || 'Add failed');
+      setSS('ok', 'Scaffold added');
+      // Reset modal back to edit mode for next use
+      SCF_EDIT_MODE = 'edit';
+      var hdr = document.querySelector('#scf-edit-ml .mhd h3');
+      if(hdr) hdr.textContent = 'Edit Scaffold';
+      var hdrBar = document.querySelector('#scf-edit-ml .mhd');
+      if(hdrBar) hdrBar.style.background = '#1565c0';
+      var sb = document.getElementById('scf-e-save-btn');
+      if(sb) sb.innerHTML = '\u2713 Save Changes';
+
+      scfCloseEdit();
+      // Switch to active tab and reload
+      SCF_CURRENT_TAB = 'active';
+      document.querySelectorAll('#t15 .reg-tb').forEach(function(b){ b.classList.remove('on'); });
+      var activeBtn = document.getElementById('scf-tb-active');
+      if(activeBtn) activeBtn.classList.add('on');
+      scfLoad();
+    })
+    .catch(function(err){
+      btn.disabled = false; btn.innerHTML = '\u2713 Add to Active Register';
+      setSS('er', 'Add failed: ' + err.message);
+      alert('Add failed: ' + err.message);
+    });
+};
+
+// Also make sure scfCloseEdit resets mode (so cancelling an "add" doesn't
+// leave the next "edit" with green header)
+var _origScfCloseEdit = scfCloseEdit;
+scfCloseEdit = function(){
+  _origScfCloseEdit();
+  if(SCF_EDIT_MODE === 'add'){
+    SCF_EDIT_MODE = 'edit';
+    var hdr = document.querySelector('#scf-edit-ml .mhd h3');
+    if(hdr) hdr.textContent = 'Edit Scaffold';
+    var hdrBar = document.querySelector('#scf-edit-ml .mhd');
+    if(hdrBar) hdrBar.style.background = '#1565c0';
+    var sb = document.getElementById('scf-e-save-btn');
+    if(sb) sb.innerHTML = '\u2713 Save Changes';
+  }
+};
+
+// ============================================================
+// SYNC ALL INTEGRATION
+// Hook scaffold register into the existing syncAll routine so
+// it refreshes when the user clicks "Sync All" in the header.
+// ============================================================
+(function(){
+  // The existing syncAll uses helper functions like doSyncSimpleStore.
+  // We add a new doSyncScaffold helper and a tiny wrapper that
+  // monkey-patches the global syncAll to include it as a step.
+  window.doSyncScaffold = function(u){
+    return new Promise(function(resolve, reject){
+      fetch(u || SCF_WORKER_URL || getURL(),
+        { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'scaffold_list'}) })
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if(!j.ok) throw new Error(j.error || 'Scaffold list failed');
+          SCF_CACHE.pending    = j.pending    || [];
+          SCF_CACHE.active     = j.active     || [];
+          SCF_CACHE.dismantled = j.dismantled || [];
+          scfUpdateBadges();
+          // Re-render if we're currently looking at the scaffold tab
+          var t15 = document.getElementById('t15');
+          if(t15 && t15.classList.contains('on')) scfRender();
+          resolve();
+        })
+        .catch(reject);
+    });
+  };
+
+  // Wrap syncAll so when it runs, it also syncs scaffolds.
+  // We can't easily hook into the internal `steps` array, so we just
+  // call the scaffold sync once syncAll's promise chain finishes.
+  var _origSyncAll = window.syncAll;
+  if(typeof _origSyncAll === 'function'){
+    window.syncAll = function(){
+      // Trigger the existing sync. It manages the status bar itself.
+      _origSyncAll.apply(this, arguments);
+      // Run scaffold sync in parallel (it has its own endpoint).
+      doSyncScaffold().catch(function(){/* fail quietly - syncAll handles its own errors */});
+    };
+  }
+})();
+
   
 
 </script></body></html>

@@ -7067,6 +7067,131 @@ scfPrintPDF = function(){
   setTimeout(function(){ window.open = _origOpen; }, 100);
 };
   
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 15
+// Bug fix: Stage 6 and Stage 8 fetch interceptors always inject
+// the edit-modal area/stage/longTerm fields into every
+// scaffold_edit call, even when the edit modal is closed. That
+// wipes the existing values when scfFailScaffold or anything
+// else does a partial edit.
+// Solution: replace window.fetch with a clean version that only
+// injects those fields when the edit modal is actually visible.
+// Paste at the bottom before the closing script tag.
+// ============================================================
+(function(){
+  // The very original native fetch is buried under multiple layers of
+  // monkey-patching by Stages 4, 6, 8. We can't easily reach it, so
+  // we wrap the current outermost fetch and strip-back any fields
+  // that shouldn't have been added.
+  var prevFetch = window.fetch;
+  window.fetch = function(url, opts){
+    // Check if the edit modal is currently open
+    var editModal = document.getElementById('scf-edit-ml');
+    var isEditOpen = editModal && editModal.classList.contains('on');
+    if(isEditOpen){
+      // Behave normally - the prior interceptors will inject correctly
+      return prevFetch.apply(this, [url, opts]);
+    }
+
+    // Edit modal is closed - any scaffold_edit fired now is a
+    // targeted partial edit (e.g. failing a scaffold). Strip
+    // injections back to only what the original caller specified.
+    if(opts && opts.body && typeof opts.body === 'string'){
+      try {
+        var body = JSON.parse(opts.body);
+        if(body && body.action === 'scaffold_edit'){
+          // Save the original fields - the caller's intended payload
+          var originalFields = body.fields ? Object.assign({}, body.fields) : {};
+          // Let the prior interceptors run (they'll inject stuff),
+          // then strip back to only the originally intended fields.
+          var newOpts = Object.assign({}, opts);
+          // We need to intercept after the prior chain runs. Easiest:
+          // call prevFetch, but first override the body NOW so the
+          // upstream interceptors can't see anything to inject from
+          // (because the edit modal is closed, they'd see blank inputs
+          // and inject blanks - this is exactly the bug).
+          // The cleanest path: keep our original body and ensure
+          // upstream sees it but doesn't add anything.
+          //
+          // The prior interceptors only inject when the elements
+          // exist; we can't easily remove them. Instead, after the
+          // call we'd need to send the right payload directly.
+          //
+          // Simplest fix: send the request WITHOUT going through the
+          // prior interceptors. Find the lowest-level original fetch.
+          var nativeFetch = window.fetch._original || null;
+          // If we can find a clean native fetch, use it. Otherwise,
+          // we still call prevFetch but we override the body to put
+          // back the original fields after upstream tampers with it.
+          // Trick: monkey-patch JSON.parse temporarily? No - simpler:
+          // re-stringify with our intended payload AFTER the chain.
+          //
+          // Best approach: pass through and re-correct.
+          // We can't intercept the upstream re-stringify, but we CAN
+          // shadow opts.body so that when the upstream JSON.parses it,
+          // the fields it tries to read from the DOM are all blank
+          // AND we tell the upstream NOT to override by including
+          // sentinel keys in our body that survive its mutations.
+          //
+          // Simpler reality: prior interceptors unconditionally set
+          // body.fields.stage = '' / body.fields.longTerm = false /
+          // body.fields.area = '' when modal closed. We just need to
+          // remove those keys from body AFTER the upstream runs.
+
+          // Build a new opts where the body is wrapped in a way the
+          // upstream interceptors won't touch:
+          // Strategy: do the fetch directly, bypassing them.
+          // The current `prevFetch` IS the chain. We don't have a
+          // reference to the original native fetch. So we have to
+          // accept the upstream tampering and then... wait, we can't
+          // un-tamper after the network request goes out.
+          //
+          // OK new strategy: pre-emptively put the "expected" values
+          // into the edit modal's hidden fields BEFORE calling
+          // prevFetch, so upstream injects the CORRECT values instead
+          // of blank ones.
+
+          // We need to know the current scaffold's existing values for
+          // area/stage/longTerm. Look it up from the cache.
+          var scfId = body.id;
+          var found = null;
+          ['pending','active','dismantled','failed'].forEach(function(tab){
+            (SCF_CACHE[tab] || []).forEach(function(s){
+              if(s.id === scfId) found = s;
+            });
+          });
+
+          if(found){
+            // Temporarily pre-populate the edit modal's hidden fields
+            // with current values so upstream interceptors inject
+            // correct data instead of blanks.
+            var areaSel = document.getElementById('scf-e-area');
+            var stageSel = document.getElementById('scf-e-stage');
+            var ltChk = document.getElementById('scf-e-longterm');
+            var woEl = document.getElementById('scf-e-wo');
+            var savedArea = areaSel ? areaSel.value : null;
+            var savedStage = stageSel ? stageSel.value : null;
+            var savedLt = ltChk ? ltChk.checked : null;
+            var savedWo = woEl ? woEl.value : null;
+            if(areaSel)  areaSel.value  = found.area || '';
+            if(stageSel) stageSel.value = found.stage || '';
+            if(ltChk)    ltChk.checked  = !!found.longTerm;
+            if(woEl)     woEl.value     = found.workOrder || '';
+            // Run the fetch
+            var p = prevFetch.apply(this, [url, opts]);
+            // Restore the modal fields immediately
+            if(areaSel && savedArea !== null)  areaSel.value  = savedArea;
+            if(stageSel && savedStage !== null) stageSel.value = savedStage;
+            if(ltChk && savedLt !== null)      ltChk.checked  = savedLt;
+            if(woEl && savedWo !== null)       woEl.value     = savedWo;
+            return p;
+          }
+        }
+      } catch(e){}
+    }
+    return prevFetch.apply(this, [url, opts]);
+  };
+})();
 
   
 

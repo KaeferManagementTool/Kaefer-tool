@@ -1010,6 +1010,38 @@ if(localStorage.getItem('kaefer_setup_done')){
     <div class="mft" id="scf-detail-actions"></div>
   </div>
 </div>
+<div class="ml" id="scf-edit-ml">
+  <div class="mb" style="width:680px;max-width:96vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+    <div class="mhd" style="background:#1565c0">
+      <h3>Edit Scaffold</h3>
+      <button class="mc" onclick="scfCloseEdit()">&#215;</button>
+    </div>
+    <div class="mbd" style="overflow-y:auto;flex:1;padding:14px" id="scf-edit-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="mf"><label>Scaffold Tag *</label><input type="text" id="scf-e-tag" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf"><label>Location *</label><input type="text" id="scf-e-loc" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf"><label>Erected By *</label><input type="text" id="scf-e-erector" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf"><label>Date Erected *</label><input type="date" id="scf-e-date" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf" style="grid-column:span 2"><label>Notes</label><input type="text" id="scf-e-notes" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+      </div>
+      <div style="background:#1a2a4a;color:#fff;padding:10px 13px;border-radius:5px;display:flex;gap:18px;font-size:13px;margin-bottom:10px">
+        <div><b id="scf-e-totItems" style="font-size:16px">0</b> <span style="opacity:.8;font-size:11px">items</span></div>
+        <div><b id="scf-e-totKg" style="font-size:16px">0.00</b> <span style="opacity:.8;font-size:11px">kg</span></div>
+        <div><b id="scf-e-totT" style="font-size:16px">0.000</b> <span style="opacity:.8;font-size:11px">tonnes</span></div>
+      </div>
+      <div style="margin-bottom:8px;display:flex;gap:6px;align-items:center">
+        <input type="search" id="scf-e-search" placeholder="Search components..." oninput="scfEditFilter()" style="flex:1;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit">
+        <button class="ob" style="font-size:11px;padding:5px 10px" onclick="scfEditToggleAll(true)">Expand All</button>
+        <button class="ob" style="font-size:11px;padding:5px 10px" onclick="scfEditToggleAll(false)">Collapse All</button>
+      </div>
+      <div id="scf-e-components"></div>
+    </div>
+    <div class="mft">
+      <button class="ob" onclick="scfCloseEdit()">Cancel</button>
+      <button class="rb" id="scf-e-save-btn" onclick="scfSaveEdit()">&#10003; Save Changes</button>
+    </div>
+  </div>
+</div>  
 
 <!-- CELL EDIT -->
 <div class="ml" id="ce-ml"><div class="mb" style="width:310px"><div class="mhd" id="ce-hd" style="background:#2e7d32"><h3 id="ce-tt">Edit Day</h3><button class="mc" onclick="closeCE()">&#215;</button></div>
@@ -4368,5 +4400,413 @@ setTimeout(function(){
       }).catch(function(){});
   }
 }, 3000);
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 2
+// Paste this entire block at the bottom of the existing
+// SCAFFOLD REGISTER - STAGE 1 code, before the closing </script>.
+// ============================================================
+
+// State for edit mode
+var SCF_EDIT_QTYS = {}; // working copy of quantities while editing
+
+// ============================================================
+// REWIRE DETAIL VIEW
+// Override scfOpenDetail to add Edit / Print / Delete buttons.
+// ============================================================
+var _origScfOpenDetail = scfOpenDetail;
+scfOpenDetail = function(id){
+  _origScfOpenDetail(id);
+  // Now rebuild the action buttons row to include new options.
+  // SCF_OPEN_SCAFFOLD is set by _origScfOpenDetail.
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var tab = SCF_OPEN_SCAFFOLD.tab;
+  var actions = document.getElementById('scf-detail-actions');
+  if(!actions) return;
+
+  var html = '';
+  // Print PDF button is available on all tabs
+  html += '<button class="ob" style="margin-right:auto" onclick="scfPrintPDF()">&#128424; Print / PDF</button>';
+
+  if(tab === 'pending'){
+    html += '<button class="ob" style="color:#c62828;border-color:#c62828" onclick="scfConfirmAction(\'reject\')">Reject</button>';
+    html += '<button class="rb" style="background:#2e7d32" onclick="scfConfirmAction(\'approve\')">&#10003; Approve</button>';
+  } else if(tab === 'active'){
+    html += '<button class="ob" style="color:#1565c0;border-color:#1565c0" onclick="scfOpenEdit()">&#9998; Edit</button>';
+    html += '<button class="rb" style="background:#c62828" onclick="scfConfirmAction(\'dismantle\')">Mark as dismantled</button>';
+  } else if(tab === 'dismantled'){
+    html += '<button class="ob" style="color:#1565c0;border-color:#1565c0" onclick="scfOpenEdit()">&#9998; Edit</button>';
+    html += '<button class="ob" style="color:#c62828;border-color:#c62828" onclick="scfConfirmDelete()">&#128465; Delete</button>';
+  }
+  actions.innerHTML = html;
+};
+
+// ============================================================
+// EDIT MODE
+// ============================================================
+function scfOpenEdit(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+
+  // Pre-fill scaffold details
+  document.getElementById('scf-e-tag').value     = s.tag || '';
+  document.getElementById('scf-e-loc').value     = s.location || '';
+  document.getElementById('scf-e-erector').value = s.erectedBy || '';
+  // Date input wants YYYY-MM-DD format
+  var dateVal = s.dateErected || '';
+  if(dateVal){
+    try {
+      var d = new Date(dateVal);
+      if(!isNaN(d)) dateVal = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    } catch(e){}
+  }
+  document.getElementById('scf-e-date').value = dateVal;
+  document.getElementById('scf-e-notes').value = s.notes || '';
+
+  // Working copy of quantities
+  SCF_EDIT_QTYS = {};
+  var origQtys = s.quantities || {};
+  Object.keys(origQtys).forEach(function(k){ SCF_EDIT_QTYS[k] = origQtys[k]; });
+
+  scfRenderEditComponents();
+  scfUpdateEditTotals();
+
+  document.getElementById('scf-edit-ml').classList.add('on');
+}
+
+function scfCloseEdit(){
+  document.getElementById('scf-edit-ml').classList.remove('on');
+}
+
+function scfRenderEditComponents(){
+  var root = document.getElementById('scf-e-components');
+  if(!root) return;
+  var html = '';
+  SCF_COMPONENTS.forEach(function(cat){
+    // Count how many items in this category have qty > 0
+    var usedCount = 0;
+    cat.items.forEach(function(item){ if((SCF_EDIT_QTYS[item.id]||0) > 0) usedCount++; });
+    var startOpen = usedCount > 0; // auto-expand categories that have items
+
+    html += '<div class="scf-e-cat" data-cat="'+scfEscHtml(cat.category)+'" style="margin-bottom:6px;border:1px solid #e0e0e0;border-radius:5px;overflow:hidden">';
+    html += '<div class="scf-e-cathdr" onclick="scfEditToggleCat(this)" style="background:#1a2a4a;color:#fff;padding:7px 11px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;font-size:12px;font-weight:700">';
+    html += '<span><span class="scf-e-chev" style="display:inline-block;width:12px;transition:transform .15s;'+(startOpen?'transform:rotate(90deg)':'')+'">&#9656;</span> '+scfEscHtml(cat.category)+'</span>';
+    html += '<span style="background:rgba(255,255,255,.18);padding:1px 8px;border-radius:8px;font-size:10px">'+usedCount+'/'+cat.items.length+'</span>';
+    html += '</div>';
+    html += '<div class="scf-e-items" style="display:'+(startOpen?'block':'none')+'">';
+    cat.items.forEach(function(item){
+      var qty = SCF_EDIT_QTYS[item.id] || 0;
+      var hasQty = qty > 0;
+      html += '<div class="scf-e-item" data-desc="'+scfEscHtml(item.desc.toLowerCase())+'" style="display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid #f0f0f0;'+(hasQty?'background:#fffaf0':'')+'">';
+      html += '<div style="flex:1;font-size:12px;line-height:1.3">'+scfEscHtml(item.desc)+'<br><span style="color:#888;font-size:10px">'+item.kg.toFixed(2)+' kg each</span></div>';
+      html += '<button class="ob" style="width:28px;height:28px;padding:0;font-size:14px;font-weight:700" onclick="scfEditQty(\''+item.id+'\',-1)">&minus;</button>';
+      html += '<input type="number" class="scf-e-qty" data-id="'+item.id+'" min="0" max="9999" value="'+(qty||'')+'" placeholder="0" oninput="scfEditQtyInput(this)" style="width:50px;text-align:center;padding:5px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-weight:600;color:#0000FF;font-family:inherit">';
+      html += '<button class="ob" style="width:28px;height:28px;padding:0;font-size:14px;font-weight:700" onclick="scfEditQty(\''+item.id+'\',1)">+</button>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  });
+  root.innerHTML = html;
+}
+
+function scfEditToggleCat(headerEl){
+  var items = headerEl.nextElementSibling;
+  var chev = headerEl.querySelector('.scf-e-chev');
+  if(items.style.display === 'none'){
+    items.style.display = 'block';
+    if(chev) chev.style.transform = 'rotate(90deg)';
+  } else {
+    items.style.display = 'none';
+    if(chev) chev.style.transform = '';
+  }
+}
+
+function scfEditToggleAll(open){
+  document.querySelectorAll('.scf-e-cat').forEach(function(cat){
+    var items = cat.querySelector('.scf-e-items');
+    var chev = cat.querySelector('.scf-e-chev');
+    items.style.display = open ? 'block' : 'none';
+    if(chev) chev.style.transform = open ? 'rotate(90deg)' : '';
+  });
+}
+
+function scfEditQty(id, delta){
+  var current = SCF_EDIT_QTYS[id] || 0;
+  var newVal = Math.max(0, current + delta);
+  if(newVal === 0) delete SCF_EDIT_QTYS[id];
+  else SCF_EDIT_QTYS[id] = newVal;
+  // Update the input field
+  var input = document.querySelector('.scf-e-qty[data-id="'+id+'"]');
+  if(input){
+    input.value = newVal > 0 ? newVal : '';
+    // Update parent row styling
+    var row = input.closest('.scf-e-item');
+    if(row) row.style.background = newVal > 0 ? '#fffaf0' : '';
+  }
+  scfUpdateEditTotals();
+  scfUpdateEditCatCounts();
+}
+
+function scfEditQtyInput(inputEl){
+  var id = inputEl.getAttribute('data-id');
+  var val = parseInt(inputEl.value || '0', 10);
+  if(isNaN(val) || val < 0) val = 0;
+  if(val > 0) SCF_EDIT_QTYS[id] = val;
+  else delete SCF_EDIT_QTYS[id];
+  var row = inputEl.closest('.scf-e-item');
+  if(row) row.style.background = val > 0 ? '#fffaf0' : '';
+  scfUpdateEditTotals();
+  scfUpdateEditCatCounts();
+}
+
+function scfUpdateEditTotals(){
+  var items = 0, kg = 0;
+  Object.keys(SCF_EDIT_QTYS).forEach(function(id){
+    var q = SCF_EDIT_QTYS[id]; if(!q) return;
+    var comp = SCF_LOOKUP[id]; if(!comp) return;
+    items += q;
+    kg += q * comp.kg;
+  });
+  document.getElementById('scf-e-totItems').textContent = items;
+  document.getElementById('scf-e-totKg').textContent = kg.toFixed(2);
+  document.getElementById('scf-e-totT').textContent = (kg/1000).toFixed(3);
+}
+
+function scfUpdateEditCatCounts(){
+  document.querySelectorAll('.scf-e-cat').forEach(function(catEl){
+    var catName = catEl.getAttribute('data-cat');
+    var cat = SCF_COMPONENTS.find(function(c){ return c.category === catName; });
+    if(!cat) return;
+    var used = 0;
+    cat.items.forEach(function(item){ if((SCF_EDIT_QTYS[item.id]||0) > 0) used++; });
+    var badge = catEl.querySelector('.scf-e-cathdr > span:last-child');
+    if(badge) badge.textContent = used + '/' + cat.items.length;
+  });
+}
+
+function scfEditFilter(){
+  var q = (document.getElementById('scf-e-search').value || '').toLowerCase().trim();
+  document.querySelectorAll('.scf-e-cat').forEach(function(catEl){
+    var anyMatch = false;
+    catEl.querySelectorAll('.scf-e-item').forEach(function(row){
+      var desc = row.getAttribute('data-desc') || '';
+      var match = !q || desc.indexOf(q) >= 0;
+      row.style.display = match ? '' : 'none';
+      if(match) anyMatch = true;
+    });
+    catEl.style.display = anyMatch ? '' : 'none';
+    if(q && anyMatch){
+      // Auto-expand when searching
+      catEl.querySelector('.scf-e-items').style.display = 'block';
+      var chev = catEl.querySelector('.scf-e-chev');
+      if(chev) chev.style.transform = 'rotate(90deg)';
+    }
+  });
+}
+
+function scfSaveEdit(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var tag = document.getElementById('scf-e-tag').value.trim();
+  var loc = document.getElementById('scf-e-loc').value.trim();
+  var erector = document.getElementById('scf-e-erector').value.trim();
+  var date = document.getElementById('scf-e-date').value;
+  var notes = document.getElementById('scf-e-notes').value.trim();
+
+  if(!tag || !loc || !erector || !date){
+    alert('Tag, Location, Erected By and Date are required.');
+    return;
+  }
+  if(Object.keys(SCF_EDIT_QTYS).length === 0){
+    if(!confirm('No components selected. Save anyway?')) return;
+  }
+
+  // Compute totals
+  var totalItems = 0, totalKg = 0;
+  Object.keys(SCF_EDIT_QTYS).forEach(function(id){
+    var q = SCF_EDIT_QTYS[id]; if(!q) return;
+    var comp = SCF_LOOKUP[id]; if(!comp) return;
+    totalItems += q;
+    totalKg += q * comp.kg;
+  });
+
+  var btn = document.getElementById('scf-e-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  setSS('bz', 'Saving changes...');
+
+  var payload = JSON.stringify({
+    action: 'scaffold_edit',
+    id: SCF_OPEN_SCAFFOLD.scaffold.id,
+    fromTab: SCF_OPEN_SCAFFOLD.tab,
+    fields: {
+      tag: tag,
+      location: loc,
+      erectedBy: erector,
+      dateErected: date,
+      notes: notes,
+      quantities: SCF_EDIT_QTYS,
+      totalItems: totalItems,
+      totalWeightKg: parseFloat(totalKg.toFixed(2))
+    }
+  });
+
+  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false; btn.textContent = '\u2713 Save Changes';
+      if(!j.ok) throw new Error(j.error || 'Save failed');
+      setSS('ok', 'Saved');
+      scfCloseEdit();
+      scfCloseDetail();
+      scfLoad();
+    })
+    .catch(function(err){
+      btn.disabled = false; btn.textContent = '\u2713 Save Changes';
+      setSS('er', 'Save failed: ' + err.message);
+      alert('Save failed: ' + err.message);
+    });
+}
+
+// ============================================================
+// DELETE (Dismantled only)
+// ============================================================
+function scfConfirmDelete(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  if(SCF_OPEN_SCAFFOLD.tab !== 'dismantled'){
+    alert('Delete is only available for dismantled scaffolds.');
+    return;
+  }
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  if(!confirm('Permanently delete scaffold '+s.tag+' from the register?\n\nThis cannot be undone.')) return;
+
+  setSS('bz', 'Deleting...');
+  var payload = JSON.stringify({
+    action: 'scaffold_delete',
+    id: s.id,
+    fromTab: 'dismantled'
+  });
+  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(!j.ok) throw new Error(j.error || 'Delete failed');
+      setSS('ok', 'Deleted');
+      scfCloseDetail();
+      scfLoad();
+    })
+    .catch(function(err){
+      setSS('er', 'Delete failed: ' + err.message);
+      alert('Delete failed: ' + err.message);
+    });
+}
+
+// ============================================================
+// PDF EXPORT
+// Opens a print-styled window matching the original Layher
+// gear list template. User prints to PDF via browser dialog.
+// ============================================================
+function scfPrintPDF(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  var qtys = s.quantities || {};
+
+  // Header info
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Scaffold Gear List - '+scfEscHtml(s.tag||'')+'</title>';
+  html += '<style>'
+       +'@page{size:A4;margin:10mm 10mm 12mm 10mm}'
+       +'*{box-sizing:border-box}'
+       +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:0;background:#f0f0f0;font-size:9pt}'
+       +'.wrap{max-width:200mm;margin:0 auto;background:#fff;padding:10mm 8mm;box-shadow:0 0 8px rgba(0,0,0,.1)}'
+       +'.print-bar{background:#1565c0;color:#fff;padding:10px;text-align:center;font-size:12px;position:sticky;top:0;z-index:100}'
+       +'.print-bar button{background:#fff;color:#1565c0;border:none;padding:6px 14px;font-weight:700;border-radius:4px;cursor:pointer;font-size:12px;margin-left:10px}'
+       +'.kheader{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4mm;padding-bottom:3mm;border-bottom:3px solid #cc0000}'
+       +'.klogo{display:flex;align-items:center;gap:8px}'
+       +'.kring{width:28px;height:28px;border:2px solid #cc0000;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#cc0000;font-weight:900;font-size:11px}'
+       +'.kw{font-size:18pt;font-weight:900;color:#cc0000;letter-spacing:1px}'
+       +'.title{font-size:14pt;font-weight:700;color:#1a2a4a;margin:0}'
+       +'.sub{font-size:9pt;color:#666;margin-top:1mm}'
+       +'.info{width:100%;border-collapse:collapse;margin-bottom:3mm;font-size:9pt}'
+       +'.info td{border:1px solid #999;padding:2mm 3mm;vertical-align:middle}'
+       +'.info .lbl{background:#e0e0e0;font-weight:700;width:24%}'
+       +'.info .val{background:#fff;width:26%}'
+       +'.cat-hdr{background:#1a2a4a;color:#fff;font-weight:700;padding:1.5mm 3mm;font-size:9pt;margin-top:3mm;text-transform:uppercase;letter-spacing:.5px}'
+       +'.comp-tbl{width:100%;border-collapse:collapse;font-size:8pt}'
+       +'.comp-tbl th{background:#d9d9d9;padding:1.5mm 2mm;text-align:left;font-weight:700;border:1px solid #999;font-size:8pt}'
+       +'.comp-tbl th.num{text-align:center;width:55px}'
+       +'.comp-tbl td{padding:1mm 2mm;border:1px solid #ccc;vertical-align:middle}'
+       +'.comp-tbl td.num{text-align:center;font-variant-numeric:tabular-nums}'
+       +'.comp-tbl tr.used td{background:#fff9c4;font-weight:700}'
+       +'.comp-tbl tr.zero td{color:#999;background:#fafafa}'
+       +'.totals{margin-top:4mm;background:#1a2a4a;color:#fff;padding:3mm 4mm;border-radius:3px;display:flex;justify-content:space-around;align-items:center}'
+       +'.totals .t-block{text-align:center}'
+       +'.totals .t-val{font-size:18pt;font-weight:900}'
+       +'.totals .t-lbl{font-size:9pt;opacity:.85;text-transform:uppercase;letter-spacing:.5px}'
+       +'.foot{margin-top:5mm;padding-top:2mm;border-top:1px solid #999;font-size:8pt;color:#666;display:flex;justify-content:space-between}'
+       +'@media print{body{background:#fff;margin:0;padding:0}.wrap{max-width:100%;box-shadow:none;padding:0;margin:0}.no-print{display:none}.cat-hdr{break-after:avoid}.comp-tbl{break-inside:auto}.comp-tbl tr{break-inside:avoid}}'
+       +'</style></head><body>';
+
+  html += '<div class="print-bar no-print">In the print dialog, choose <b>"Save as PDF"</b> as destination.<button onclick="window.print()">&#128424; Print / Save PDF</button></div>';
+  html += '<div class="wrap">';
+
+  // Header
+  html += '<div class="kheader">';
+  html += '<div><h1 class="title">Scaffold Gear List</h1><div class="sub">KAEFER Integrated Services - Yarwun</div></div>';
+  html += '<div class="klogo"><div class="kring">K</div><div class="kw">KAEFER</div></div>';
+  html += '</div>';
+
+  // Info block
+  html += '<table class="info"><tbody>';
+  html += '<tr><td class="lbl">Scaffold Tag</td><td class="val"><b>'+scfEscHtml(s.tag||'')+'</b></td>';
+  html += '<td class="lbl">Status</td><td class="val">'+(SCF_OPEN_SCAFFOLD.tab.toUpperCase())+'</td></tr>';
+  html += '<tr><td class="lbl">Location / Area</td><td class="val" colspan="3">'+scfEscHtml(s.location||'')+'</td></tr>';
+  html += '<tr><td class="lbl">Erected By</td><td class="val">'+scfEscHtml(s.erectedBy||'')+'</td>';
+  html += '<td class="lbl">Date Erected</td><td class="val">'+scfFmtDate(s.dateErected)+'</td></tr>';
+  if(s.approvedAt || s.dismantledAt){
+    html += '<tr>';
+    html += '<td class="lbl">Approved</td><td class="val">'+scfFmtDate(s.approvedAt)+'</td>';
+    html += '<td class="lbl">Dismantled</td><td class="val">'+scfFmtDate(s.dismantledAt)+'</td>';
+    html += '</tr>';
+  }
+  if(s.notes){
+    html += '<tr><td class="lbl">Notes</td><td class="val" colspan="3">'+scfEscHtml(s.notes)+'</td></tr>';
+  }
+  html += '</tbody></table>';
+
+  // All 220 components, grouped by category (matches the original template)
+  SCF_COMPONENTS.forEach(function(cat){
+    html += '<div class="cat-hdr">'+scfEscHtml(cat.category)+'</div>';
+    html += '<table class="comp-tbl"><thead><tr><th>Description</th><th class="num">Wt (kg)</th><th class="num">Qty</th><th class="num">Total (kg)</th></tr></thead><tbody>';
+    cat.items.forEach(function(item){
+      var q = qtys[item.id] || 0;
+      var rowCls = q > 0 ? 'used' : 'zero';
+      var totalKg = (q * item.kg);
+      html += '<tr class="'+rowCls+'">';
+      html += '<td>'+scfEscHtml(item.desc)+'</td>';
+      html += '<td class="num">'+item.kg.toFixed(2)+'</td>';
+      html += '<td class="num">'+(q || '-')+'</td>';
+      html += '<td class="num">'+(q > 0 ? totalKg.toFixed(2) : '-')+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  });
+
+  // Totals block
+  html += '<div class="totals">';
+  html += '<div class="t-block"><div class="t-val">'+(s.totalItems||0)+'</div><div class="t-lbl">Total Items</div></div>';
+  html += '<div class="t-block"><div class="t-val">'+(s.totalWeightKg||0).toFixed(2)+'</div><div class="t-lbl">Total Weight (kg)</div></div>';
+  html += '<div class="t-block"><div class="t-val">'+((s.totalWeightKg||0)/1000).toFixed(3)+'</div><div class="t-lbl">Total Weight (tonnes)</div></div>';
+  html += '</div>';
+
+  // Footer
+  html += '<div class="foot"><span><b>KAEFER Scaffold Gear List</b> - Layher System</span><span>Generated: '+new Date().toLocaleString('en-AU')+'</span></div>';
+
+  html += '</div></body></html>';
+
+  var w = window.open('', '_blank');
+  if(!w){
+    alert('Please allow popups for this site to generate the PDF.');
+    return;
+  }
+  w.document.write(html);
+  w.document.close();
+}
+  
 
 </script></body></html>

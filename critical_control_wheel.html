@@ -6548,32 +6548,34 @@ scfPrintPDF = function(){
 };
 
 // ============================================================
-// SCAFFOLD REGISTER - STAGE 9
-// Fix: rebuild the edit-modal area dropdown so it includes HYDRATE
-// (and any future areas added to SCF_AREAS).
-// Paste at the bottom of Stage 8 code, before </script>.
+// SCAFFOLD REGISTER - STAGE 11
+// Clean-up patch:
+// 1) Force-rebuild the edit modal area dropdown AFTER SCF_AREAS has
+//    HYDRATE added (timing fix - earlier Stage 9 ran too early)
+// 2) Stage 10 produced page-content because of a comment trap, so
+//    we re-apply the solid-fill bubble styling here without any
+//    problematic literal text in comments.
+// Paste at the bottom, before the closing script tag.
 // ============================================================
+
+// --- PART 1: rebuild edit-modal Area dropdown with current SCF_AREAS ---
 (function(){
-  function rebuildEditAreaDropdown(){
+  function rebuildEditAreaDropdownDelayed(){
     var sel = document.getElementById('scf-e-area');
-    if(!sel){ setTimeout(rebuildEditAreaDropdown, 300); return; }
-    // Preserve the current value if any
+    if(!sel){ setTimeout(rebuildEditAreaDropdownDelayed, 400); return; }
     var current = sel.value;
-    // Rebuild options from the current SCF_AREAS
-    var html = '<option value="">— select area —</option>';
+    var html = '<option value="">- select area -</option>';
     SCF_AREAS.forEach(function(a){
       html += '<option value="'+scfEscHtml(a)+'">'+scfEscHtml(a)+'</option>';
     });
     sel.innerHTML = html;
     sel.value = current;
   }
-  rebuildEditAreaDropdown();
+  // Run after a longer delay to ensure HYDRATE has been pushed onto SCF_AREAS
+  setTimeout(rebuildEditAreaDropdownDelayed, 1500);
 })();
-// ============================================================
-// SCAFFOLD REGISTER - STAGE 10
-// Restyle bubbles: solid colour fill, white text.
-// Paste at the bottom of Stage 9, before </script>.
-// ============================================================
+
+// --- PART 2: solid-fill bubbles (no comment traps) ---
 (function(){
   function rebuildSolidBubbles(){
     var container = document.getElementById('scf-stat-cards');
@@ -6596,7 +6598,6 @@ scfPrintPDF = function(){
           + 'S2 <span id="' + opts.valueId + '-s2">0.0 t</span>'
           + '</div>';
       }
-      // Use a slightly darker variant of the colour as a thin inner ring for depth
       return ''
         + '<div style="display:flex;flex-direction:column;align-items:center;'
         +    'justify-content:center;width:'+width+';height:'+height+';'
@@ -6639,7 +6640,7 @@ scfPrintPDF = function(){
     SCF_AREAS.forEach(function(area){
       var color = SCF_AREA_COLORS[area] || '#607d8b';
       var key = scfAreaKey(area);
-      var split = SCF_STAGED_AREAS && SCF_STAGED_AREAS.indexOf(area.toUpperCase()) !== -1;
+      var split = (typeof SCF_STAGED_AREAS !== 'undefined') && SCF_STAGED_AREAS.indexOf(area.toUpperCase()) !== -1;
       html += bubble({
         label: area,
         color: color,
@@ -6651,8 +6652,10 @@ scfPrintPDF = function(){
     container.innerHTML = html;
     if(typeof scfUpdateStats === 'function') scfUpdateStats();
   }
-  rebuildSolidBubbles();
+  // Run after a small delay so it lands after Stage 7 / Stage 8 bubble code
+  setTimeout(rebuildSolidBubbles, 1700);
 })();
+
   
 
   

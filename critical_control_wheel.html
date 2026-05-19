@@ -5405,6 +5405,476 @@ setTimeout(function(){
   if(typeof scfUpdateStats === 'function') scfUpdateStats();
 }, 100);
 
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 6
+// Area system: 6 area cards + Total Active card, area picker on
+// approve, area dropdowns in edit + manual-add, first-load
+// prompt for existing active scaffolds without an area.
+// Paste this entire block at the bottom of the existing Stage 5
+// scaffold code, before the closing script tag.
+// ============================================================
+
+// The fixed list of areas at Yarwun
+var SCF_AREAS = ['DIGESTION', 'BOILER', 'CALCINATION', 'MATERIAL HANDLING', 'CLARIFICATION', 'RMA'];
+// Coloured stripe for each area card (top border)
+var SCF_AREA_COLORS = {
+  'DIGESTION':         '#1565c0',
+  'BOILER':            '#e65100',
+  'CALCINATION':       '#6a1b9a',
+  'MATERIAL HANDLING': '#2e7d32',
+  'CLARIFICATION':     '#00838f',
+  'RMA':               '#c62828'
+};
+
+// ============================================================
+// PART 1: Replace the 3 tonnage stat cards with 6 area cards + Total Active
+// ============================================================
+(function(){
+  function rebuildStatCards(){
+    var old = document.getElementById('scf-stat-cards');
+    if(!old){ setTimeout(rebuildStatCards, 300); return; }
+    // Build new grid
+    var html = '';
+    // Total Active first - the headline number
+    html += '<div class="sc" style="border-top:4px solid #1a1a1a;text-align:center;background:#fafafa">'
+      +   '<div class="sl2" style="font-weight:800">TOTAL ACTIVE</div>'
+      +   '<div class="sv" id="scf-stat-total" style="color:#1a1a1a">0.000 t</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-total-items">0</span> items</div>'
+      + '</div>';
+    SCF_AREAS.forEach(function(area){
+      var color = SCF_AREA_COLORS[area] || '#607d8b';
+      var key = scfAreaKey(area);
+      html += '<div class="sc" style="border-top:4px solid '+color+';text-align:center">'
+        +   '<div class="sl2">'+scfEscHtml(area)+'</div>'
+        +   '<div class="sv" id="scf-stat-'+key+'" style="color:'+color+'">0.000 t</div>'
+        +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-'+key+'-items">0</span> items</div>'
+        + '</div>';
+    });
+    old.innerHTML = html;
+  }
+  rebuildStatCards();
+})();
+
+// Helper to make a safe DOM id from an area name
+function scfAreaKey(area){
+  return 'area-' + (area||'').toLowerCase().replace(/[^a-z0-9]+/g,'-');
+}
+
+// ============================================================
+// PART 2: Replace scfUpdateStats with the per-area version
+// ============================================================
+scfUpdateStats = function(){
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+
+  // Build per-area buckets from the active list (the headline metric)
+  var active = SCF_CACHE['active'] || [];
+  if(areaPrefix){
+    active = active.filter(function(s){
+      return (s.location || '').toLowerCase().indexOf(areaPrefix) === 0;
+    });
+  }
+
+  var buckets = {};
+  SCF_AREAS.forEach(function(a){ buckets[a] = { kg: 0, items: 0 }; });
+  var totalKg = 0, totalItems = 0;
+
+  active.forEach(function(s){
+    var kg = s.totalWeightKg || 0;
+    var items = s.totalItems || 0;
+    totalKg += kg; totalItems += items;
+    if(s.area && buckets[s.area]){
+      buckets[s.area].kg += kg;
+      buckets[s.area].items += items;
+    }
+  });
+
+  // Update Total Active
+  var totEl = document.getElementById('scf-stat-total');
+  var totItemsEl = document.getElementById('scf-stat-total-items');
+  if(totEl) totEl.textContent = (totalKg/1000).toFixed(3) + ' t';
+  if(totItemsEl) totItemsEl.textContent = totalItems;
+
+  // Update each area card
+  SCF_AREAS.forEach(function(area){
+    var key = scfAreaKey(area);
+    var el = document.getElementById('scf-stat-'+key);
+    var itemsEl = document.getElementById('scf-stat-'+key+'-items');
+    if(el) el.textContent = (buckets[area].kg / 1000).toFixed(3) + ' t';
+    if(itemsEl) itemsEl.textContent = buckets[area].items;
+  });
+
+  // Show filter indicator on the labels if area prefix is set
+  var cards = document.getElementById('scf-stat-cards');
+  if(cards && areaPrefix){
+    var labels = cards.querySelectorAll('.sl2');
+    labels.forEach(function(lbl){
+      var t = lbl.textContent;
+      if(t.indexOf('[') === -1){
+        lbl.innerHTML = scfEscHtml(t) + ' <span style="color:#cc0000;font-size:9px;font-weight:700">[' + areaPrefix.toUpperCase() + '*]</span>';
+      }
+    });
+  }
+};
+
+// ============================================================
+// PART 3: Build the area-picker modal (shared use)
+// ============================================================
+(function(){
+  if(document.getElementById('scf-area-picker-ml')) return;
+  var ml = document.createElement('div');
+  ml.id = 'scf-area-picker-ml';
+  ml.className = 'ml';
+  ml.innerHTML =
+      '<div class="mb" style="max-width:480px">'
+    +   '<div class="mhd" style="background:#1565c0">'
+    +     '<h3 id="scf-ap-title" style="color:#fff">Select Area</h3>'
+    +     '<button class="mcl" onclick="scfCloseAreaPicker()">&times;</button>'
+    +   '</div>'
+    +   '<div class="mc">'
+    +     '<p id="scf-ap-msg" style="margin:0 0 12px;font-size:13px;color:#555">Pick the area this scaffold belongs to:</p>'
+    +     '<div id="scf-ap-buttons" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>'
+    +     '<div style="margin-top:14px;text-align:right">'
+    +       '<button class="ob" onclick="scfCloseAreaPicker()">Cancel</button>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(ml);
+})();
+
+var SCF_AREA_PICKER_CALLBACK = null;
+function scfOpenAreaPicker(title, msg, callback){
+  SCF_AREA_PICKER_CALLBACK = callback;
+  document.getElementById('scf-ap-title').textContent = title || 'Select Area';
+  document.getElementById('scf-ap-msg').textContent = msg || 'Pick the area this scaffold belongs to:';
+  var box = document.getElementById('scf-ap-buttons');
+  var html = '';
+  SCF_AREAS.forEach(function(area){
+    var color = SCF_AREA_COLORS[area] || '#607d8b';
+    html += '<button onclick="scfPickArea(\''+area.replace(/\'/g,"\\\'")+'\')" '
+      + 'style="padding:14px 8px;background:'+color+';color:#fff;border:0;border-radius:4px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'
+      + scfEscHtml(area) + '</button>';
+  });
+  box.innerHTML = html;
+  document.getElementById('scf-area-picker-ml').classList.add('on');
+}
+function scfCloseAreaPicker(){
+  document.getElementById('scf-area-picker-ml').classList.remove('on');
+  SCF_AREA_PICKER_CALLBACK = null;
+}
+function scfPickArea(area){
+  var cb = SCF_AREA_PICKER_CALLBACK;
+  scfCloseAreaPicker();
+  if(cb) cb(area);
+}
+
+// ============================================================
+// PART 4: Replace the Approve action with one that picks an area first
+// ============================================================
+var _origScfAction = scfAction;
+scfAction = function(action, id){
+  if(action !== 'approve'){
+    _origScfAction.apply(this, arguments);
+    return;
+  }
+  // Approve flow: open area picker first
+  scfOpenAreaPicker('Approve Scaffold', 'Select the area this scaffold belongs to:', function(area){
+    if(!confirm('Approve this scaffold and assign to ' + area + '?')) return;
+    setSS('bz', 'Approving scaffold for ' + area + '...');
+    fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'scaffold_action', subAction:'approve', id:id, area:area}) })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j.ok) throw new Error(j.error || 'Approve failed');
+        setSS('ok','Approved');
+        scfCloseDetail();
+        scfLoad();
+      })
+      .catch(function(err){
+        setSS('er','Approve failed: '+err.message);
+        alert('Approve failed: '+err.message);
+      });
+  });
+};
+
+// ============================================================
+// PART 5: Add an Area dropdown to the edit modal
+// ============================================================
+(function(){
+  function injectAreaSelect(){
+    var modal = document.getElementById('scf-edit-ml');
+    if(!modal) { setTimeout(injectAreaSelect, 300); return; }
+    if(document.getElementById('scf-e-area')) return;
+    var woField = document.getElementById('scf-e-wo');
+    if(!woField){ setTimeout(injectAreaSelect, 300); return; }
+    var woWrapper = woField.closest('.mf');
+    if(!woWrapper) return;
+    var areaWrapper = document.createElement('div');
+    areaWrapper.className = 'mf';
+    var html = '<label>Area</label>'
+      + '<select id="scf-e-area" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit;background:#fff">'
+      + '<option value="">— select area —</option>';
+    SCF_AREAS.forEach(function(a){
+      html += '<option value="'+scfEscHtml(a)+'">'+scfEscHtml(a)+'</option>';
+    });
+    html += '</select>';
+    areaWrapper.innerHTML = html;
+    // Insert AFTER the workOrder field
+    woWrapper.parentNode.insertBefore(areaWrapper, woWrapper.nextSibling);
+  }
+  injectAreaSelect();
+})();
+
+// When edit modal opens, populate the area dropdown
+var _origScfOpenEditForArea = scfOpenEdit;
+scfOpenEdit = function(){
+  _origScfOpenEditForArea.apply(this, arguments);
+  setTimeout(function(){
+    var sel = document.getElementById('scf-e-area');
+    if(sel && SCF_OPEN_SCAFFOLD && SCF_OPEN_SCAFFOLD.scaffold){
+      sel.value = SCF_OPEN_SCAFFOLD.scaffold.area || '';
+    }
+  }, 0);
+};
+
+// When manual-add opens, blank the area dropdown
+var _origScfOpenManualAddForArea = scfOpenManualAdd;
+scfOpenManualAdd = function(){
+  _origScfOpenManualAddForArea.apply(this, arguments);
+  setTimeout(function(){
+    var sel = document.getElementById('scf-e-area');
+    if(sel) sel.value = '';
+  }, 0);
+};
+
+// ============================================================
+// PART 6: Hook area into the save payload (extend the fetch interceptor)
+// ============================================================
+// Stage 4 already monkey-patches fetch to inject workOrder. Wrap it again
+// to also inject area for edit + manual_add.
+var _prevFetchForArea = window.fetch;
+window.fetch = function(url, opts){
+  try {
+    if(opts && opts.body && typeof opts.body === 'string'){
+      var body = JSON.parse(opts.body);
+      if(body && (body.action === 'scaffold_edit' || body.action === 'scaffold_manual_add')){
+        var sel = document.getElementById('scf-e-area');
+        if(sel){
+          var areaVal = sel.value;
+          if(body.action === 'scaffold_edit'){
+            body.fields = body.fields || {};
+            body.fields.area = areaVal;
+          } else {
+            body.data = body.data || {};
+            body.data.area = areaVal;
+          }
+          // For manual_add, area is required - block if blank
+          if(body.action === 'scaffold_manual_add' && !areaVal){
+            alert('Please select an area before saving.');
+            return Promise.resolve({
+              ok: true,
+              json: function(){ return Promise.resolve({ok:false, error:'Area is required'}); }
+            });
+          }
+          opts = Object.assign({}, opts, { body: JSON.stringify(body) });
+        }
+      }
+    }
+  } catch(e){}
+  return _prevFetchForArea.apply(this, [url, opts]);
+};
+
+// ============================================================
+// PART 7: Show area on cards
+// ============================================================
+var _origScfRenderForArea = scfRender;
+scfRender = function(){
+  _origScfRenderForArea.apply(this, arguments);
+  // Walk through visible cards and tag with area chip
+  var items = (SCF_CACHE[SCF_CURRENT_TAB] || []);
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+  var search = (document.getElementById('scf-filter')||{}).value || '';
+  search = search.trim().toLowerCase();
+  var filtered = items.filter(function(s){
+    if(areaPrefix && (s.location || '').toLowerCase().indexOf(areaPrefix) !== 0) return false;
+    if(!search) return true;
+    return (s.tag||'').toLowerCase().indexOf(search) >= 0
+        || (s.location||'').toLowerCase().indexOf(search) >= 0
+        || (s.erectedBy||'').toLowerCase().indexOf(search) >= 0;
+  });
+  var cards = document.querySelectorAll('#scf-list .scf-card');
+  cards.forEach(function(card, idx){
+    var s = filtered[idx];
+    if(!s) return;
+    if(card.querySelector('.scf-area-chip')) return; // already added
+    if(s.area){
+      var color = SCF_AREA_COLORS[s.area] || '#607d8b';
+      var chip = document.createElement('div');
+      chip.className = 'scf-area-chip';
+      chip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+        + 'background:'+color+';padding:2px 7px;border-radius:10px;margin-top:3px';
+      chip.textContent = s.area;
+      // Find a sensible insertion point - after the tag heading
+      var firstChild = card.firstElementChild;
+      if(firstChild) firstChild.appendChild(chip);
+    }
+  });
+};
+
+// ============================================================
+// PART 8: Show area in detail view + PDF
+// ============================================================
+var _origScfOpenDetailForArea = scfOpenDetail;
+scfOpenDetail = function(id){
+  _origScfOpenDetailForArea.apply(this, arguments);
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  if(!s.area) return;
+  var body = document.getElementById('scf-detail-body');
+  if(!body) return;
+  var tbody = body.querySelector('table tbody');
+  if(!tbody) return;
+  if(tbody.querySelector('.scf-area-row')) return; // already there
+  var color = SCF_AREA_COLORS[s.area] || '#607d8b';
+  var tr = document.createElement('tr');
+  tr.className = 'scf-area-row';
+  tr.innerHTML = '<td style="padding:3px 0;color:#607d8b;width:120px">Area</td>'
+    + '<td><span style="display:inline-block;background:'+color+';color:#fff;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px">'+scfEscHtml(s.area)+'</span></td>';
+  tbody.insertBefore(tr, tbody.firstChild);
+};
+
+// PDF: inject area row into the printable HTML
+var _origScfPrintPDFForArea = scfPrintPDF;
+scfPrintPDF = function(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  var _origOpen = window.open;
+  window.open = function(){
+    var w = _origOpen.apply(window, arguments);
+    if(!w) return w;
+    var _origWrite = w.document.write;
+    w.document.write = function(html){
+      if(s.area){
+        var areaRow = '<tr><td class="lbl">Area</td><td class="val" colspan="3"><b>' + scfEscHtml(s.area) + '</b></td></tr>';
+        // Insert at the top of the info table (after the first <tr> if any)
+        html = html.replace(
+          /(<td class="lbl">Tag<\/td><td class="val">[^<]*<\/td>)/,
+          '$1</tr><tr>' + areaRow.replace(/<\/?tr>/g,'')
+        );
+        // Fallback: prepend to table if pattern not found
+        if(html.indexOf(areaRow) === -1){
+          html = html.replace(/(<table class="info">[^<]*<tbody>)/,'$1'+areaRow);
+        }
+      }
+      _origWrite.call(this, html);
+    };
+    return w;
+  };
+  _origScfPrintPDFForArea.apply(this, arguments);
+  setTimeout(function(){ window.open = _origOpen; }, 100);
+};
+
+// ============================================================
+// PART 9: First-load prompt for existing active scaffolds without area
+// ============================================================
+var SCF_AREA_BACKFILL_DONE = false;
+function scfCheckAreaBackfill(){
+  if(SCF_AREA_BACKFILL_DONE) return;
+  // Only check once data has loaded
+  var active = SCF_CACHE['active'] || [];
+  var missing = active.filter(function(s){ return !s.area; });
+  if(missing.length === 0){
+    SCF_AREA_BACKFILL_DONE = true;
+    return;
+  }
+  SCF_AREA_BACKFILL_DONE = true; // only show on first load even if user cancels
+
+  // Build a custom modal listing the missing scaffolds
+  var ml = document.getElementById('scf-backfill-ml');
+  if(!ml){
+    ml = document.createElement('div');
+    ml.id = 'scf-backfill-ml';
+    ml.className = 'ml';
+    ml.innerHTML =
+        '<div class="mb" style="max-width:600px">'
+      +   '<div class="mhd" style="background:#e65100">'
+      +     '<h3 style="color:#fff">Assign Areas to Active Scaffolds</h3>'
+      +     '<button class="mcl" onclick="document.getElementById(\'scf-backfill-ml\').classList.remove(\'on\')">&times;</button>'
+      +   '</div>'
+      +   '<div class="mc">'
+      +     '<p style="margin:0 0 12px;font-size:13px;color:#555">The following active scaffolds don\'t have an area assigned. Pick an area for each (or skip for now):</p>'
+      +     '<div id="scf-backfill-list"></div>'
+      +     '<div style="margin-top:14px;text-align:right">'
+      +       '<button class="ob" onclick="document.getElementById(\'scf-backfill-ml\').classList.remove(\'on\')">Close</button>'
+      +     '</div>'
+      +   '</div>'
+      + '</div>';
+    document.body.appendChild(ml);
+  }
+  var listEl = document.getElementById('scf-backfill-list');
+  var html = '';
+  missing.forEach(function(s){
+    var sel = 'scf-bf-' + s.id;
+    html += '<div style="padding:8px;border:1px solid var(--bd);border-radius:4px;margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:140px"><b>'+scfEscHtml(s.tag||'(no tag)')+'</b> &middot; <span style="color:#888;font-size:12px">'+scfEscHtml(s.location||'')+'</span></div>'
+      + '<select id="'+sel+'" style="padding:4px 6px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="">— select —</option>';
+    SCF_AREAS.forEach(function(a){
+      html += '<option value="'+scfEscHtml(a)+'">'+scfEscHtml(a)+'</option>';
+    });
+    html += '</select>';
+    html += '<button class="rb" style="font-size:11px;padding:4px 10px" onclick="scfBackfillSave(\''+s.id+'\')">Save</button>';
+    html += '</div>';
+  });
+  listEl.innerHTML = html;
+  ml.classList.add('on');
+}
+
+function scfBackfillSave(id){
+  var sel = document.getElementById('scf-bf-'+id);
+  if(!sel || !sel.value){ alert('Please pick an area first.'); return; }
+  var area = sel.value;
+  setSS('bz','Saving area...');
+  // We use scaffold_edit so the row stays in Active
+  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+    body: JSON.stringify({action:'scaffold_edit', id:id, fromTab:'active', fields:{area:area}}) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(!j.ok) throw new Error(j.error || 'Save failed');
+      setSS('ok','Area saved');
+      // Remove that entry's row from the backfill list
+      var btn = document.querySelector('#scf-bf-'+id);
+      if(btn){
+        var row = btn.closest('div');
+        if(row && row.parentNode) row.parentNode.removeChild(row);
+      }
+      // Update the cached scaffold so it doesn't reprompt
+      var active = SCF_CACHE['active'] || [];
+      for(var i=0;i<active.length;i++){
+        if(active[i].id === id){ active[i].area = area; break; }
+      }
+      scfUpdateStats();
+      // If list is now empty, close the modal
+      var list = document.getElementById('scf-backfill-list');
+      if(list && list.children.length === 0){
+        document.getElementById('scf-backfill-ml').classList.remove('on');
+      }
+    })
+    .catch(function(err){
+      setSS('er','Save failed: '+err.message);
+      alert('Save failed: '+err.message);
+    });
+}
+
+// Hook into the badges update so the backfill check runs after data is loaded
+var _prevScfUpdateBadgesForBackfill = scfUpdateBadges;
+scfUpdateBadges = function(){
+  _prevScfUpdateBadgesForBackfill.apply(this, arguments);
+  // Defer slightly so the page is settled
+  setTimeout(scfCheckAreaBackfill, 800);
+};
+  
+
   
 
 </script></body></html>

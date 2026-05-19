@@ -6656,6 +6656,495 @@ scfPrintPDF = function(){
   setTimeout(rebuildSolidBubbles, 1700);
 })();
 
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 13
+// Two combined features:
+//  A) Clickable bubbles - tap a bubble to filter to that area or
+//     long-term. TOTAL ACTIVE clears the filter.
+//  B) Failed scaffolds - new "Failed" tab between Active and
+//     Dismantled, new FAILED bubble, Mark Failed action with
+//     reason, Unfail action, Mark Dismantled from Failed.
+// Paste at the bottom of the existing code, before the closing
+// script tag.
+// ============================================================
+
+// ------------------------------------------------------------
+// PART A1: bubble click filter state
+// ------------------------------------------------------------
+// null, 'area:<NAME>', 'longterm', 'failed'
+var SCF_BUBBLE_FILTER = null;
+
+// ------------------------------------------------------------
+// PART B1: add a "Failed" sub-tab between Active and Dismantled
+// ------------------------------------------------------------
+(function(){
+  function injectFailedTab(){
+    var dismantleBtn = document.getElementById('scf-tb-dismantled');
+    if(!dismantleBtn){ setTimeout(injectFailedTab, 300); return; }
+    if(document.getElementById('scf-tb-failed')) return;
+    var btn = document.createElement('button');
+    btn.id = 'scf-tb-failed';
+    btn.className = 'reg-tb';
+    btn.onclick = function(){
+      SCF_CURRENT_TAB = 'failed';
+      document.querySelectorAll('#t15 .reg-tb').forEach(function(b){ b.classList.remove('on'); });
+      btn.classList.add('on');
+      SCF_BUBBLE_FILTER = null;  // clear bubble filter when switching tabs manually
+      scfRender();
+      scfUpdateBubbleHighlight();
+    };
+    btn.innerHTML = 'Failed <span class="reg-tb-b" id="scf-tb-failed-b">0</span>';
+    dismantleBtn.parentNode.insertBefore(btn, dismantleBtn);
+  }
+  injectFailedTab();
+})();
+
+// ------------------------------------------------------------
+// PART B2: extend scfLoad to populate the "failed" view
+// We don't add a separate sheet tab - failed scaffolds live in
+// ScaffoldActive with a flag. The frontend filters them into a
+// virtual "failed" cache.
+// ------------------------------------------------------------
+function scfRecomputeFailedCache(){
+  var active = SCF_CACHE['active'] || [];
+  SCF_CACHE['failed'] = active.filter(function(s){ return !!s.failed; });
+}
+
+// After any data load, recompute the failed cache and update its badge.
+var _stage13PrevUpdateBadges = scfUpdateBadges;
+scfUpdateBadges = function(){
+  scfRecomputeFailedCache();
+  _stage13PrevUpdateBadges.apply(this, arguments);
+  var b = document.getElementById('scf-tb-failed-b');
+  if(b) b.textContent = (SCF_CACHE['failed'] || []).length;
+};
+
+// ------------------------------------------------------------
+// PART A2 + B3: rebuild bubbles - clickable + new FAILED bubble
+// ------------------------------------------------------------
+(function(){
+  function rebuildBubblesS13(){
+    var container = document.getElementById('scf-stat-cards');
+    if(!container){ setTimeout(rebuildBubblesS13, 300); return; }
+    container.className = '';
+    container.style.cssText =
+      'display:flex;flex-wrap:wrap;gap:14px;justify-content:center;'
+      + 'margin:0 0 14px;padding:6px 0';
+
+    function bubble(opts){
+      var color = opts.color;
+      var width = opts.size || '150px';
+      var height = opts.size || '150px';
+      var valSize = opts.valueSize || '22px';
+      var splitHtml = '';
+      if(opts.split){
+        splitHtml = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.92);line-height:1.2;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,0.15);pointer-events:none">'
+          + 'S1 <span id="' + opts.valueId + '-s1">0.0 t</span>'
+          + ' &middot; '
+          + 'S2 <span id="' + opts.valueId + '-s2">0.0 t</span>'
+          + '</div>';
+      }
+      var bubbleId = 'scf-bubble-' + (opts.filterKey || 'unknown').replace(/[^a-zA-Z0-9]+/g,'-');
+      return ''
+        + '<div id="'+bubbleId+'" data-filter-key="'+(opts.filterKey || '')+'" '
+        +    'data-base-color="'+color+'" '
+        +    'onclick="scfBubbleClick(\''+(opts.filterKey||'').replace(/\'/g,"\\\'")+'\')" '
+        +    'style="display:flex;flex-direction:column;align-items:center;'
+        +    'justify-content:center;width:'+width+';height:'+height+';'
+        +    'border-radius:50%;background:'+color+';'
+        +    'box-shadow:0 4px 14px rgba(0,0,0,0.18), inset 0 -4px 14px rgba(0,0,0,0.10);'
+        +    'position:relative;color:#fff;cursor:pointer;user-select:none;'
+        +    'transition:transform 0.15s ease, box-shadow 0.15s ease" '
+        +    'onmouseover="this.style.transform=\'scale(1.05)\'" '
+        +    'onmouseout="this.style.transform=\'scale(1)\'">'
+        + '  <div style="position:absolute;top:-11px;background:#fff;color:'+color+';'
+        +    'padding:3px 12px;border-radius:14px;font-size:10px;font-weight:800;'
+        +    'letter-spacing:0.5px;white-space:nowrap;box-shadow:0 2px 5px rgba(0,0,0,0.18);'
+        +    'border:1.5px solid '+color+';pointer-events:none" class="sl2">'+scfEscHtml(opts.label)+'</div>'
+        + '  <div style="font-size:'+valSize+';font-weight:800;color:#fff;'
+        +    'margin-top:6px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,0.20);pointer-events:none" '
+        +    'id="'+opts.valueId+'">0.000 t</div>'
+        + '  <div style="font-size:10px;color:rgba(255,255,255,0.9);margin-top:5px;font-weight:600;pointer-events:none">'
+        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        +    splitHtml
+        + '</div>';
+    }
+
+    var html = '';
+    html += bubble({
+      label: 'TOTAL ACTIVE',
+      color: '#1a1a1a',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-total',
+      itemsId: 'scf-stat-total-items',
+      filterKey: 'clear'
+    });
+    html += bubble({
+      label: 'LONG-TERM',
+      color: '#f57f17',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-longterm',
+      itemsId: 'scf-stat-longterm-items',
+      filterKey: 'longterm'
+    });
+    html += bubble({
+      label: 'FAILED',
+      color: '#c62828',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-failed',
+      itemsId: 'scf-stat-failed-items',
+      filterKey: 'failed'
+    });
+    SCF_AREAS.forEach(function(area){
+      var color = SCF_AREA_COLORS[area] || '#607d8b';
+      var key = scfAreaKey(area);
+      var split = (typeof SCF_STAGED_AREAS !== 'undefined') && SCF_STAGED_AREAS.indexOf(area.toUpperCase()) !== -1;
+      html += bubble({
+        label: area,
+        color: color,
+        valueId: 'scf-stat-'+key,
+        itemsId: 'scf-stat-'+key+'-items',
+        split: split,
+        filterKey: 'area:' + area
+      });
+    });
+    container.innerHTML = html;
+    if(typeof scfUpdateStats === 'function') scfUpdateStats();
+    scfUpdateBubbleHighlight();
+  }
+  setTimeout(rebuildBubblesS13, 200);
+})();
+
+// ------------------------------------------------------------
+// PART B4: extend scfUpdateStats - also compute FAILED total
+// ------------------------------------------------------------
+var _stage13PrevUpdateStats = scfUpdateStats;
+scfUpdateStats = function(){
+  _stage13PrevUpdateStats.apply(this, arguments);
+
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+
+  var active = SCF_CACHE['active'] || [];
+  if(areaPrefix){
+    active = active.filter(function(s){
+      return (s.location || '').toLowerCase().indexOf(areaPrefix) === 0;
+    });
+  }
+
+  var failedKg = 0, failedItems = 0;
+  active.forEach(function(s){
+    if(s.failed){
+      failedKg += s.totalWeightKg || 0;
+      failedItems += s.totalItems || 0;
+    }
+  });
+
+  var el = document.getElementById('scf-stat-failed');
+  var itemsEl = document.getElementById('scf-stat-failed-items');
+  if(el) el.textContent = (failedKg/1000).toFixed(3) + ' t';
+  if(itemsEl) itemsEl.textContent = failedItems;
+};
+
+// ------------------------------------------------------------
+// PART A3: bubble click handler
+// ------------------------------------------------------------
+function scfBubbleClick(filterKey){
+  if(!filterKey) return;
+  if(filterKey === 'clear'){
+    SCF_BUBBLE_FILTER = null;
+  } else if(SCF_BUBBLE_FILTER === filterKey){
+    SCF_BUBBLE_FILTER = null;
+  } else {
+    SCF_BUBBLE_FILTER = filterKey;
+  }
+
+  // Switch to Active tab (or Failed for the FAILED bubble) when a filter is applied
+  if(SCF_BUBBLE_FILTER !== null){
+    var targetTab = (SCF_BUBBLE_FILTER === 'failed') ? 'failed' : 'active';
+    if(SCF_CURRENT_TAB !== targetTab){
+      SCF_CURRENT_TAB = targetTab;
+      document.querySelectorAll('#t15 .reg-tb').forEach(function(b){ b.classList.remove('on'); });
+      var btn = document.getElementById('scf-tb-' + targetTab);
+      if(btn) btn.classList.add('on');
+    }
+  }
+
+  scfRender();
+  scfUpdateBubbleHighlight();
+}
+
+// ------------------------------------------------------------
+// PART A4: highlight the selected bubble
+// ------------------------------------------------------------
+function scfUpdateBubbleHighlight(){
+  var container = document.getElementById('scf-stat-cards');
+  if(!container) return;
+  var bubbles = container.querySelectorAll('[data-filter-key]');
+  bubbles.forEach(function(b){
+    var key = b.getAttribute('data-filter-key');
+    var color = b.getAttribute('data-base-color') || '#000';
+    var isSelected = (SCF_BUBBLE_FILTER === key) ||
+                     (SCF_BUBBLE_FILTER === null && key === 'clear');
+    if(isSelected){
+      b.style.boxShadow = '0 0 0 5px #fff, 0 0 0 8px '+color+', 0 6px 18px rgba(0,0,0,0.30), inset 0 -4px 14px rgba(0,0,0,0.10)';
+      b.style.transform = 'scale(1.05)';
+    } else {
+      b.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18), inset 0 -4px 14px rgba(0,0,0,0.10)';
+      b.style.transform = 'scale(1)';
+    }
+  });
+}
+
+// ------------------------------------------------------------
+// PART A5: apply bubble filter inside scfRender
+// ------------------------------------------------------------
+var _stage13OrigRender = scfRender;
+scfRender = function(){
+  var bf = SCF_BUBBLE_FILTER;
+  if(!bf){
+    _stage13OrigRender.apply(this, arguments);
+    scfUpdateBubbleHighlight();
+    scfRefreshFilterBanner();
+    return;
+  }
+
+  var originalList = SCF_CACHE[SCF_CURRENT_TAB] || [];
+  var filteredList = originalList.filter(function(s){
+    if(bf === 'longterm') return !!s.longTerm;
+    if(bf === 'failed')   return !!s.failed;
+    if(bf.indexOf('area:') === 0){
+      var wantArea = bf.substr(5);
+      return s.area === wantArea;
+    }
+    return true;
+  });
+
+  SCF_CACHE[SCF_CURRENT_TAB] = filteredList;
+  _stage13OrigRender.apply(this, arguments);
+  SCF_CACHE[SCF_CURRENT_TAB] = originalList;
+  scfUpdateBubbleHighlight();
+  scfRefreshFilterBanner();
+};
+
+// ------------------------------------------------------------
+// PART A6: active-filter banner
+// ------------------------------------------------------------
+function scfRefreshFilterBanner(){
+  var existing = document.getElementById('scf-filter-banner');
+  if(existing && existing.parentNode) existing.parentNode.removeChild(existing);
+  if(!SCF_BUBBLE_FILTER) return;
+  var label = '';
+  if(SCF_BUBBLE_FILTER === 'longterm')  label = 'LONG-TERM scaffolds only';
+  else if(SCF_BUBBLE_FILTER === 'failed') label = 'FAILED scaffolds only';
+  else if(SCF_BUBBLE_FILTER.indexOf('area:') === 0) label = SCF_BUBBLE_FILTER.substr(5) + ' area only';
+  if(!label) return;
+
+  var list = document.getElementById('scf-list');
+  if(!list) return;
+  var banner = document.createElement('div');
+  banner.id = 'scf-filter-banner';
+  banner.style.cssText = 'background:#fff8e1;border:1px solid #ffe082;border-radius:4px;'
+    + 'padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;'
+    + 'font-size:13px;font-weight:600;color:#5d4037';
+  banner.innerHTML = '<span style="font-size:16px">&#128269;</span>'
+    + '<span style="flex:1">Filtered by: <b>'+scfEscHtml(label)+'</b></span>'
+    + '<button onclick="scfBubbleClick(\'clear\')" '
+    + 'style="background:#1a1a1a;color:#fff;border:0;border-radius:4px;'
+    + 'padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">'
+    + 'CLEAR FILTER</button>';
+  list.parentNode.insertBefore(banner, list);
+}
+
+// ------------------------------------------------------------
+// PART B5: Failed-state actions in detail view
+// scfConfirmAction is what fires when Approve/Reject/Dismantle/etc
+// is clicked. We add three new action types: 'fail', 'unfail',
+// 'dismantle-failed'.
+// We also need to insert new buttons into the detail action bar.
+// ------------------------------------------------------------
+
+// Inject extra action buttons into the detail modal after it opens
+var _stage13OrigOpenDetail = scfOpenDetail;
+scfOpenDetail = function(id){
+  _stage13OrigOpenDetail.apply(this, arguments);
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  var tab = SCF_OPEN_SCAFFOLD.tab;
+  var actionsBar = document.getElementById('scf-detail-actions');
+  if(!actionsBar) return;
+
+  // Remove any failed-related buttons from prior opens
+  ['scf-act-fail','scf-act-unfail','scf-act-dismantle-failed'].forEach(function(id){
+    var b = document.getElementById(id); if(b && b.parentNode) b.parentNode.removeChild(b);
+  });
+
+  // Show fail/unfail status row in detail body
+  var tbody = document.querySelector('#scf-detail-body table tbody');
+  // remove any prior failed row
+  var existingFR = tbody && tbody.querySelector('.scf-failed-row');
+  if(existingFR) existingFR.parentNode.removeChild(existingFR);
+  if(tbody && s.failed){
+    var tr = document.createElement('tr');
+    tr.className = 'scf-failed-row';
+    var reason = s.failedReason ? ' &mdash; <span style="color:#555;font-weight:500">'+scfEscHtml(s.failedReason)+'</span>' : '';
+    tr.innerHTML = '<td style="padding:3px 0;color:#607d8b;width:120px">Failed</td>'
+      + '<td><span style="display:inline-block;background:#c62828;color:#fff;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px">FAILED</span>'+reason+'</td>';
+    tbody.insertBefore(tr, tbody.firstChild);
+  }
+
+  // Add action buttons depending on tab/state
+  // tab is 'active' or 'failed' (failed is the virtual cache tab)
+  // - From active, not failed: "Mark as Failed" button
+  // - From failed (or active+failed): "Unfail" + "Mark Dismantled" buttons
+  if((tab === 'active' || tab === 'failed') && !s.failed){
+    var btnFail = document.createElement('button');
+    btnFail.id = 'scf-act-fail';
+    btnFail.className = 'rb';
+    btnFail.style.cssText = 'background:#c62828;font-size:12px;padding:5px 12px';
+    btnFail.innerHTML = '&#9888; Mark as Failed';
+    btnFail.onclick = function(){ scfFailScaffold(s.id); };
+    actionsBar.appendChild(btnFail);
+  }
+  if(s.failed){
+    var btnUnfail = document.createElement('button');
+    btnUnfail.id = 'scf-act-unfail';
+    btnUnfail.className = 'rb';
+    btnUnfail.style.cssText = 'background:#2e7d32;font-size:12px;padding:5px 12px';
+    btnUnfail.innerHTML = '&#10003; Unfail (back to Active)';
+    btnUnfail.onclick = function(){ scfUnfailScaffold(s.id); };
+    actionsBar.appendChild(btnUnfail);
+
+    // Also need Mark Dismantled if we're viewing in the Failed tab
+    // (Active tab already has Mark Dismantled)
+    if(tab === 'failed'){
+      var btnDis = document.createElement('button');
+      btnDis.id = 'scf-act-dismantle-failed';
+      btnDis.className = 'rb';
+      btnDis.style.cssText = 'background:#607d8b;font-size:12px;padding:5px 12px';
+      btnDis.innerHTML = '&#9881; Mark Dismantled';
+      btnDis.onclick = function(){ scfConfirmAction('dismantle'); };
+      actionsBar.appendChild(btnDis);
+    }
+  }
+};
+
+// Mark a scaffold as failed (with reason)
+function scfFailScaffold(id){
+  var reason = prompt('Reason for failure (optional):', '');
+  if(reason === null) return;   // cancelled
+  setSS('bz','Marking as failed...');
+  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+    body: JSON.stringify({
+      action:'scaffold_edit',
+      id: id,
+      fromTab: 'active',
+      fields: { failed: true, failedReason: reason || '' }
+    }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(!j.ok) throw new Error(j.error || 'Mark failed failed');
+      setSS('ok','Marked as failed');
+      scfCloseDetail();
+      scfLoad();
+    })
+    .catch(function(err){
+      setSS('er','Failed to mark: '+err.message);
+      alert('Failed to mark: '+err.message);
+    });
+}
+
+// Remove the failed flag
+function scfUnfailScaffold(id){
+  if(!confirm('Mark this scaffold as PASSING again (move back to Active)?')) return;
+  setSS('bz','Unfailing...');
+  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+    body: JSON.stringify({
+      action:'scaffold_edit',
+      id: id,
+      fromTab: 'active',
+      fields: { failed: false, failedReason: '' }
+    }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(!j.ok) throw new Error(j.error || 'Unfail failed');
+      setSS('ok','Unfailed');
+      scfCloseDetail();
+      scfLoad();
+    })
+    .catch(function(err){
+      setSS('er','Unfail failed: '+err.message);
+      alert('Unfail failed: '+err.message);
+    });
+}
+
+// ------------------------------------------------------------
+// PART B6: Show FAILED chip on cards (alongside long-term / stage)
+// ------------------------------------------------------------
+var _stage13PrevRenderForChips = scfRender;
+scfRender = function(){
+  _stage13PrevRenderForChips.apply(this, arguments);
+  var items = SCF_CACHE[SCF_CURRENT_TAB] || [];
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+  var search = (document.getElementById('scf-filter')||{}).value || '';
+  search = search.trim().toLowerCase();
+
+  var bf = SCF_BUBBLE_FILTER;
+  var filtered = items.filter(function(s){
+    if(bf === 'longterm' && !s.longTerm) return false;
+    if(bf === 'failed' && !s.failed) return false;
+    if(bf && bf.indexOf('area:') === 0 && s.area !== bf.substr(5)) return false;
+    if(areaPrefix && (s.location || '').toLowerCase().indexOf(areaPrefix) !== 0) return false;
+    if(!search) return true;
+    return (s.tag||'').toLowerCase().indexOf(search) >= 0
+        || (s.location||'').toLowerCase().indexOf(search) >= 0
+        || (s.erectedBy||'').toLowerCase().indexOf(search) >= 0;
+  });
+  var cards = document.querySelectorAll('#scf-list .scf-card');
+  cards.forEach(function(card, idx){
+    var s = filtered[idx];
+    if(!s) return;
+    if(!s.failed) return;
+    if(card.querySelector('.scf-failed-chip')) return;
+    var firstChild = card.firstElementChild;
+    if(!firstChild) return;
+    var chip = document.createElement('span');
+    chip.className = 'scf-failed-chip';
+    chip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+      + 'background:#c62828;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px';
+    chip.textContent = 'FAILED';
+    firstChild.appendChild(chip);
+  });
+};
+
+// ------------------------------------------------------------
+// PART B7: PDF row for failed status
+// ------------------------------------------------------------
+var _stage13OrigPDF = scfPrintPDF;
+scfPrintPDF = function(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  if(!s.failed){ _stage13OrigPDF.apply(this, arguments); return; }
+  var _origOpen = window.open;
+  window.open = function(){
+    var w = _origOpen.apply(window, arguments);
+    if(!w) return w;
+    var _origWrite = w.document.write;
+    w.document.write = function(html){
+      var reason = s.failedReason ? ' &mdash; ' + scfEscHtml(s.failedReason) : '';
+      var row = '<tr><td class="lbl">Status</td><td class="val" colspan="3"><b style="color:#c62828">FAILED</b>' + reason + '</td></tr>';
+      html = html.replace(/(<table class="info">[\s\S]*?)(<\/tbody>\s*<\/table>)/, '$1' + row + '$2');
+      _origWrite.call(this, html);
+    };
+    return w;
+  };
+  _stage13OrigPDF.apply(this, arguments);
+  setTimeout(function(){ window.open = _origOpen; }, 100);
+};
   
 
   

@@ -5276,7 +5276,134 @@ scfUpdateBadges = function(){
 
 // Also call on initial page load if SCF_CACHE has anything
 setTimeout(function(){ scfUpdateStats(); }, 4000);
+
   
+  
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 5
+// Area prefix filter + filtered tonnage totals.
+// Paste this entire block at the bottom of the existing Stage 4
+// scaffold code, before the closing script tag.
+// ============================================================
+
+// ============================================================
+// PART 1: Add Area Prefix filter input
+// ============================================================
+(function(){
+  function injectAreaFilter(){
+    var panel = document.getElementById('t15');
+    if(!panel) { setTimeout(injectAreaFilter, 300); return; }
+    if(document.getElementById('scf-area-filter')) return;
+    var filterBar = panel.querySelector('.filter-bar');
+    if(!filterBar) { setTimeout(injectAreaFilter, 300); return; }
+
+    // Insert the area filter before the search filter
+    var areaLabel = document.createElement('label');
+    areaLabel.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mu);white-space:nowrap';
+    areaLabel.textContent = 'Area:';
+
+    var areaInput = document.createElement('input');
+    areaInput.type = 'text';
+    areaInput.id = 'scf-area-filter';
+    areaInput.placeholder = 'e.g. 240 (matches 240JPU, 240ABC...)';
+    areaInput.style.cssText = 'padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:200px';
+    areaInput.oninput = function(){ scfRender(); scfUpdateStats(); };
+
+    // Insert at the start of the filter bar (before the existing Search label)
+    filterBar.insertBefore(areaInput, filterBar.firstChild);
+    filterBar.insertBefore(areaLabel, areaInput);
+
+    // Also hook the existing "Clear" button to clear this too if it's nearby
+    var clearBtn = filterBar.querySelector('button.ob');
+    if(clearBtn){
+      var origClick = clearBtn.onclick;
+      clearBtn.onclick = function(){
+        if(origClick) origClick.apply(this, arguments);
+        var ai = document.getElementById('scf-area-filter');
+        if(ai) ai.value = '';
+        scfRender();
+        scfUpdateStats();
+      };
+    }
+  }
+  injectAreaFilter();
+})();
+
+// ============================================================
+// PART 2: Apply area filter to scaffold list AND remember filter state
+// ============================================================
+// The existing scfRender() reads the search box and filters cards.
+// We monkey-patch it to also apply the area prefix filter.
+var _origScfRenderArea = scfRender;
+scfRender = function(){
+  // Hide cards that don't match the area prefix before the original render
+  // runs. The cleanest way is to filter SCF_CACHE temporarily, but that
+  // pollutes the source. Instead we replace the data source for the
+  // current tab with a filtered view, render, then put it back.
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+  if(!areaPrefix){
+    // No area filter active - just defer to original render
+    _origScfRenderArea.apply(this, arguments);
+    return;
+  }
+
+  var originalList = SCF_CACHE[SCF_CURRENT_TAB];
+  var filteredList = originalList.filter(function(s){
+    return (s.location || '').toLowerCase().indexOf(areaPrefix) === 0;
+  });
+  // Swap, render, swap back
+  SCF_CACHE[SCF_CURRENT_TAB] = filteredList;
+  _origScfRenderArea.apply(this, arguments);
+  SCF_CACHE[SCF_CURRENT_TAB] = originalList;
+};
+
+// ============================================================
+// PART 3: Make the tonnage stat cards reflect the area filter
+// ============================================================
+// Replace scfUpdateStats with a version that respects the area prefix.
+scfUpdateStats = function(){
+  var areaInput = document.getElementById('scf-area-filter');
+  var areaPrefix = areaInput ? (areaInput.value || '').trim().toLowerCase() : '';
+
+  ['pending','active','dismantled'].forEach(function(tab){
+    var list = SCF_CACHE[tab] || [];
+    if(areaPrefix){
+      list = list.filter(function(s){
+        return (s.location || '').toLowerCase().indexOf(areaPrefix) === 0;
+      });
+    }
+    var totalKg = 0, totalItems = 0;
+    list.forEach(function(s){
+      totalKg += (s.totalWeightKg || 0);
+      totalItems += (s.totalItems || 0);
+    });
+    var totalT = totalKg / 1000;
+    var statEl = document.getElementById('scf-stat-' + tab);
+    var itemsEl = document.getElementById('scf-stat-' + tab + '-items');
+    if(statEl) statEl.textContent = totalT.toFixed(3) + ' t';
+    if(itemsEl) itemsEl.textContent = totalItems;
+  });
+
+  // Update the labels on the stat cards to show filter state
+  var cards = document.getElementById('scf-stat-cards');
+  if(cards){
+    var labels = cards.querySelectorAll('.sl2');
+    var names = ['Pending Tonnage', 'Active Tonnage', 'Dismantled Tonnage'];
+    labels.forEach(function(lbl, i){
+      if(areaPrefix){
+        lbl.innerHTML = names[i] + ' <span style="color:#cc0000;font-size:9px;font-weight:700">[' + areaPrefix.toUpperCase() + '*]</span>';
+      } else {
+        lbl.textContent = names[i];
+      }
+    });
+  }
+};
+
+// Trigger an initial stats refresh now that we've redefined the function
+setTimeout(function(){
+  if(typeof scfUpdateStats === 'function') scfUpdateStats();
+}, 100);
 
   
 

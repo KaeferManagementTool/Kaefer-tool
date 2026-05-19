@@ -5026,6 +5026,257 @@ scfCloseEdit = function(){
     };
   }
 })();
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 4
+// Work Order field + tonnage stat cards
+// Paste this entire block at the bottom of the existing
+// Stage 3 scaffold code, before the closing script tag.
+// ============================================================
+
+// ============================================================
+// PART 1: ADD WORK ORDER FIELD TO EDIT MODAL
+// ============================================================
+(function(){
+  function injectWorkOrderField(){
+    var modal = document.getElementById('scf-edit-ml');
+    if(!modal) { setTimeout(injectWorkOrderField, 300); return; }
+    // Don't double-inject
+    if(document.getElementById('scf-e-wo')) return;
+    // Find the grid that holds the input fields
+    var notesField = document.getElementById('scf-e-notes');
+    if(!notesField) { setTimeout(injectWorkOrderField, 300); return; }
+    var grid = notesField.closest('div[style*="grid-template-columns"]');
+    if(!grid) return;
+    // Create the work order field, insert BEFORE the notes field
+    var notesWrapper = notesField.closest('.mf');
+    var woWrapper = document.createElement('div');
+    woWrapper.className = 'mf';
+    woWrapper.innerHTML = '<label>Work Order <span style="color:#bbb;font-weight:400">(optional)</span></label>'
+      + '<input type="text" id="scf-e-wo" placeholder="e.g. WO-12345" '
+      + 'style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit">';
+    // Insert before notes
+    grid.insertBefore(woWrapper, notesWrapper);
+    // Make notes span full width if it wasn't (it was span 2, keep that)
+  }
+  injectWorkOrderField();
+})();
+
+// ============================================================
+// PART 2: HOOK INTO scfOpenEdit AND scfOpenManualAdd
+// ============================================================
+// Wrap the existing scfOpenEdit to also populate workOrder
+var _origScfOpenEditForWO = scfOpenEdit;
+scfOpenEdit = function(){
+  _origScfOpenEditForWO.apply(this, arguments);
+  setTimeout(function(){
+    var wo = document.getElementById('scf-e-wo');
+    if(wo && SCF_OPEN_SCAFFOLD && SCF_OPEN_SCAFFOLD.scaffold){
+      wo.value = SCF_OPEN_SCAFFOLD.scaffold.workOrder || '';
+    }
+  }, 0);
+};
+
+// Wrap scfOpenManualAdd similarly so the field is blank on add
+var _origScfOpenManualAdd = scfOpenManualAdd;
+scfOpenManualAdd = function(){
+  _origScfOpenManualAdd.apply(this, arguments);
+  setTimeout(function(){
+    var wo = document.getElementById('scf-e-wo');
+    if(wo) wo.value = '';
+  }, 0);
+};
+
+// ============================================================
+// PART 3: SAVE WORK ORDER WHEN EDITING OR ADDING
+// ============================================================
+// We need to wrap scfSaveEdit (the Stage 3 version, which has its own
+// branching logic). Cleanest approach: intercept the fetch payload.
+var _origFetchForWO = window.fetch;
+window.fetch = function(url, opts){
+  try {
+    if(opts && opts.body && typeof opts.body === 'string'){
+      var body = JSON.parse(opts.body);
+      if(body && (body.action === 'scaffold_edit' || body.action === 'scaffold_manual_add')){
+        var woEl = document.getElementById('scf-e-wo');
+        if(woEl){
+          var woVal = woEl.value.trim();
+          if(body.action === 'scaffold_edit'){
+            body.fields = body.fields || {};
+            body.fields.workOrder = woVal;
+          } else {
+            body.data = body.data || {};
+            body.data.workOrder = woVal;
+          }
+          opts = Object.assign({}, opts, { body: JSON.stringify(body) });
+        }
+      }
+    }
+  } catch(e){ /* not JSON or different shape - leave alone */ }
+  return _origFetchForWO.apply(this, [url, opts]);
+};
+
+// ============================================================
+// PART 4: SHOW WORK ORDER IN DETAIL VIEW
+// ============================================================
+var _origScfOpenDetailForWO = scfOpenDetail;
+scfOpenDetail = function(id){
+  _origScfOpenDetailForWO.apply(this, arguments);
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  if(!s.workOrder) return;
+  // Insert a workOrder row into the info table at the top of the body
+  var body = document.getElementById('scf-detail-body');
+  if(!body) return;
+  var tbody = body.querySelector('table tbody');
+  if(!tbody) return;
+  // Build a new row to insert after the "Location" row
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td style="padding:3px 0;color:#607d8b;width:120px">Work Order</td>'
+    + '<td style="font-weight:700;color:#1565c0">'+scfEscHtml(s.workOrder)+'</td>';
+  // Find the location row and insert after it
+  var rows = tbody.querySelectorAll('tr');
+  for(var i=0;i<rows.length;i++){
+    var firstCell = rows[i].cells[0];
+    if(firstCell && firstCell.textContent.trim() === 'Location'){
+      rows[i].parentNode.insertBefore(tr, rows[i].nextSibling);
+      return;
+    }
+  }
+  // Fallback: insert at the top
+  tbody.insertBefore(tr, tbody.firstChild);
+};
+
+// ============================================================
+// PART 5: SHOW WORK ORDER IN CARD LIST
+// ============================================================
+var _origScfRender = scfRender;
+scfRender = function(){
+  _origScfRender.apply(this, arguments);
+  // After original render, walk through visible cards and inject the
+  // workOrder line into each one (if the scaffold has one).
+  var items = (SCF_CACHE[SCF_CURRENT_TAB] || []);
+  var search = (document.getElementById('scf-filter')||{}).value || '';
+  search = search.trim().toLowerCase();
+  var filtered = items.filter(function(s){
+    if(!search) return true;
+    return (s.tag||'').toLowerCase().indexOf(search) >= 0
+        || (s.location||'').toLowerCase().indexOf(search) >= 0
+        || (s.erectedBy||'').toLowerCase().indexOf(search) >= 0;
+  });
+  var cards = document.querySelectorAll('#scf-list .scf-card');
+  cards.forEach(function(card, idx){
+    var s = filtered[idx];
+    if(!s || !s.workOrder) return;
+    // Find the "Erected by" line and add a WO line after it
+    var ercDiv = card.querySelector('div[style*="margin-top:2px"]');
+    if(!ercDiv) return;
+    // Don't double-add
+    if(card.querySelector('.scf-wo-line')) return;
+    var wo = document.createElement('div');
+    wo.className = 'scf-wo-line';
+    wo.style.cssText = 'font-size:11px;color:#1565c0;margin-top:2px;font-weight:600';
+    wo.innerHTML = 'WO: '+scfEscHtml(s.workOrder);
+    ercDiv.parentNode.insertBefore(wo, ercDiv.nextSibling);
+  });
+};
+
+// ============================================================
+// PART 6: WORK ORDER IN PDF EXPORT
+// ============================================================
+var _origScfPrintPDF = scfPrintPDF;
+scfPrintPDF = function(){
+  // We need to call the original but inject workOrder into the
+  // generated HTML. Cleanest: capture window.open and modify the html.
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  var _origOpen = window.open;
+  window.open = function(){
+    var w = _origOpen.apply(window, arguments);
+    if(!w) return w;
+    var _origWrite = w.document.write;
+    w.document.write = function(html){
+      // Inject a Work Order row into the info table
+      if(s.workOrder){
+        var woRow = '<tr><td class="lbl">Work Order</td><td class="val" colspan="3">'
+          + scfEscHtml(s.workOrder) + '</td></tr>';
+        // Insert after the Location row
+        html = html.replace(
+          /(<td class="lbl">Location \/ Area<\/td><td class="val" colspan="3">[^<]*<\/td><\/tr>)/,
+          '$1' + woRow
+        );
+      }
+      _origWrite.call(this, html);
+    };
+    return w;
+  };
+  _origScfPrintPDF.apply(this, arguments);
+  // Restore window.open
+  setTimeout(function(){ window.open = _origOpen; }, 100);
+};
+
+// ============================================================
+// PART 7: TONNAGE STAT CARDS
+// ============================================================
+(function(){
+  function injectStatCards(){
+    var panel = document.getElementById('t15');
+    if(!panel) { setTimeout(injectStatCards, 300); return; }
+    if(document.getElementById('scf-stat-cards')) return;
+    var introCard = panel.querySelector('.card');
+    if(!introCard) { setTimeout(injectStatCards, 300); return; }
+    var statsDiv = document.createElement('div');
+    statsDiv.id = 'scf-stat-cards';
+    statsDiv.className = 'sg';
+    statsDiv.style.cssText = 'margin-bottom:11px';
+    statsDiv.innerHTML =
+        '<div class="sc" style="border-top:4px solid #e65100;text-align:center">'
+      +   '<div class="sl2">Pending Tonnage</div>'
+      +   '<div class="sv" id="scf-stat-pending" style="color:#e65100">0.000 t</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-pending-items">0</span> items</div>'
+      + '</div>'
+      + '<div class="sc" style="border-top:4px solid #2e7d32;text-align:center">'
+      +   '<div class="sl2">Active Tonnage</div>'
+      +   '<div class="sv" id="scf-stat-active" style="color:#2e7d32">0.000 t</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-active-items">0</span> items</div>'
+      + '</div>'
+      + '<div class="sc" style="border-top:4px solid #607d8b;text-align:center">'
+      +   '<div class="sl2">Dismantled Tonnage</div>'
+      +   '<div class="sv" id="scf-stat-dismantled" style="color:#607d8b">0.000 t</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-dismantled-items">0</span> items</div>'
+      + '</div>';
+    // Insert after the intro card but before the sub-tabs
+    introCard.parentNode.insertBefore(statsDiv, introCard.nextSibling);
+  }
+  injectStatCards();
+})();
+
+// Update stat cards whenever data is loaded
+function scfUpdateStats(){
+  ['pending','active','dismantled'].forEach(function(tab){
+    var list = SCF_CACHE[tab] || [];
+    var totalKg = 0, totalItems = 0;
+    list.forEach(function(s){
+      totalKg += (s.totalWeightKg || 0);
+      totalItems += (s.totalItems || 0);
+    });
+    var totalT = totalKg / 1000;
+    var statEl = document.getElementById('scf-stat-'+tab);
+    var itemsEl = document.getElementById('scf-stat-'+tab+'-items');
+    if(statEl) statEl.textContent = totalT.toFixed(3) + ' t';
+    if(itemsEl) itemsEl.textContent = totalItems;
+  });
+}
+
+// Hook into scfUpdateBadges (called after every load) to also update stats
+var _origScfUpdateBadges = scfUpdateBadges;
+scfUpdateBadges = function(){
+  _origScfUpdateBadges.apply(this, arguments);
+  scfUpdateStats();
+};
+
+// Also call on initial page load if SCF_CACHE has anything
+setTimeout(function(){ scfUpdateStats(); }, 4000);
+  
 
   
 

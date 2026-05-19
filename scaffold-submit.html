@@ -157,6 +157,9 @@
     <label for="dateErected">Date erected *</label>
     <input type="date" id="dateErected" required>
 
+    <label for="workOrder">Work order (optional)</label>
+    <input type="text" id="workOrder" placeholder="e.g. WO-12345" autocomplete="off">
+
     <label for="notes">Notes (optional)</label>
     <input type="text" id="notes" placeholder="Any extras, dropped items, etc." autocomplete="off">
   </div>
@@ -319,6 +322,7 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
   const loc = document.getElementById('location').value.trim();
   const erector = document.getElementById('erectedBy').value.trim();
   const date = document.getElementById('dateErected').value;
+  const workOrder = document.getElementById('workOrder').value.trim();
   const notes = document.getElementById('notes').value.trim();
 
   if (!tag || !loc || !erector || !date) {
@@ -337,7 +341,7 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
   const payload = {
     action: 'scaffold_submit',
     data: {
-      tag, location: loc, erectedBy: erector, dateErected: date, notes,
+      tag, location: loc, erectedBy: erector, dateErected: date, workOrder, notes,
       quantities, // { componentId: qty }
       submittedAt: new Date().toISOString(),
       totalItems: parseInt(document.getElementById('totalItems').textContent, 10),

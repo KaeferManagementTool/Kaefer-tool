@@ -5881,6 +5881,89 @@ scfUpdateBadges = function(){
   setTimeout(scfCheckAreaBackfill, 800);
 };
 
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 7
+// 1) Add HYDRATE as a 7th area
+// 2) Restyle the tonnage stat cards as bubbles (rounder, bolder)
+// Paste this entire block at the bottom of the existing Stage 6
+// scaffold code, before the closing script tag.
+// ============================================================
+
+// ----- Add HYDRATE to the area list (and a colour for it) -----
+if(SCF_AREAS.indexOf('HYDRATE') === -1){
+  SCF_AREAS.push('HYDRATE');
+}
+SCF_AREA_COLORS['HYDRATE'] = '#ad1457';   // deep magenta - contrasts with the existing 7
+
+// ----- Rebuild the stat cards block (now 8 cards: Total Active + 7 areas) -----
+(function(){
+  function rebuildBubbles(){
+    var container = document.getElementById('scf-stat-cards');
+    if(!container){ setTimeout(rebuildBubbles, 300); return; }
+
+    // Use a flex grid so the bubbles can wrap nicely
+    container.className = '';  // clear .sg
+    container.style.cssText =
+      'display:flex;flex-wrap:wrap;gap:12px;justify-content:center;'
+      + 'margin:0 0 14px;padding:6px 0';
+
+    // Helper to build a bubble
+    function bubble(opts){
+      // opts: { label, color, valueId, itemsId, isTotal }
+      var color = opts.color;
+      var border = opts.isTotal ? '3px solid #1a1a1a' : '3px solid '+color;
+      var labelBg = opts.isTotal ? '#1a1a1a' : color;
+      var width = opts.isTotal ? '170px' : '150px';
+      var height = opts.isTotal ? '170px' : '150px';
+      return ''
+        + '<div style="display:flex;flex-direction:column;align-items:center;'
+        +    'justify-content:center;width:'+width+';height:'+height+';'
+        +    'border-radius:50%;background:#fff;border:'+border+';'
+        +    'box-shadow:0 3px 10px rgba(0,0,0,0.08);position:relative;'
+        +    'transition:transform 0.15s ease" '
+        +    'onmouseover="this.style.transform=\'scale(1.04)\'" '
+        +    'onmouseout="this.style.transform=\'scale(1)\'">'
+        + '  <div style="position:absolute;top:-10px;background:'+labelBg+';color:#fff;'
+        +    'padding:3px 10px;border-radius:12px;font-size:10px;font-weight:800;'
+        +    'letter-spacing:0.5px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.15)" '
+        +    'class="sl2">'+scfEscHtml(opts.label)+'</div>'
+        + '  <div style="font-size:'+(opts.isTotal?'24px':'20px')+';font-weight:800;color:'+(opts.isTotal?'#1a1a1a':color)+';'
+        +    'margin-top:4px;line-height:1" id="'+opts.valueId+'">0.000 t</div>'
+        + '  <div style="font-size:10px;color:#888;margin-top:4px">'
+        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        + '</div>';
+    }
+
+    var html = '';
+    // Total Active first - bigger and dark
+    html += bubble({
+      label: 'TOTAL ACTIVE',
+      color: '#1a1a1a',
+      valueId: 'scf-stat-total',
+      itemsId: 'scf-stat-total-items',
+      isTotal: true
+    });
+    // Each area
+    SCF_AREAS.forEach(function(area){
+      var color = SCF_AREA_COLORS[area] || '#607d8b';
+      var key = scfAreaKey(area);
+      html += bubble({
+        label: area,
+        color: color,
+        valueId: 'scf-stat-'+key,
+        itemsId: 'scf-stat-'+key+'-items',
+        isTotal: false
+      });
+    });
+    container.innerHTML = html;
+
+    // Trigger an immediate stats refresh so the bubbles populate
+    if(typeof scfUpdateStats === 'function') scfUpdateStats();
+  }
+  rebuildBubbles();
+})();
+  
+
   
 
   

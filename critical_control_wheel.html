@@ -6547,6 +6547,112 @@ scfPrintPDF = function(){
   setTimeout(function(){ window.open = _origOpen; }, 100);
 };
 
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 9
+// Fix: rebuild the edit-modal area dropdown so it includes HYDRATE
+// (and any future areas added to SCF_AREAS).
+// Paste at the bottom of Stage 8 code, before </script>.
+// ============================================================
+(function(){
+  function rebuildEditAreaDropdown(){
+    var sel = document.getElementById('scf-e-area');
+    if(!sel){ setTimeout(rebuildEditAreaDropdown, 300); return; }
+    // Preserve the current value if any
+    var current = sel.value;
+    // Rebuild options from the current SCF_AREAS
+    var html = '<option value="">— select area —</option>';
+    SCF_AREAS.forEach(function(a){
+      html += '<option value="'+scfEscHtml(a)+'">'+scfEscHtml(a)+'</option>';
+    });
+    sel.innerHTML = html;
+    sel.value = current;
+  }
+  rebuildEditAreaDropdown();
+})();
+// ============================================================
+// SCAFFOLD REGISTER - STAGE 10
+// Restyle bubbles: solid colour fill, white text.
+// Paste at the bottom of Stage 9, before </script>.
+// ============================================================
+(function(){
+  function rebuildSolidBubbles(){
+    var container = document.getElementById('scf-stat-cards');
+    if(!container){ setTimeout(rebuildSolidBubbles, 300); return; }
+    container.className = '';
+    container.style.cssText =
+      'display:flex;flex-wrap:wrap;gap:14px;justify-content:center;'
+      + 'margin:0 0 14px;padding:6px 0';
+
+    function bubble(opts){
+      var color = opts.color;
+      var width = opts.size || '150px';
+      var height = opts.size || '150px';
+      var valSize = opts.valueSize || '22px';
+      var splitHtml = '';
+      if(opts.split){
+        splitHtml = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.92);line-height:1.2;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,0.15)">'
+          + 'S1 <span id="' + opts.valueId + '-s1">0.0 t</span>'
+          + ' &middot; '
+          + 'S2 <span id="' + opts.valueId + '-s2">0.0 t</span>'
+          + '</div>';
+      }
+      // Use a slightly darker variant of the colour as a thin inner ring for depth
+      return ''
+        + '<div style="display:flex;flex-direction:column;align-items:center;'
+        +    'justify-content:center;width:'+width+';height:'+height+';'
+        +    'border-radius:50%;background:'+color+';'
+        +    'box-shadow:0 4px 14px rgba(0,0,0,0.18), inset 0 -4px 14px rgba(0,0,0,0.10);'
+        +    'position:relative;color:#fff;'
+        +    'transition:transform 0.15s ease" '
+        +    'onmouseover="this.style.transform=\'scale(1.05)\'" '
+        +    'onmouseout="this.style.transform=\'scale(1)\'">'
+        + '  <div style="position:absolute;top:-11px;background:#fff;color:'+color+';'
+        +    'padding:3px 12px;border-radius:14px;font-size:10px;font-weight:800;'
+        +    'letter-spacing:0.5px;white-space:nowrap;box-shadow:0 2px 5px rgba(0,0,0,0.18);'
+        +    'border:1.5px solid '+color+'" class="sl2">'+scfEscHtml(opts.label)+'</div>'
+        + '  <div style="font-size:'+valSize+';font-weight:800;color:#fff;'
+        +    'margin-top:6px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,0.20)" '
+        +    'id="'+opts.valueId+'">0.000 t</div>'
+        + '  <div style="font-size:10px;color:rgba(255,255,255,0.9);margin-top:5px;font-weight:600">'
+        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        +    splitHtml
+        + '</div>';
+    }
+
+    var html = '';
+    html += bubble({
+      label: 'TOTAL ACTIVE',
+      color: '#1a1a1a',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-total',
+      itemsId: 'scf-stat-total-items'
+    });
+    html += bubble({
+      label: 'LONG-TERM',
+      color: '#f57f17',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-longterm',
+      itemsId: 'scf-stat-longterm-items'
+    });
+    SCF_AREAS.forEach(function(area){
+      var color = SCF_AREA_COLORS[area] || '#607d8b';
+      var key = scfAreaKey(area);
+      var split = SCF_STAGED_AREAS && SCF_STAGED_AREAS.indexOf(area.toUpperCase()) !== -1;
+      html += bubble({
+        label: area,
+        color: color,
+        valueId: 'scf-stat-'+key,
+        itemsId: 'scf-stat-'+key+'-items',
+        split: split
+      });
+    });
+    container.innerHTML = html;
+    if(typeof scfUpdateStats === 'function') scfUpdateStats();
+  }
+  rebuildSolidBubbles();
+})();
   
 
   

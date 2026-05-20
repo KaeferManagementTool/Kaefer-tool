@@ -7563,50 +7563,56 @@ scfPrintPDF = function(){
 </script>
 
 <!-- ============================================================
-     KAEFER Safety Tool — Auto-Sync Patch (companion to v4 sync)
+     KAEFER Safety Tool — Auto-Sync Patch v2 (with in-flight guards)
      ------------------------------------------------------------
-     What it does:
-       * After any add / delete / cell-edit, schedules a sync of
-         the relevant dataset (Inspections, R&R, Attendance)
-         3 seconds later. Debounced so 10 rapid edits = 1 sync.
-       * Every 5 minutes in the background, pulls in any changes
-         made by other supervisors.
-       * Syncs once on tab focus (so you see updates the moment
-         you switch back to the tool).
-     Result:
-       You can stop pressing Sync All. Your changes propagate
-       automatically; other supervisors' changes show up within
-       5 minutes (or instantly when you focus the tab).
-     How to install:
-       Paste this entire block AFTER the multi-supervisor patch
-       (the one ending in kaeferSyncDebug), BEFORE </body></html>.
-       Structure should be:
-         </script>           ← main script
-         <script>...</script>← multi-supervisor sync patch
-         <script>...</script>← this auto-sync patch
-         </body></html>
-     How to roll back:
-       Delete this block. Manual sync still works as before.
+     Changes vs v1:
+       * Each sync function is now guarded — a second call while one
+         is in flight is silently dropped, preventing lock pile-up
+         on the Apps Script backend.
+       * Background pull is per-dataset rather than firing all three
+         simultaneously.
      ============================================================ -->
 <script>
 (function(){
   'use strict';
 
-  var DEBOUNCE_MS         = 3000;     // wait 3s after last edit before syncing
-  var BACKGROUND_PULL_MS  = 10*1000;// pull other supervisors' changes every 5 min
-  var FOCUS_PULL_COOLDOWN = 30*1000;  // don't re-sync on focus more than once per 30s
+  var DEBOUNCE_MS         = 3000;
+  var BACKGROUND_PULL_MS  = 15*1000;
+  var FOCUS_PULL_COOLDOWN = 5*1000;
 
-  var timers = {};
+  var timers   = {};
+  var inFlight = {};
+
   function debounce(name, fn){
     clearTimeout(timers[name]);
     timers[name] = setTimeout(function(){
-      try { fn(); } catch(e){ console.warn('[KAEFER] auto-sync '+name+' failed:', e); }
+      guardedRun(name, fn);
     }, DEBOUNCE_MS);
+  }
+
+  function guardedRun(name, fn){
+    if (inFlight[name]) return; // already running, drop this call
+    inFlight[name] = true;
+    var releaseTimer = setTimeout(function(){ inFlight[name] = false; }, 60000); // hard release after 60s
+    try {
+      var result = fn();
+      // The patched sync functions don't return a promise we can hook,
+      // but they finish in <~5s typically. We release the guard after a
+      // short delay to give the chained fetch+load time to complete.
+      setTimeout(function(){
+        clearTimeout(releaseTimer);
+        inFlight[name] = false;
+      }, 6000);
+      return result;
+    } catch(e){
+      console.warn('[KAEFER] auto-sync '+name+' threw:', e);
+      clearTimeout(releaseTimer);
+      inFlight[name] = false;
+    }
   }
 
   function exists(name){ return typeof window[name] === 'function'; }
 
-  // ── Wrap mutating functions so each fires a debounced sync ──
   function wrapWithSync(funcNames, syncName){
     funcNames.forEach(function(fn){
       if (!exists(fn)) return;
@@ -7619,55 +7625,52 @@ scfPrintPDF = function(){
     });
   }
 
-  // R&R: add, delete one, delete all
-  wrapWithSync(['addRR','dRR','clrRRLog'], 'syncRR');
+  wrapWithSync(['addRR','dRR','clrRRLog'],                                   'syncRR');
+  wrapWithSync(['saveInsp','dLog','clrLog'],                                 'syncLog');
+  wrapWithSync(['setStatus','saveAddEmp','removeEmp','restoreEmp'],          'syncAtt');
 
-  // Inspections: save inspection, delete one, delete all
-  wrapWithSync(['saveInsp','dLog','clrLog'], 'syncLog');
-
-  // Attendance: cell status changes + add / remove / restore employee
-  wrapWithSync(['setStatus','saveAddEmp','removeEmp','restoreEmp'], 'syncAtt');
-
-  // ── Periodic background pull ────────────────────────────────
-  function pullAll(){
+  // ── Periodic background pull — staggered so all three don't fire at once
+  function pullOne(name){
     if (typeof window.getURL === 'function' && !window.getURL()) return;
-    try { if (exists('syncRR'))  window.syncRR();  } catch(_){}
-    try { if (exists('syncLog')) window.syncLog(); } catch(_){}
-    try { if (exists('syncAtt')) window.syncAtt(); } catch(_){}
+    if (exists(name)) guardedRun(name, window[name]);
   }
 
-  setInterval(pullAll, BACKGROUND_PULL_MS);
+  // Stagger the three: 0s, 5s, 10s offset within the 15s window.
+  setInterval(function(){ pullOne('syncRR');  }, BACKGROUND_PULL_MS);
+  setTimeout(function(){
+    setInterval(function(){ pullOne('syncLog'); }, BACKGROUND_PULL_MS);
+  }, 5000);
+  setTimeout(function(){
+    setInterval(function(){ pullOne('syncAtt'); }, BACKGROUND_PULL_MS);
+  }, 10000);
 
-  // ── On tab focus, sync (but rate-limited) ───────────────────
+  // ── On tab focus — pull each, guarded
   var lastFocusSync = 0;
-  window.addEventListener('focus', function(){
+  function onFocus(){
     var now = Date.now();
     if (now - lastFocusSync < FOCUS_PULL_COOLDOWN) return;
     lastFocusSync = now;
-    pullAll();
-  });
-
-  // Also handle "page just became visible" (mobile tab return)
+    pullOne('syncRR');
+    pullOne('syncLog');
+    pullOne('syncAtt');
+  }
+  window.addEventListener('focus', onFocus);
   document.addEventListener('visibilitychange', function(){
-    if (document.visibilityState !== 'visible') return;
-    var now = Date.now();
-    if (now - lastFocusSync < FOCUS_PULL_COOLDOWN) return;
-    lastFocusSync = now;
-    pullAll();
+    if (document.visibilityState === 'visible') onFocus();
   });
 
-  // ── Diagnostic helper ───────────────────────────────────────
+  // ── Diagnostic helper
   window.kaeferAutoSyncStatus = function(){
-    console.log('Auto-sync installed. Debounce:', DEBOUNCE_MS+'ms,',
-                'background pull every', (BACKGROUND_PULL_MS/60000)+'min,',
+    console.log('Auto-sync v2 installed. Debounce:', DEBOUNCE_MS+'ms,',
+                'background pull every', (BACKGROUND_PULL_MS/1000)+'s,',
                 'focus cooldown', (FOCUS_PULL_COOLDOWN/1000)+'s.');
     console.log('Pending debounced timers:', Object.keys(timers).filter(function(k){ return timers[k]; }));
+    console.log('In flight:', Object.keys(inFlight).filter(function(k){ return inFlight[k]; }));
   };
 
-  console.log('[KAEFER] Auto-sync patch installed. Changes will sync automatically.');
+  console.log('[KAEFER] Auto-sync v2 installed (with in-flight guards).');
 })();
 </script>
 
-  
 
-</script></body></html>
+</body></html>

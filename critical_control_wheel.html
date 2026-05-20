@@ -7562,6 +7562,111 @@ scfPrintPDF = function(){
 })();
 </script>
 
+<!-- ============================================================
+     KAEFER Safety Tool — Auto-Sync Patch (companion to v4 sync)
+     ------------------------------------------------------------
+     What it does:
+       * After any add / delete / cell-edit, schedules a sync of
+         the relevant dataset (Inspections, R&R, Attendance)
+         3 seconds later. Debounced so 10 rapid edits = 1 sync.
+       * Every 5 minutes in the background, pulls in any changes
+         made by other supervisors.
+       * Syncs once on tab focus (so you see updates the moment
+         you switch back to the tool).
+     Result:
+       You can stop pressing Sync All. Your changes propagate
+       automatically; other supervisors' changes show up within
+       5 minutes (or instantly when you focus the tab).
+     How to install:
+       Paste this entire block AFTER the multi-supervisor patch
+       (the one ending in kaeferSyncDebug), BEFORE </body></html>.
+       Structure should be:
+         </script>           ← main script
+         <script>...</script>← multi-supervisor sync patch
+         <script>...</script>← this auto-sync patch
+         </body></html>
+     How to roll back:
+       Delete this block. Manual sync still works as before.
+     ============================================================ -->
+<script>
+(function(){
+  'use strict';
+
+  var DEBOUNCE_MS         = 3000;     // wait 3s after last edit before syncing
+  var BACKGROUND_PULL_MS  = 5*60*1000;// pull other supervisors' changes every 5 min
+  var FOCUS_PULL_COOLDOWN = 30*1000;  // don't re-sync on focus more than once per 30s
+
+  var timers = {};
+  function debounce(name, fn){
+    clearTimeout(timers[name]);
+    timers[name] = setTimeout(function(){
+      try { fn(); } catch(e){ console.warn('[KAEFER] auto-sync '+name+' failed:', e); }
+    }, DEBOUNCE_MS);
+  }
+
+  function exists(name){ return typeof window[name] === 'function'; }
+
+  // ── Wrap mutating functions so each fires a debounced sync ──
+  function wrapWithSync(funcNames, syncName){
+    funcNames.forEach(function(fn){
+      if (!exists(fn)) return;
+      var orig = window[fn];
+      window[fn] = function(){
+        var r = orig.apply(this, arguments);
+        if (exists(syncName)) debounce(syncName, window[syncName]);
+        return r;
+      };
+    });
+  }
+
+  // R&R: add, delete one, delete all
+  wrapWithSync(['addRR','dRR','clrRRLog'], 'syncRR');
+
+  // Inspections: save inspection, delete one, delete all
+  wrapWithSync(['saveInsp','dLog','clrLog'], 'syncLog');
+
+  // Attendance: cell status changes + add / remove / restore employee
+  wrapWithSync(['setStatus','saveAddEmp','removeEmp','restoreEmp'], 'syncAtt');
+
+  // ── Periodic background pull ────────────────────────────────
+  function pullAll(){
+    if (typeof window.getURL === 'function' && !window.getURL()) return;
+    try { if (exists('syncRR'))  window.syncRR();  } catch(_){}
+    try { if (exists('syncLog')) window.syncLog(); } catch(_){}
+    try { if (exists('syncAtt')) window.syncAtt(); } catch(_){}
+  }
+
+  setInterval(pullAll, BACKGROUND_PULL_MS);
+
+  // ── On tab focus, sync (but rate-limited) ───────────────────
+  var lastFocusSync = 0;
+  window.addEventListener('focus', function(){
+    var now = Date.now();
+    if (now - lastFocusSync < FOCUS_PULL_COOLDOWN) return;
+    lastFocusSync = now;
+    pullAll();
+  });
+
+  // Also handle "page just became visible" (mobile tab return)
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState !== 'visible') return;
+    var now = Date.now();
+    if (now - lastFocusSync < FOCUS_PULL_COOLDOWN) return;
+    lastFocusSync = now;
+    pullAll();
+  });
+
+  // ── Diagnostic helper ───────────────────────────────────────
+  window.kaeferAutoSyncStatus = function(){
+    console.log('Auto-sync installed. Debounce:', DEBOUNCE_MS+'ms,',
+                'background pull every', (BACKGROUND_PULL_MS/60000)+'min,',
+                'focus cooldown', (FOCUS_PULL_COOLDOWN/1000)+'s.');
+    console.log('Pending debounced timers:', Object.keys(timers).filter(function(k){ return timers[k]; }));
+  };
+
+  console.log('[KAEFER] Auto-sync patch installed. Changes will sync automatically.');
+})();
+</script>
 
   
 

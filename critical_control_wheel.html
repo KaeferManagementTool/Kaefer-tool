@@ -7593,7 +7593,7 @@ scfPrintPDF = function(){
   'use strict';
 
   var DEBOUNCE_MS         = 3000;     // wait 3s after last edit before syncing
-  var BACKGROUND_PULL_MS  = 5*60*1000;// pull other supervisors' changes every 5 min
+  var BACKGROUND_PULL_MS  = 10*1000;// pull other supervisors' changes every 5 min
   var FOCUS_PULL_COOLDOWN = 30*1000;  // don't re-sync on focus more than once per 30s
 
   var timers = {};

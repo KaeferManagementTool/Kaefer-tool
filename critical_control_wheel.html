@@ -7175,6 +7175,392 @@ scfPrintPDF = function(){
   };
 })();
 
+  
+<!-- ============================================================
+     KAEFER Safety Tool — Multi-Supervisor Sync Patch (v4 client)
+     ------------------------------------------------------------
+     What it does:
+       * Replaces syncLog / syncRR / syncAtt with delta-based versions
+         that play nicely with multiple supervisors editing concurrently.
+       * Patches dLog / dRR / clrLog / clrRRLog to record local tombstones
+         so deletes get pushed up on next sync (and survive offline).
+       * Sends a "who" field on every sync using
+         localStorage.getItem('kaefer_supervisor').
+     How to install:
+       Open critical_control_wheel.html and find the last </script> tag
+       (it's right before </body></html> at the very bottom). Paste this
+       ENTIRE block — including the <script>...</script> wrapper — on a
+       new line AFTER that closing </script> but BEFORE </body>.
+       So the structure becomes:
+           ...existing code...
+           </script>          ← the big main script ends here
+           <script>           ← this patch starts here
+             ...patch code...
+           </script>
+           </body></html>
+     How to roll back:
+       Just delete this script block. A full page reload restores the
+       original syncLog / syncRR / syncAtt and the original delete fns.
+     Pairs with:
+       The matching v4 Apps Script backend — both must be deployed.
+     ============================================================ -->
+<script>
+(function(){
+  'use strict';
+
+  // ── helpers reused from main script ─────────────────────────
+  function ls(k, fallback){
+    try { var v = localStorage.getItem(k); return v == null ? fallback : v; }
+    catch(e){ return fallback; }
+  }
+  function lj(k, fallback){
+    try { var v = localStorage.getItem(k); return v == null ? fallback : JSON.parse(v); }
+    catch(e){ return fallback; }
+  }
+  function sj(k, v){
+    try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){}
+  }
+  function who(){
+    return (ls('kaefer_supervisor','')||'').toString().slice(0,80);
+  }
+  function setStatus(state, msg){
+    if (typeof setSS === 'function') setSS(state, msg);
+  }
+  function getURLSafe(){
+    return (typeof getURL === 'function') ? getURL() : localStorage.getItem('kaefer_url');
+  }
+
+  // ── tombstone storage (client-side, queued) ─────────────────
+  // Shape: { log: {id:true,...}, rr: {id:true,...}, emp: {name:true,...} }
+  var TOMB_KEY = 'kaefer_tombstones_v4';
+  function getTombs(){
+    var t = lj(TOMB_KEY, null);
+    if (!t || typeof t !== 'object') t = {};
+    if (!t.log) t.log = {};
+    if (!t.rr)  t.rr  = {};
+    if (!t.emp) t.emp = {};
+    return t;
+  }
+  function addTomb(type, id){
+    if (id == null || id === '') return;
+    var t = getTombs();
+    t[type][String(id)] = true;
+    sj(TOMB_KEY, t);
+  }
+  function clearTombs(type, ids){
+    // Called after a successful sync to remove queued tombstones
+    // that the server has now persisted. (We keep them around if
+    // not yet acknowledged.)
+    var t = getTombs();
+    if (!t[type]) return;
+    ids.forEach(function(id){ delete t[type][String(id)]; });
+    sj(TOMB_KEY, t);
+  }
+  function tombList(type){
+    var t = getTombs();
+    return Object.keys(t[type]||{});
+  }
+
+  // ── snapshot storage for delta computation ──────────────────
+  // After every successful sync we store what the server now has
+  // so the next sync only sends what changed.
+  function snapKey(name){ return 'kaefer_sync_snap_'+name; }
+  function getSnap(name){ return lj(snapKey(name), null); }
+  function setSnap(name, v){ sj(snapKey(name), v); }
+
+  // ── DELETE PATCHES ──────────────────────────────────────────
+  // Record local tombstones so the next sync can tell the server.
+
+  if (typeof window.dLog === 'function') {
+    var _origDLog = window.dLog;
+    window.dLog = function(id){
+      if (!confirm('Delete?')) return;
+      addTomb('log', id);
+      // Mirror original local-removal logic without re-prompting
+      var key = 'kaefer_log';
+      var arr = lj(key, []) || [];
+      sj(key, arr.filter(function(e){ return e.id !== id; }));
+      if (typeof rLog === 'function') rLog();
+    };
+  }
+
+  if (typeof window.dRR === 'function') {
+    window.dRR = function(id){
+      if (!confirm('Delete?')) return;
+      addTomb('rr', id);
+      var arr = lj('kaefer_rr', []) || [];
+      sj('kaefer_rr', arr.filter(function(e){ return e.id !== id; }));
+      if (typeof rRR === 'function') rRR();
+    };
+  }
+
+  if (typeof window.clrLog === 'function') {
+    window.clrLog = function(){
+      if (!confirm('Delete all?')) return;
+      var arr = lj('kaefer_log', []) || [];
+      arr.forEach(function(e){ addTomb('log', e.id); });
+      sj('kaefer_log', []);
+      if (typeof rLog === 'function') rLog();
+    };
+  }
+
+  if (typeof window.clrRRLog === 'function') {
+    window.clrRRLog = function(){
+      if (!confirm('Delete all?')) return;
+      var arr = lj('kaefer_rr', []) || [];
+      arr.forEach(function(e){ addTomb('rr', e.id); });
+      sj('kaefer_rr', []);
+      if (typeof rRR === 'function') rRR();
+    };
+  }
+
+  // ── NEW syncLog ─────────────────────────────────────────────
+  window.syncLog = function(){
+    var u = getURLSafe();
+    if (!u) { alert('Set up sync URL first.'); return; }
+    setStatus('bz','Syncing inspection log...');
+    var local = lj('kaefer_log', []) || [];
+    var snap  = getSnap('log') || {}; // {id: hashOfEntry}
+    // Compute upserts: any local entry whose hash differs from snapshot.
+    var upserts = [];
+    var seenIds = {};
+    local.forEach(function(en){
+      if (en == null || en.id == null) return;
+      var key = String(en.id);
+      seenIds[key] = true;
+      var h = hashLogEntry(en);
+      if (snap[key] !== h) upserts.push(en);
+    });
+    var deletes = tombList('log');
+
+    var payload = JSON.stringify({
+      action: 'save_log',
+      who:    who(),
+      data:   { upserts: upserts, deletes: deletes }
+    });
+
+    fetch(u, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body:payload})
+      .then(function(r){ return r.text(); })
+      .then(function(t){
+        var j = JSON.parse(t);
+        if (!j.ok) throw new Error(j.error || 'Save failed');
+        return fetch(u + '?action=load_log&t=' + Date.now(), {redirect:'follow'});
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j.ok) throw new Error(j.error || 'Load failed');
+        var serverArr = j.data || [];
+        // Server is authoritative — replace local with what it returned.
+        // (Server has already merged our upserts with anything other
+        //  supervisors added, and has honoured our tombstones.)
+        sj('kaefer_log', serverArr);
+        // Rebuild snapshot
+        var newSnap = {};
+        serverArr.forEach(function(en){
+          if (en && en.id != null) newSnap[String(en.id)] = hashLogEntry(en);
+        });
+        setSnap('log', newSnap);
+        // Tombstones the server has now applied can be cleared locally.
+        clearTombs('log', deletes);
+        if (typeof rLog === 'function') rLog();
+        setStatus('ok','Inspection log synced');
+      })
+      .catch(function(err){ setStatus('er','Log sync failed: ' + err.message); });
+  };
+
+  function hashLogEntry(en){
+    // Cheap stable hash — JSON of the fields that matter.
+    return JSON.stringify([en.date, en.insp, en.site, en.area, en.team, en.yes, en.no, en.na, en.sc, en.items]);
+  }
+
+  // ── NEW syncRR ──────────────────────────────────────────────
+  window.syncRR = function(){
+    var u = getURLSafe();
+    if (!u) { alert('Set up sync URL first.'); return; }
+    setStatus('bz','Syncing R&R...');
+    var local = lj('kaefer_rr', []) || [];
+    var snap  = getSnap('rr') || {};
+    var upserts = [];
+    local.forEach(function(en){
+      if (en == null || en.id == null) return;
+      var key = String(en.id);
+      var h = hashRREntry(en);
+      if (snap[key] !== h) upserts.push(en);
+    });
+    var deletes = tombList('rr');
+
+    var payload = JSON.stringify({
+      action: 'save_rr',
+      who:    who(),
+      data:   { upserts: upserts, deletes: deletes }
+    });
+
+    fetch(u, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body:payload})
+      .then(function(r){ return r.text(); })
+      .then(function(t){
+        var j = JSON.parse(t);
+        if (!j.ok) throw new Error(j.error || 'Save failed');
+        return fetch(u + '?action=load_rr&t=' + Date.now(), {redirect:'follow'});
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j.ok) throw new Error(j.error || 'Load failed');
+        var serverArr = j.data || [];
+        sj('kaefer_rr', serverArr);
+        var newSnap = {};
+        serverArr.forEach(function(en){
+          if (en && en.id != null) newSnap[String(en.id)] = hashRREntry(en);
+        });
+        setSnap('rr', newSnap);
+        clearTombs('rr', deletes);
+        if (typeof rRR === 'function') rRR();
+        setStatus('ok','R&R synced');
+      })
+      .catch(function(err){ setStatus('er','R&R sync failed: ' + err.message); });
+  };
+
+  function hashRREntry(en){
+    return JSON.stringify([en.date, en.name, (en.choices||[]).slice().sort(), en.comment]);
+  }
+
+  // ── NEW syncAtt (delta + cell merge) ────────────────────────
+  // Attendance is a 2-level map: { empName: { dateKey: status } }.
+  // We diff vs snapshot:
+  //   - cell present locally but not in snapshot (or changed)  → upsert
+  //   - cell present in snapshot but not locally               → delete (status '')
+  // For employees, we send the full active/archived lists (small,
+  // and the server upserts by name without dropping anything).
+  window.syncAtt = function(){
+    var u = getURLSafe();
+    if (!u) { alert('Set up sync URL first (Setup Sync button).'); return; }
+    setStatus('bz','Syncing attendance...');
+
+    var localOv   = lj('kaefer_att_ov',   {}) || {};
+    var localEmps = lj('kaefer_att_emps', null);
+    var localArch = lj('kaefer_att_arch', []) || [];
+    var snap      = getSnap('att') || {}; // flat { "name::date": status }
+
+    // Flatten local into a flat cell map
+    var flat = {};
+    for (var name in localOv) {
+      var dates = localOv[name] || {};
+      for (var dk in dates) {
+        var v = dates[dk];
+        if (v === '' || v == null) continue; // already-deleted cell
+        flat[name + '::' + dk] = v;
+      }
+    }
+
+    var upserts = {};
+    var deletes = [];
+    // Upserts: anything changed or new locally
+    for (var k in flat) {
+      if (snap[k] !== flat[k]) upserts[k] = flat[k];
+    }
+    // Deletes: anything in snapshot but no longer locally
+    for (var k2 in snap) {
+      if (!(k2 in flat)) deletes.push(k2);
+    }
+
+    // Employee deletes from local tombstone queue (if you ever wire a hard-delete UI;
+    // currently the app archives rather than deletes, so this is usually empty)
+    var empDeletes = tombList('emp');
+
+    var payload = JSON.stringify({
+      action: 'save_att',
+      who:    who(),
+      data: {
+        upserts:    upserts,
+        deletes:    deletes,
+        emps:       localEmps,
+        arch:       localArch,
+        empDeletes: empDeletes
+      }
+    });
+
+    fetch(u, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body:payload})
+      .then(function(r){ return r.text(); })
+      .then(function(t){
+        var j = JSON.parse(t);
+        if (!j.ok) throw new Error(j.error || 'Save failed');
+        return fetch(u + '?action=load_att&t=' + Date.now(), {redirect:'follow'});
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j.ok) throw new Error(j.error || 'Load failed');
+        // Replace local with the merged server state.
+        var ov = j.ov || {};
+        sj('kaefer_att_ov', ov);
+        if (j.emps) sj('kaefer_att_emps', j.emps);
+        if (j.arch && j.arch.length) sj('kaefer_att_arch', j.arch);
+
+        // Rebuild snapshot from merged server state
+        var newSnap = {};
+        for (var nm in ov) {
+          for (var d in ov[nm]) {
+            var st = ov[nm][d];
+            if (st === '' || st == null) continue;
+            newSnap[nm + '::' + d] = st;
+          }
+        }
+        setSnap('att', newSnap);
+        clearTombs('emp', empDeletes);
+
+        if (typeof rAtt === 'function') rAtt();
+        if (typeof rFormer === 'function') rFormer();
+        setStatus('ok','Attendance synced');
+      })
+      .catch(function(err){ setStatus('er','Attendance sync failed: ' + err.message); });
+  };
+
+  // ── Bootstrap snapshots on first run ────────────────────────
+  // If snapshots don't exist yet, seed them from whatever is locally
+  // present so a first sync after this patch doesn't try to re-upsert
+  // everything as "new". (The server will merge those upserts safely
+  // either way, but seeding avoids needless writes.)
+  (function seedSnapshots(){
+    if (!getSnap('log')) {
+      var snap = {};
+      (lj('kaefer_log', []) || []).forEach(function(en){
+        if (en && en.id != null) snap[String(en.id)] = hashLogEntry(en);
+      });
+      setSnap('log', snap);
+    }
+    if (!getSnap('rr')) {
+      var snap = {};
+      (lj('kaefer_rr', []) || []).forEach(function(en){
+        if (en && en.id != null) snap[String(en.id)] = hashRREntry(en);
+      });
+      setSnap('rr', snap);
+    }
+    if (!getSnap('att')) {
+      var ov = lj('kaefer_att_ov', {}) || {};
+      var snap = {};
+      for (var nm in ov) {
+        for (var d in ov[nm]) {
+          var st = ov[nm][d];
+          if (st === '' || st == null) continue;
+          snap[nm + '::' + d] = st;
+        }
+      }
+      setSnap('att', snap);
+    }
+  })();
+
+  // ── Diagnostic console ─────────────────────────────────────
+  // Run from devtools: kaeferSyncDebug()
+  window.kaeferSyncDebug = function(){
+    console.log('Supervisor:', who() || '(none — set localStorage.kaefer_supervisor)');
+    console.log('Tombstones:', getTombs());
+    console.log('Log snapshot size:',  Object.keys(getSnap('log')||{}).length);
+    console.log('RR snapshot size:',   Object.keys(getSnap('rr')||{}).length);
+    console.log('Att snapshot size:',  Object.keys(getSnap('att')||{}).length);
+  };
+
+  console.log('[KAEFER] Multi-supervisor sync patch v4 installed. who=', who() || '(set localStorage.kaefer_supervisor)');
+})();
+</script>
+
 
   
 

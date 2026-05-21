@@ -7672,5 +7672,80 @@ scfPrintPDF = function(){
 })();
 </script>
 
+<!-- ============================================================
+     KAEFER Safety Tool — setStatus "Present" Fix
+     ------------------------------------------------------------
+     Fixes a pre-existing bug where clicking "Present" in the
+     attendance cell picker doesn't actually clear the cell from
+     storage. setStatus(name, date, '') was a no-op, so clicking
+     AL → Present visually changed the cell but the AL value
+     remained in kaefer_att_ov, then re-rendered as AL on next
+     redraw or background sync pull.
+     This patch wraps setStatus so that when called with an empty
+     status, it explicitly deletes the cell from kaefer_att_ov
+     and triggers a sync (which will push the delete to other
+     supervisors as a "blank cell" via the patch's diff logic).
+     Paste this AFTER all other patches, BEFORE </body></html>.
+     ============================================================ -->
+<script>
+(function(){
+  'use strict';
+
+  if (typeof window.setStatus !== 'function') {
+    console.log('[KAEFER] setStatus-fix: setStatus not found, skipping');
+    return;
+  }
+
+  var origSetStatus = window.setStatus;
+  var attDebounce;
+
+  window.setStatus = function(name, dateKey, val){
+    // Always call the original first — it handles the visual side and
+    // any logic for valid statuses.
+    var r = origSetStatus.apply(this, arguments);
+
+    // If this looks like an attendance call (3 args, dateKey present),
+    // and the value is empty (Present), explicitly delete the cell so
+    // it doesn't get reasserted on the next render or sync.
+    if (arguments.length >= 3 && name && dateKey) {
+      try {
+        var ov = JSON.parse(localStorage.getItem('kaefer_att_ov') || '{}');
+        var emp = ov[name];
+        if (val === '' || val == null) {
+          if (emp && (dateKey in emp)) {
+            delete emp[dateKey];
+            // Clean up empty employee entry too
+            if (Object.keys(emp).length === 0) delete ov[name];
+            localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
+            if (typeof rAtt === 'function') rAtt();
+          }
+        } else {
+          // Defensive: also ensure non-empty values are persisted.
+          // (If the original setStatus already did this, we're a no-op.)
+          if (!ov[name]) ov[name] = {};
+          if (ov[name][dateKey] !== val) {
+            ov[name][dateKey] = val;
+            localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
+          }
+        }
+
+        // Trigger a sync after the dust settles. Debounced so rapid
+        // clicks coalesce.
+        if (typeof syncAtt === 'function') {
+          clearTimeout(attDebounce);
+          attDebounce = setTimeout(syncAtt, 1500);
+        }
+      } catch(e) {
+        console.warn('[KAEFER] setStatus-fix error:', e);
+      }
+    }
+
+    return r;
+  };
+
+  console.log('[KAEFER] setStatus "Present" fix installed.');
+})();
+</script>
+  
 
 </body></html>

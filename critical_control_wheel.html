@@ -2594,8 +2594,17 @@ function hashRREntry(en){return JSON.stringify([en.date,en.name,(en.choices||[])
 var _syncInFlight={},_syncTimers={};
 var SYNC_DEBOUNCE_MS=3000;
 
+var _syncQueued={}; // name -> bool: another call wants to run after the current finishes
+
 function runSyncGuarded(name,fn){
-  if(_syncInFlight[name]) return Promise.resolve(); // already running, drop
+  if(_syncInFlight[name]){
+    // Don't drop — queue a retry once the current sync finishes. This is
+    // critical because Apps Script calls take 5-10s each and background
+    // polls fire every 15s, so user clicks often arrive while a sync is
+    // already running. Without queueing, those clicks silently fail.
+    _syncQueued[name]=true;
+    return Promise.resolve();
+  }
   _syncInFlight[name]=true;
   // Hard release after 60s as a backstop in case the chain stalls.
   var hardRelease=setTimeout(function(){_syncInFlight[name]=false;},60000);
@@ -2606,16 +2615,27 @@ function runSyncGuarded(name,fn){
     console.warn('[KAEFER] sync '+name+' threw:',e);
     clearTimeout(hardRelease);
     _syncInFlight[name]=false;
+    flushQueuedSync(name,fn);
     return Promise.resolve();
   }
-  // If sync returned a promise, release when it settles. Otherwise fall
-  // back to a generous timer (some older paths may not return one).
-  if(p && typeof p.then==='function'){
-    return p.then(function(){clearTimeout(hardRelease);_syncInFlight[name]=false;},
-                  function(){clearTimeout(hardRelease);_syncInFlight[name]=false;});
+  function done(){
+    clearTimeout(hardRelease);
+    _syncInFlight[name]=false;
+    flushQueuedSync(name,fn);
   }
-  setTimeout(function(){clearTimeout(hardRelease);_syncInFlight[name]=false;},20000);
+  if(p && typeof p.then==='function'){
+    return p.then(done,done);
+  }
+  setTimeout(done,20000);
   return Promise.resolve();
+}
+
+function flushQueuedSync(name,fn){
+  if(!_syncQueued[name])return;
+  _syncQueued[name]=false;
+  // Small delay so the freshly-released flag is visible to anything else,
+  // and so back-to-back calls don't hammer the server.
+  setTimeout(function(){runSyncGuarded(name,fn);},500);
 }
 
 function scheduleSync(name,fn){
@@ -2806,7 +2826,7 @@ function syncLog(){
 // All three datasets pulled together. Apps Script serialises them
 // via withLock anyway, and the in-flight guard prevents pile-up.
 (function(){
-  var BG_MS=15000,FOCUS_COOLDOWN_MS=5000,lastFocusPull=0;
+  var BG_MS=30000,FOCUS_COOLDOWN_MS=5000,lastFocusPull=0;
   function pullAll(){
     if(!getURL())return;
     // Serial, not parallel. Apps Script's withLock serialises them

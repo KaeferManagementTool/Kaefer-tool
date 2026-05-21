@@ -2595,21 +2595,27 @@ var _syncInFlight={},_syncTimers={};
 var SYNC_DEBOUNCE_MS=3000;
 
 function runSyncGuarded(name,fn){
-  if(_syncInFlight[name])return; // another instance is mid-flight, drop
+  if(_syncInFlight[name]) return Promise.resolve(); // already running, drop
   _syncInFlight[name]=true;
   // Hard release after 60s as a backstop in case the chain stalls.
   var hardRelease=setTimeout(function(){_syncInFlight[name]=false;},60000);
+  var p;
   try{
-    fn();
+    p=fn();
   }catch(e){
     console.warn('[KAEFER] sync '+name+' threw:',e);
     clearTimeout(hardRelease);
     _syncInFlight[name]=false;
-    return;
+    return Promise.resolve();
   }
-  // The sync functions don't return promises; release after their
-  // typical fetch+load roundtrip completes.
-  setTimeout(function(){clearTimeout(hardRelease);_syncInFlight[name]=false;},6000);
+  // If sync returned a promise, release when it settles. Otherwise fall
+  // back to a generous timer (some older paths may not return one).
+  if(p && typeof p.then==='function'){
+    return p.then(function(){clearTimeout(hardRelease);_syncInFlight[name]=false;},
+                  function(){clearTimeout(hardRelease);_syncInFlight[name]=false;});
+  }
+  setTimeout(function(){clearTimeout(hardRelease);_syncInFlight[name]=false;},20000);
+  return Promise.resolve();
 }
 
 function scheduleSync(name,fn){
@@ -2666,7 +2672,7 @@ function syncAtt(){
     data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes}
   });
 
-  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  return fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
   .then(function(r){return r.text();})
   .then(function(t){
     var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
@@ -2741,7 +2747,7 @@ function syncRR(){
 
   var payload=JSON.stringify({action:'save_rr',who:whoSync(),data:{upserts:upserts,deletes:deletes}});
 
-  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  return fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
   .then(function(r){return r.text();})
   .then(function(t){
     var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
@@ -2776,7 +2782,7 @@ function syncLog(){
 
   var payload=JSON.stringify({action:'save_log',who:whoSync(),data:{upserts:upserts,deletes:deletes}});
 
-  fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
+  return fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
   .then(function(r){return r.text();})
   .then(function(t){
     var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
@@ -2803,9 +2809,13 @@ function syncLog(){
   var BG_MS=15000,FOCUS_COOLDOWN_MS=5000,lastFocusPull=0;
   function pullAll(){
     if(!getURL())return;
-    runSyncGuarded('log',syncLog);
-    runSyncGuarded('rr',syncRR);
-    runSyncGuarded('att',syncAtt);
+    // Serial, not parallel. Apps Script's withLock serialises them
+    // server-side anyway; firing them sequentially client-side keeps
+    // the request queue clean and prevents redirect-token expiry on
+    // slow networks.
+    runSyncGuarded('log',syncLog)
+      .then(function(){return runSyncGuarded('rr',syncRR);})
+      .then(function(){return runSyncGuarded('att',syncAtt);});
   }
   // Seed snapshots from current local state so the first sync after a
   // page load doesn't re-upsert everything as "new".

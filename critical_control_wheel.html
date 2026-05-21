@@ -1393,11 +1393,11 @@ var CLS=[{t:'Documentation',r:true,i:['JHA tasks appropriate for the job','JHA u
 function tYN(btn,v,id){btn.parentElement.querySelectorAll('.yn').forEach(function(b){b.className='yn';});btn.classList.add(v==='y'?'sy':v==='n'?'sn':'sa');}
 function getCLD(){var res=[];CLS.forEach(function(sec,si){sec.i.forEach(function(item,ii){var id='c_'+si+'_'+ii;var yb=document.getElementById('y_'+id);var val='';if(yb){var par=yb.parentElement;var sel=par.querySelector('.sy,.sn,.sa');if(sel)val=sel.classList.contains('sy')?'YES':sel.classList.contains('sn')?'NO':'N/A';}var cm=document.getElementById('m_'+id);res.push({sec:sec.t,item:item,val:val,cm:cm?cm.value.trim():''});});});return res;}
 function clrCL(){document.querySelectorAll('.yn').forEach(function(b){b.className='yn';});document.querySelectorAll('.cc').forEach(function(i){i.value='';});document.getElementById('cd').value=new Date().toISOString().split('T')[0];['ci2','cs2','cw2','ct2'].forEach(function(id){document.getElementById(id).value='';});}
-function saveInsp(){var insp=document.getElementById('ci2').value.trim(),site=document.getElementById('cs2').value.trim();if(!insp||!site){alert('Fill in Inspector and Site.');return;}var items=getCLD(),yes=0,no=0,na=0;items.forEach(function(it){if(it.val==='YES')yes++;else if(it.val==='NO')no++;else if(it.val==='N/A')na++;});var sc=yes+no>0?Math.round(yes/(yes+no)*100):0;var entry={id:Date.now(),date:document.getElementById('cd').value,insp:insp,site:site,area:document.getElementById('cw2').value.trim(),team:document.getElementById('ct2').value.trim(),yes:yes,no:no,na:na,sc:sc,items:items};var log=glj('kaefer_log',[]);log.unshift(entry);sl('kaefer_log',log);if(confirm('Saved! Score: '+sc+'%\n\nClear form?'))clrCL();rLog();if(getURL())autoSyncOne('log');}
-function clrLog(){if(confirm('Delete all?')){sl('kaefer_log',[]);rLog();}}
+function saveInsp(){var insp=document.getElementById('ci2').value.trim(),site=document.getElementById('cs2').value.trim();if(!insp||!site){alert('Fill in Inspector and Site.');return;}var items=getCLD(),yes=0,no=0,na=0;items.forEach(function(it){if(it.val==='YES')yes++;else if(it.val==='NO')no++;else if(it.val==='N/A')na++;});var sc=yes+no>0?Math.round(yes/(yes+no)*100):0;var entry={id:Date.now(),date:document.getElementById('cd').value,insp:insp,site:site,area:document.getElementById('cw2').value.trim(),team:document.getElementById('ct2').value.trim(),yes:yes,no:no,na:na,sc:sc,items:items};var log=glj('kaefer_log',[]);log.unshift(entry);sl('kaefer_log',log);if(confirm('Saved! Score: '+sc+'%\n\nClear form?'))clrCL();rLog();if(getURL())scheduleSyncLog();}
+function clrLog(){if(!confirm('Delete all?'))return;var arr=glj('kaefer_log',[]);arr.forEach(function(e){addTomb('log',e.id);});sl('kaefer_log',[]);rLog();if(getURL())scheduleSyncLog();}
 function rLog(){var log=glj('kaefer_log',[]);document.getElementById('lgbg').textContent=log.length;var em=document.getElementById('lge'),tbl=document.getElementById('lgt'),tb=document.getElementById('lgb');if(!log.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';log.forEach(function(en){var sc2=en.sc>=90?'bg':en.sc>=70?'bam':'br';var tr=document.createElement('tr');tr.innerHTML='<td><button class="xb" onclick="tDet('+en.id+')">&#9654;</button></td><td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:700">'+en.insp+'</td><td>'+en.site+'</td><td>'+en.area+'</td><td style="color:#2e7d32;font-weight:700">'+en.yes+'</td><td style="color:#c62828;font-weight:700">'+en.no+'</td><td style="color:#607d8b">'+en.na+'</td><td><span class="badge '+sc2+'">'+en.sc+'%</span></td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px;color:#c62828;border-color:#c62828" onclick="dLog('+en.id+')">Del</button></td>';tb.appendChild(tr);var ni=(en.items||[]).filter(function(it){return it.val==='NO';});var dtr=document.createElement('tr');dtr.className='dr';dtr.id='det_'+en.id;var dh='<td colspan="10"><div style="padding:6px 0">';if(en.team)dh+='<p style="font-size:11px;color:#607d8b;margin-bottom:5px"><b>Team:</b> '+en.team+'</p>';if(ni.length){dh+='<p style="font-size:10px;font-weight:700;color:#c62828;margin-bottom:3px;text-transform:uppercase">&#9888; Items NO:</p><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">';ni.forEach(function(it){dh+='<div style="background:#fff;border:1px solid #ffcdd2;border-radius:4px;padding:4px 7px"><div style="font-size:9px;text-transform:uppercase;color:#c62828">'+it.sec+'</div><div style="font-size:10px;color:#c62828">'+it.item+'</div>'+(it.cm?'<div style="font-size:10px;color:#555;font-style:italic">'+it.cm+'</div>':'')+'</div>';});dh+='</div>';}if(!ni.length)dh+='<p style="color:#2e7d32;font-size:12px">&#10003; All passed.</p>';dh+='</div></td>';dtr.innerHTML=dh;tb.appendChild(dtr);});}
 function tDet(id){var r=document.getElementById('det_'+id);if(!r)return;var b=r.previousElementSibling.querySelector('.xb');r.classList.toggle('on');if(b)b.textContent=r.classList.contains('on')?'▼':'▶';}
-function dLog(id){if(!confirm('Delete?'))return;sl('kaefer_log',glj('kaefer_log',[]).filter(function(e){return e.id!==id;}));rLog();if(getURL())autoSyncOne('log');}
+function dLog(id){if(!confirm('Delete?'))return;addTomb('log',id);sl('kaefer_log',glj('kaefer_log',[]).filter(function(e){return e.id!==id;}));rLog();if(getURL())scheduleSyncLog();}
 var SCK=['safe','efficient','proud','healthy','environmental'];
 var SCL={safe:'Safe Choice',efficient:'Efficient Choice',proud:'Proud Choice',healthy:'Healthy Choice',environmental:'Green Choice'};
 var SCC={safe:'#1565c0',efficient:'#e65100',proud:'#e53935',healthy:'#2e7d32',environmental:'#00695c'};
@@ -1405,9 +1405,9 @@ var SCP={safe:'ps',efficient:'pe',proud:'pp',healthy:'ph2',environmental:'pv'};
 function mkSVG(k){var c2=SCC[k];return'<svg width="18" height="18" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="54" height="54" rx="9" fill="white" stroke="'+c2+'" stroke-width="4"/><circle cx="30" cy="13" r="5" fill="none" stroke="'+c2+'" stroke-width="3"/><line x1="30" y1="18" x2="30" y2="36" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="22" x2="44" y2="13" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="22" x2="20" y2="30" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="36" x2="40" y2="48" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="36" x2="22" y2="48" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/></svg>';}
 function tSC(k){document.getElementById('sc-'+k).classList.toggle('on-'+k);}
 function clrRR(){document.getElementById('rd').value=new Date().toISOString().split('T')[0];document.getElementById('rn').value='';document.getElementById('rc2').value='';SCK.forEach(function(k){document.getElementById('sc-'+k).classList.remove('on-'+k);});}
-function addRR(){var name=document.getElementById('rn').value.trim(),comment=document.getElementById('rc2').value.trim();if(!name){alert('Enter name.');return;}if(!comment){alert('Describe what they did.');return;}var chosen=SCK.filter(function(k){return document.getElementById('sc-'+k).classList.contains('on-'+k);});var log=glj('kaefer_rr',[]);log.unshift({id:Date.now(),date:document.getElementById('rd').value,name:name,comment:comment,choices:chosen});sl('kaefer_rr',log);clrRR();rRR();if(getURL())autoSyncOne('rr');}
-function clrRRLog(){if(confirm('Delete all?')){sl('kaefer_rr',[]);rRR();}}
-function dRR(id){if(!confirm('Delete?'))return;sl('kaefer_rr',glj('kaefer_rr',[]).filter(function(e){return e.id!==id;}));rRR();if(getURL())autoSyncOne('rr');}
+function addRR(){var name=document.getElementById('rn').value.trim(),comment=document.getElementById('rc2').value.trim();if(!name){alert('Enter name.');return;}if(!comment){alert('Describe what they did.');return;}var chosen=SCK.filter(function(k){return document.getElementById('sc-'+k).classList.contains('on-'+k);});var log=glj('kaefer_rr',[]);log.unshift({id:Date.now(),date:document.getElementById('rd').value,name:name,comment:comment,choices:chosen});sl('kaefer_rr',log);clrRR();rRR();if(getURL())scheduleSyncRR();}
+function clrRRLog(){if(!confirm('Delete all?'))return;var arr=glj('kaefer_rr',[]);arr.forEach(function(e){addTomb('rr',e.id);});sl('kaefer_rr',[]);rRR();if(getURL())scheduleSyncRR();}
+function dRR(id){if(!confirm('Delete?'))return;addTomb('rr',id);sl('kaefer_rr',glj('kaefer_rr',[]).filter(function(e){return e.id!==id;}));rRR();if(getURL())scheduleSyncRR();}
 function rRR(){
   SCK.forEach(function(k){var btn=document.getElementById('sc-'+k);if(!btn||btn.dataset.init)return;btn.dataset.init='1';btn.innerHTML=mkSVG(k)+' '+{safe:'Safe',efficient:'Efficient',proud:'Proud',healthy:'Healthy',environmental:'Green'}[k];});
   var log=glj('kaefer_rr',[]);document.getElementById('rrbg').textContent=log.length;document.getElementById('rt0').textContent=log.length;
@@ -1481,7 +1481,24 @@ function toggleExc(enc,dk){
 function aKey(n){return n.toLowerCase().replace(/[^a-z0-9]/g,'_');}
 function getBaseExc(n){var b=ATT_BASE.filter(function(e){return e.n===n;});return b.length?b[0].e:{};}
 function getStatus(n,dk){var ov=getOv(),ak=aKey(n);if(ov[ak]&&ov[ak][dk]!==undefined)return ov[ak][dk];return getBaseExc(n)[dk]||'';}
-function setStatus(n,dk,v){var ov=getOv(),ak=aKey(n);if(!ov[ak])ov[ak]={};if(v==='')delete ov[ak][dk];else ov[ak][dk]=v;sl(ATT_OV,ov);}
+function setStatus(n,dk,v){
+  var ov=getOv(),ak=aKey(n),clearing=(v===''||v==null);
+  if(clearing){
+    if(ov[ak]){
+      delete ov[ak][dk];
+      if(Object.keys(ov[ak]).length===0) delete ov[ak];
+    }
+    sl(ATT_OV,ov);
+    addPendingClear(ak,dk);
+    if(getURL()) flushSyncAtt();          // push immediately to beat any racing pull
+  } else {
+    if(!ov[ak]) ov[ak]={};
+    ov[ak][dk]=v;
+    sl(ATT_OV,ov);
+    clearPendingClear(ak,dk);
+    if(getURL()) scheduleSyncAtt();       // debounced
+  }
+}
 function aCS(v,wk){if(wk)return'background:#eee;color:#bbb';if(v==='SL')return'background:#ffcdd2;color:#c62828';if(v==='AL')return'background:#bbdefb;color:#1565c0';if(v==='X')return'background:#fce4ec;color:#880e4f';if(v==='PH')return'background:#fff9c4;color:#e65100';if(v==='BL')return'background:#f3e5f5;color:#6a1b9a';if(v==='LATE')return'background:#fff3e0;color:#bf360c';return'background:#c8e6c9;color:#2e7d32';}
 var ce_n='',ce_dk='';
 function openCE(n,dk){ce_n=n;ce_dk=dk;var cur=getStatus(n,dk),d=dk.split('-');document.getElementById('ce-tt').textContent=n;document.getElementById('ce-sub').textContent=d[2]+'/'+d[1]+'/'+d[0]+' — currently: '+(ATT_LBLS[cur]||'Present');document.getElementById('ce-hd').style.background=cur?'#c62828':'#2e7d32';var opts=['','SL','AL','X','PH','BL','LATE'],bgs={'':'#2e7d32','SL':'#c62828','AL':'#1565c0','X':'#880e4f','PH':'#e65100','BL':'#6a1b9a','LATE':'#bf360c'};var h='';opts.forEach(function(v){var act=v===cur,bg=bgs[v];h+='<button onclick="setCE(\''+v+'\')" style="padding:8px 5px;border:2px solid '+(act?bg:'#e0e0e0')+';border-radius:5px;background:'+(act?bg:'#fff')+';color:'+(act?'#fff':bg)+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">'+ATT_LBLS[v]+'</button>';});document.getElementById('ce-btns').innerHTML=h;document.getElementById('ce-ml').classList.add('on');}
@@ -1489,7 +1506,7 @@ function setCE(v){setStatus(ce_n,ce_dk,v);closeCE();rAtt();}
 function closeCE(){document.getElementById('ce-ml').classList.remove('on');}
 function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-ml').classList.add('on');}
 function closeAddEmp(){document.getElementById('ae-ml').classList.remove('on');}
-function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value;if(!name){alert('Enter a name.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp});sl(ATT_EMP,emps);closeAddEmp();rAtt();}
+function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value;if(!name){alert('Enter a name.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp});sl(ATT_EMP,emps);closeAddEmp();rAtt();if(getURL())scheduleSyncAtt();}
 function editEmp(oldName){
   var newName = prompt('Edit employee name:', oldName);
   if(newName===null) return; // cancelled
@@ -1519,8 +1536,8 @@ function editEmp(oldName){
   rAtt();
 }
 function editEmpByEl(btn){editEmp(decodeURIComponent(btn.getAttribute('data-name')));}
-function removeEmp(n){if(!confirm('Move '+n+' to No Longer Employed?'))return;var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'})});sl(ATT_ARCH,arch);}rAtt();rFormer();}
-function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}rAtt();rFormer();}
+function removeEmp(n){if(!confirm('Move '+n+' to No Longer Employed?'))return;var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'})});sl(ATT_ARCH,arch);}rAtt();rFormer();if(getURL())scheduleSyncAtt();}
+function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}rAtt();rFormer();if(getURL())scheduleSyncAtt();}
 function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+'</td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
 function restoreEmpByEl(btn){restoreEmp(decodeURIComponent(btn.getAttribute('data-name')));}
 function rAtt(){
@@ -2497,31 +2514,189 @@ function syncTool()  { syncSimple('tool',  'kaefer_tool_ov', rToolReg); }
 function syncTrain() { syncSimple('train', 'kaefer_train_ov', rTraining); }
 function syncBth()   { syncSimple('bth',   'kaefer_bth3',   rBth); }
 
+// ── MULTI-SUPERVISOR SYNC INFRASTRUCTURE ────────────────────
+// Shared by syncLog / syncRR / syncAtt. Lets concurrent supervisors
+// safely edit the same dataset: deltas are computed locally from a
+// snapshot of what the server last had, tombstones queue deletes,
+// and an in-flight guard prevents pile-up of overlapping syncs.
+
+function whoSync(){ return (localStorage.getItem('kaefer_supervisor')||'').toString().slice(0,80); }
+
+// Tombstones — queued deletes that survive until the server has them.
+var TOMB_KEY='kaefer_tombstones_v4';
+function getTombs(){var t=glj(TOMB_KEY,null);if(!t||typeof t!=='object')t={};if(!t.log)t.log={};if(!t.rr)t.rr={};if(!t.emp)t.emp={};return t;}
+function addTomb(type,id){if(id==null||id==='')return;var t=getTombs();t[type][String(id)]=true;sl(TOMB_KEY,t);}
+function clearTombs(type,ids){var t=getTombs();if(!t[type])return;ids.forEach(function(id){delete t[type][String(id)];});sl(TOMB_KEY,t);}
+function tombList(type){return Object.keys(getTombs()[type]||{});}
+
+// Snapshots — what the server had after our last successful sync.
+// Used to compute deltas (only upsert what changed).
+function snapKey(name){return 'kaefer_sync_snap_'+name;}
+function getSnap(name){return glj(snapKey(name),null);}
+function setSnap(name,v){sl(snapKey(name),v);}
+
+// Pending attendance clears — survive racing background pulls.
+// Keys here are aKey-normalised (matching kaefer_att_ov keys).
+var PEND_CLR_KEY='kaefer_att_pending_clears';
+function getPendingClears(){return glj(PEND_CLR_KEY,{})||{};}
+function setPendingClears(p){sl(PEND_CLR_KEY,p);}
+function addPendingClear(ak,dk){var p=getPendingClears();if(!p[ak])p[ak]={};p[ak][dk]=Date.now();setPendingClears(p);}
+function clearPendingClear(ak,dk){var p=getPendingClears();if(p[ak]){delete p[ak][dk];if(Object.keys(p[ak]).length===0)delete p[ak];setPendingClears(p);}}
+function reapplyPendingClears(){
+  // Re-applied after every att load. If a racing pull resurrected a
+  // cell we cleared before the server knew, this puts it back.
+  // Pending entries auto-expire after 2 min to avoid holding forever.
+  var p=getPendingClears();if(!Object.keys(p).length)return;
+  var ov=glj('kaefer_att_ov',{}),changed=false,now=Date.now(),TWO_MIN=2*60*1000;
+  for(var ak in p){
+    for(var dk in p[ak]){
+      if(now-p[ak][dk]>TWO_MIN){clearPendingClear(ak,dk);continue;}
+      if(ov[ak]&&(dk in ov[ak])){
+        delete ov[ak][dk];
+        if(Object.keys(ov[ak]).length===0)delete ov[ak];
+        changed=true;
+      }
+    }
+  }
+  if(changed)sl('kaefer_att_ov',ov);
+}
+
+// Date normalisation — server may return Date strings in mixed forms.
+// We want ISO YYYY-MM-DD as the canonical date_key everywhere.
+function normDateKey(dk){
+  if(!dk)return dk;
+  if(dk instanceof Date)return dk.toISOString().slice(0,10);
+  var s=String(dk);
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+  var d=new Date(s);
+  return isNaN(d.getTime())?s.slice(0,10):d.toISOString().slice(0,10);
+}
+function normaliseOvDates(ov){
+  // Mutates a fresh copy: ensures every date key is ISO YYYY-MM-DD.
+  var out={};
+  for(var ak in ov){
+    out[ak]={};
+    for(var dk in ov[ak]){
+      var st=ov[ak][dk];
+      if(st===''||st==null)continue;
+      out[ak][normDateKey(dk)]=st;
+    }
+    if(Object.keys(out[ak]).length===0)delete out[ak];
+  }
+  return out;
+}
+
+// Entry hashes for delta diffing
+function hashLogEntry(en){return JSON.stringify([en.date,en.insp,en.site,en.area,en.team,en.yes,en.no,en.na,en.sc,en.items]);}
+function hashRREntry(en){return JSON.stringify([en.date,en.name,(en.choices||[]).slice().sort(),en.comment]);}
+
+// ── In-flight guard + debounced scheduler ───────────────────
+var _syncInFlight={},_syncTimers={};
+var SYNC_DEBOUNCE_MS=3000;
+
+function runSyncGuarded(name,fn){
+  if(_syncInFlight[name])return; // another instance is mid-flight, drop
+  _syncInFlight[name]=true;
+  // Hard release after 60s as a backstop in case the chain stalls.
+  var hardRelease=setTimeout(function(){_syncInFlight[name]=false;},60000);
+  try{
+    fn();
+  }catch(e){
+    console.warn('[KAEFER] sync '+name+' threw:',e);
+    clearTimeout(hardRelease);
+    _syncInFlight[name]=false;
+    return;
+  }
+  // The sync functions don't return promises; release after their
+  // typical fetch+load roundtrip completes.
+  setTimeout(function(){clearTimeout(hardRelease);_syncInFlight[name]=false;},6000);
+}
+
+function scheduleSync(name,fn){
+  clearTimeout(_syncTimers[name]);
+  _syncTimers[name]=setTimeout(function(){runSyncGuarded(name,fn);},SYNC_DEBOUNCE_MS);
+}
+
+// Convenience wrappers used by mutating functions
+function scheduleSyncLog(){scheduleSync('log',syncLog);}
+function scheduleSyncRR(){ scheduleSync('rr', syncRR); }
+function scheduleSyncAtt(){scheduleSync('att',syncAtt);}
+function flushSyncAtt(){
+  // Immediate (not debounced) — used when clearing an attendance cell
+  // so the server learns about the delete before any background pull
+  // can re-assert the old value.
+  clearTimeout(_syncTimers.att);
+  setTimeout(function(){runSyncGuarded('att',syncAtt);},50);
+}
+
+// ── syncAtt (delta + cell merge) ────────────────────────────
 function syncAtt(){
   var u=getURL();if(!u){alert('Set up sync URL first (Setup Sync button).');return;}
   setSS('bz','Syncing attendance...');
-  // Save local data up first
+
+  var localOv  =glj('kaefer_att_ov',{})||{};
+  var localEmps=glj('kaefer_att_emps',null);
+  var localArch=glj('kaefer_att_arch',[])||[];
+  var snap     =getSnap('att')||{}; // flat { "ak::date": status }
+
+  // Flatten local into a flat cell map (skip empty/null values)
+  var flat={};
+  for(var ak in localOv){
+    var dates=localOv[ak]||{};
+    for(var dk in dates){
+      var v=dates[dk];
+      if(v===''||v==null)continue;
+      flat[ak+'::'+normDateKey(dk)]=v;
+    }
+  }
+
+  // Upserts: anything new or changed vs snapshot
+  var upserts={};
+  for(var k in flat){if(snap[k]!==flat[k])upserts[k]=flat[k];}
+  // Deletes: anything in snapshot but no longer locally
+  var deletes=[];
+  for(var k2 in snap){if(!(k2 in flat))deletes.push(k2);}
+  var empDeletes=tombList('emp');
+
+  var pendingBeforeSync=getPendingClears();
+
   var payload=JSON.stringify({
     action:'save_att',
-    data:{
-      ov:glj('kaefer_att_ov',{}),
-      emps:glj('kaefer_att_emps',null),
-      arch:glj('kaefer_att_arch',[])
-    }
+    who:whoSync(),
+    data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes}
   });
+
   fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
   .then(function(r){return r.text();})
   .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
-    // Now load back
+    var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
     return fetch(u+'?action=load_att&t='+Date.now(),{redirect:'follow'});
   })
   .then(function(r){return r.json();})
   .then(function(j){
-    if(!j.ok)throw new Error('Load failed');
-    if(j.ov)sl('kaefer_att_ov',j.ov);
+    if(!j.ok)throw new Error(j.error||'Load failed');
+    var ov=normaliseOvDates(j.ov||{});
+    sl('kaefer_att_ov',ov);
     if(j.emps)sl('kaefer_att_emps',j.emps);
     if(j.arch&&j.arch.length)sl('kaefer_att_arch',j.arch);
+
+    // Rebuild snapshot from merged server state
+    var newSnap={};
+    for(var nm in ov){for(var d in ov[nm]){var st=ov[nm][d];if(st===''||st==null)continue;newSnap[nm+'::'+d]=st;}}
+    setSnap('att',newSnap);
+    clearTombs('emp',empDeletes);
+
+    // For every pending clear we sent: if the server now has no value
+    // for that cell, the clear is acknowledged.
+    for(var nm2 in pendingBeforeSync){
+      for(var dk2 in pendingBeforeSync[nm2]){
+        if(!ov[nm2]||!(dk2 in ov[nm2]))clearPendingClear(nm2,dk2);
+      }
+    }
+    // Any pending clears not yet acked: re-apply locally so a racing
+    // server response doesn't show the resurrected value to the user.
+    reapplyPendingClears();
+
     rAtt();rFormer();setSS('ok','Attendance synced');
   })
   .catch(function(err){setSS('er','Attendance sync failed: '+err.message);});
@@ -2554,18 +2729,33 @@ function syncPV(){
 function syncRR(){
   var u=getURL();if(!u){alert('Set up sync URL first.');return;}
   setSS('bz','Syncing R&R...');
-  var log=glj('kaefer_rr',[]);
-  var payload=JSON.stringify({action:'save_rr',data:log});
+  var local=glj('kaefer_rr',[])||[];
+  var snap=getSnap('rr')||{};
+  var upserts=[];
+  local.forEach(function(en){
+    if(en==null||en.id==null)return;
+    var key=String(en.id),h=hashRREntry(en);
+    if(snap[key]!==h)upserts.push(en);
+  });
+  var deletes=tombList('rr');
+
+  var payload=JSON.stringify({action:'save_rr',who:whoSync(),data:{upserts:upserts,deletes:deletes}});
+
   fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
   .then(function(r){return r.text();})
   .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
     return fetch(u+'?action=load_rr&t='+Date.now(),{redirect:'follow'});
   })
   .then(function(r){return r.json();})
   .then(function(j){
-    if(!j.ok)throw new Error('Load failed');
-    sl('kaefer_rr',j.data||[]);
+    if(!j.ok)throw new Error(j.error||'Load failed');
+    var serverArr=j.data||[];
+    sl('kaefer_rr',serverArr);
+    var newSnap={};
+    serverArr.forEach(function(en){if(en&&en.id!=null)newSnap[String(en.id)]=hashRREntry(en);});
+    setSnap('rr',newSnap);
+    clearTombs('rr',deletes);
     rRR();setSS('ok','R&R synced');
   })
   .catch(function(err){setSS('er','R&R sync failed: '+err.message);});
@@ -2574,22 +2764,90 @@ function syncRR(){
 function syncLog(){
   var u=getURL();if(!u){alert('Set up sync URL first.');return;}
   setSS('bz','Syncing inspection log...');
-  var log=glj('kaefer_log',[]);
-  var payload=JSON.stringify({action:'save_log',data:log});
+  var local=glj('kaefer_log',[])||[];
+  var snap=getSnap('log')||{};
+  var upserts=[];
+  local.forEach(function(en){
+    if(en==null||en.id==null)return;
+    var key=String(en.id),h=hashLogEntry(en);
+    if(snap[key]!==h)upserts.push(en);
+  });
+  var deletes=tombList('log');
+
+  var payload=JSON.stringify({action:'save_log',who:whoSync(),data:{upserts:upserts,deletes:deletes}});
+
   fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
   .then(function(r){return r.text();})
   .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error('Save failed');
+    var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
     return fetch(u+'?action=load_log&t='+Date.now(),{redirect:'follow'});
   })
   .then(function(r){return r.json();})
   .then(function(j){
-    if(!j.ok)throw new Error('Load failed');
-    sl('kaefer_log',j.data||[]);
+    if(!j.ok)throw new Error(j.error||'Load failed');
+    var serverArr=j.data||[];
+    sl('kaefer_log',serverArr);
+    var newSnap={};
+    serverArr.forEach(function(en){if(en&&en.id!=null)newSnap[String(en.id)]=hashLogEntry(en);});
+    setSnap('log',newSnap);
+    clearTombs('log',deletes);
     rLog();setSS('ok','Inspection log synced');
   })
   .catch(function(err){setSS('er','Log sync failed: '+err.message);});
 }
+
+// ── Single 15s background poll + on-focus pull ──────────────
+// All three datasets pulled together. Apps Script serialises them
+// via withLock anyway, and the in-flight guard prevents pile-up.
+(function(){
+  var BG_MS=15000,FOCUS_COOLDOWN_MS=5000,lastFocusPull=0;
+  function pullAll(){
+    if(!getURL())return;
+    runSyncGuarded('log',syncLog);
+    runSyncGuarded('rr',syncRR);
+    runSyncGuarded('att',syncAtt);
+  }
+  // Seed snapshots from current local state so the first sync after a
+  // page load doesn't re-upsert everything as "new".
+  function seedSnapshots(){
+    if(!getSnap('log')){
+      var s={};(glj('kaefer_log',[])||[]).forEach(function(en){if(en&&en.id!=null)s[String(en.id)]=hashLogEntry(en);});
+      setSnap('log',s);
+    }
+    if(!getSnap('rr')){
+      var s={};(glj('kaefer_rr',[])||[]).forEach(function(en){if(en&&en.id!=null)s[String(en.id)]=hashRREntry(en);});
+      setSnap('rr',s);
+    }
+    if(!getSnap('att')){
+      var ov=glj('kaefer_att_ov',{})||{},s={};
+      for(var nm in ov){for(var d in ov[nm]){var st=ov[nm][d];if(st===''||st==null)continue;s[nm+'::'+d]=st;}}
+      setSnap('att',s);
+    }
+  }
+  seedSnapshots();
+  setInterval(pullAll,BG_MS);
+  function onFocus(){
+    var now=Date.now();
+    if(now-lastFocusPull<FOCUS_COOLDOWN_MS)return;
+    lastFocusPull=now;
+    pullAll();
+  }
+  window.addEventListener('focus',onFocus);
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')onFocus();});
+  // Re-apply pending attendance clears on load, in case last session's
+  // sync was interrupted mid-flow.
+  setTimeout(reapplyPendingClears,1000);
+})();
+
+// Diagnostic helper — call from devtools
+window.kaeferSyncStatus=function(){
+  console.log('Supervisor:',whoSync()||'(none — set localStorage.kaefer_supervisor)');
+  console.log('Tombstones:',getTombs());
+  console.log('Pending att clears:',getPendingClears());
+  console.log('Snapshots:',{log:Object.keys(getSnap('log')||{}).length,rr:Object.keys(getSnap('rr')||{}).length,att:Object.keys(getSnap('att')||{}).length});
+  console.log('In flight:',Object.keys(_syncInFlight).filter(function(k){return _syncInFlight[k];}));
+};
+
 
 // wizard check moved to end of init
 var td2=new Date().toISOString().split('T')[0];
@@ -7177,676 +7435,6 @@ scfPrintPDF = function(){
 </script>  
 
   
-<!-- ============================================================
-     KAEFER Safety Tool — Multi-Supervisor Sync Patch (v4 client)
-     ------------------------------------------------------------
-     What it does:
-       * Replaces syncLog / syncRR / syncAtt with delta-based versions
-         that play nicely with multiple supervisors editing concurrently.
-       * Patches dLog / dRR / clrLog / clrRRLog to record local tombstones
-         so deletes get pushed up on next sync (and survive offline).
-       * Sends a "who" field on every sync using
-         localStorage.getItem('kaefer_supervisor').
-     How to install:
-       Open critical_control_wheel.html and find the last </script> tag
-       (it's right before </body></html> at the very bottom). Paste this
-       ENTIRE block — including the <script>...</script> wrapper — on a
-       new line AFTER that closing </script> but BEFORE </body>.
-       So the structure becomes:
-           ...existing code...
-           </script>          ← the big main script ends here
-           <script>           ← this patch starts here
-             ...patch code...
-           </script>
-           </body></html>
-     How to roll back:
-       Just delete this script block. A full page reload restores the
-       original syncLog / syncRR / syncAtt and the original delete fns.
-     Pairs with:
-       The matching v4 Apps Script backend — both must be deployed.
-     ============================================================ -->
-<script>
-(function(){
-  'use strict';
-
-  // ── helpers reused from main script ─────────────────────────
-  function ls(k, fallback){
-    try { var v = localStorage.getItem(k); return v == null ? fallback : v; }
-    catch(e){ return fallback; }
-  }
-  function lj(k, fallback){
-    try { var v = localStorage.getItem(k); return v == null ? fallback : JSON.parse(v); }
-    catch(e){ return fallback; }
-  }
-  function sj(k, v){
-    try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){}
-  }
-  function who(){
-    return (ls('kaefer_supervisor','')||'').toString().slice(0,80);
-  }
-  function setStatus(state, msg){
-    if (typeof setSS === 'function') setSS(state, msg);
-  }
-  function getURLSafe(){
-    return (typeof getURL === 'function') ? getURL() : localStorage.getItem('kaefer_url');
-  }
-
-  // ── tombstone storage (client-side, queued) ─────────────────
-  // Shape: { log: {id:true,...}, rr: {id:true,...}, emp: {name:true,...} }
-  var TOMB_KEY = 'kaefer_tombstones_v4';
-  function getTombs(){
-    var t = lj(TOMB_KEY, null);
-    if (!t || typeof t !== 'object') t = {};
-    if (!t.log) t.log = {};
-    if (!t.rr)  t.rr  = {};
-    if (!t.emp) t.emp = {};
-    return t;
-  }
-  function addTomb(type, id){
-    if (id == null || id === '') return;
-    var t = getTombs();
-    t[type][String(id)] = true;
-    sj(TOMB_KEY, t);
-  }
-  function clearTombs(type, ids){
-    // Called after a successful sync to remove queued tombstones
-    // that the server has now persisted. (We keep them around if
-    // not yet acknowledged.)
-    var t = getTombs();
-    if (!t[type]) return;
-    ids.forEach(function(id){ delete t[type][String(id)]; });
-    sj(TOMB_KEY, t);
-  }
-  function tombList(type){
-    var t = getTombs();
-    return Object.keys(t[type]||{});
-  }
-
-  // ── snapshot storage for delta computation ──────────────────
-  // After every successful sync we store what the server now has
-  // so the next sync only sends what changed.
-  function snapKey(name){ return 'kaefer_sync_snap_'+name; }
-  function getSnap(name){ return lj(snapKey(name), null); }
-  function setSnap(name, v){ sj(snapKey(name), v); }
-
-  // ── DELETE PATCHES ──────────────────────────────────────────
-  // Record local tombstones so the next sync can tell the server.
-
-  if (typeof window.dLog === 'function') {
-    var _origDLog = window.dLog;
-    window.dLog = function(id){
-      if (!confirm('Delete?')) return;
-      addTomb('log', id);
-      // Mirror original local-removal logic without re-prompting
-      var key = 'kaefer_log';
-      var arr = lj(key, []) || [];
-      sj(key, arr.filter(function(e){ return e.id !== id; }));
-      if (typeof rLog === 'function') rLog();
-    };
-  }
-
-  if (typeof window.dRR === 'function') {
-    window.dRR = function(id){
-      if (!confirm('Delete?')) return;
-      addTomb('rr', id);
-      var arr = lj('kaefer_rr', []) || [];
-      sj('kaefer_rr', arr.filter(function(e){ return e.id !== id; }));
-      if (typeof rRR === 'function') rRR();
-    };
-  }
-
-  if (typeof window.clrLog === 'function') {
-    window.clrLog = function(){
-      if (!confirm('Delete all?')) return;
-      var arr = lj('kaefer_log', []) || [];
-      arr.forEach(function(e){ addTomb('log', e.id); });
-      sj('kaefer_log', []);
-      if (typeof rLog === 'function') rLog();
-    };
-  }
-
-  if (typeof window.clrRRLog === 'function') {
-    window.clrRRLog = function(){
-      if (!confirm('Delete all?')) return;
-      var arr = lj('kaefer_rr', []) || [];
-      arr.forEach(function(e){ addTomb('rr', e.id); });
-      sj('kaefer_rr', []);
-      if (typeof rRR === 'function') rRR();
-    };
-  }
-
-  // ── NEW syncLog ─────────────────────────────────────────────
-  window.syncLog = function(){
-    var u = getURLSafe();
-    if (!u) { alert('Set up sync URL first.'); return; }
-    setStatus('bz','Syncing inspection log...');
-    var local = lj('kaefer_log', []) || [];
-    var snap  = getSnap('log') || {}; // {id: hashOfEntry}
-    // Compute upserts: any local entry whose hash differs from snapshot.
-    var upserts = [];
-    var seenIds = {};
-    local.forEach(function(en){
-      if (en == null || en.id == null) return;
-      var key = String(en.id);
-      seenIds[key] = true;
-      var h = hashLogEntry(en);
-      if (snap[key] !== h) upserts.push(en);
-    });
-    var deletes = tombList('log');
-
-    var payload = JSON.stringify({
-      action: 'save_log',
-      who:    who(),
-      data:   { upserts: upserts, deletes: deletes }
-    });
-
-    fetch(u, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body:payload})
-      .then(function(r){ return r.text(); })
-      .then(function(t){
-        var j = JSON.parse(t);
-        if (!j.ok) throw new Error(j.error || 'Save failed');
-        return fetch(u + '?action=load_log&t=' + Date.now(), {redirect:'follow'});
-      })
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (!j.ok) throw new Error(j.error || 'Load failed');
-        var serverArr = j.data || [];
-        // Server is authoritative — replace local with what it returned.
-        // (Server has already merged our upserts with anything other
-        //  supervisors added, and has honoured our tombstones.)
-        sj('kaefer_log', serverArr);
-        // Rebuild snapshot
-        var newSnap = {};
-        serverArr.forEach(function(en){
-          if (en && en.id != null) newSnap[String(en.id)] = hashLogEntry(en);
-        });
-        setSnap('log', newSnap);
-        // Tombstones the server has now applied can be cleared locally.
-        clearTombs('log', deletes);
-        if (typeof rLog === 'function') rLog();
-        setStatus('ok','Inspection log synced');
-      })
-      .catch(function(err){ setStatus('er','Log sync failed: ' + err.message); });
-  };
-
-  function hashLogEntry(en){
-    // Cheap stable hash — JSON of the fields that matter.
-    return JSON.stringify([en.date, en.insp, en.site, en.area, en.team, en.yes, en.no, en.na, en.sc, en.items]);
-  }
-
-  // ── NEW syncRR ──────────────────────────────────────────────
-  window.syncRR = function(){
-    var u = getURLSafe();
-    if (!u) { alert('Set up sync URL first.'); return; }
-    setStatus('bz','Syncing R&R...');
-    var local = lj('kaefer_rr', []) || [];
-    var snap  = getSnap('rr') || {};
-    var upserts = [];
-    local.forEach(function(en){
-      if (en == null || en.id == null) return;
-      var key = String(en.id);
-      var h = hashRREntry(en);
-      if (snap[key] !== h) upserts.push(en);
-    });
-    var deletes = tombList('rr');
-
-    var payload = JSON.stringify({
-      action: 'save_rr',
-      who:    who(),
-      data:   { upserts: upserts, deletes: deletes }
-    });
-
-    fetch(u, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body:payload})
-      .then(function(r){ return r.text(); })
-      .then(function(t){
-        var j = JSON.parse(t);
-        if (!j.ok) throw new Error(j.error || 'Save failed');
-        return fetch(u + '?action=load_rr&t=' + Date.now(), {redirect:'follow'});
-      })
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (!j.ok) throw new Error(j.error || 'Load failed');
-        var serverArr = j.data || [];
-        sj('kaefer_rr', serverArr);
-        var newSnap = {};
-        serverArr.forEach(function(en){
-          if (en && en.id != null) newSnap[String(en.id)] = hashRREntry(en);
-        });
-        setSnap('rr', newSnap);
-        clearTombs('rr', deletes);
-        if (typeof rRR === 'function') rRR();
-        setStatus('ok','R&R synced');
-      })
-      .catch(function(err){ setStatus('er','R&R sync failed: ' + err.message); });
-  };
-
-  function hashRREntry(en){
-    return JSON.stringify([en.date, en.name, (en.choices||[]).slice().sort(), en.comment]);
-  }
-
-  // ── NEW syncAtt (delta + cell merge) ────────────────────────
-  // Attendance is a 2-level map: { empName: { dateKey: status } }.
-  // We diff vs snapshot:
-  //   - cell present locally but not in snapshot (or changed)  → upsert
-  //   - cell present in snapshot but not locally               → delete (status '')
-  // For employees, we send the full active/archived lists (small,
-  // and the server upserts by name without dropping anything).
-  window.syncAtt = function(){
-    var u = getURLSafe();
-    if (!u) { alert('Set up sync URL first (Setup Sync button).'); return; }
-    setStatus('bz','Syncing attendance...');
-
-    var localOv   = lj('kaefer_att_ov',   {}) || {};
-    var localEmps = lj('kaefer_att_emps', null);
-    var localArch = lj('kaefer_att_arch', []) || [];
-    var snap      = getSnap('att') || {}; // flat { "name::date": status }
-
-    // Flatten local into a flat cell map
-    var flat = {};
-    for (var name in localOv) {
-      var dates = localOv[name] || {};
-      for (var dk in dates) {
-        var v = dates[dk];
-        if (v === '' || v == null) continue; // already-deleted cell
-        flat[name + '::' + dk] = v;
-      }
-    }
-
-    var upserts = {};
-    var deletes = [];
-    // Upserts: anything changed or new locally
-    for (var k in flat) {
-      if (snap[k] !== flat[k]) upserts[k] = flat[k];
-    }
-    // Deletes: anything in snapshot but no longer locally
-    for (var k2 in snap) {
-      if (!(k2 in flat)) deletes.push(k2);
-    }
-
-    // Employee deletes from local tombstone queue (if you ever wire a hard-delete UI;
-    // currently the app archives rather than deletes, so this is usually empty)
-    var empDeletes = tombList('emp');
-
-    var payload = JSON.stringify({
-      action: 'save_att',
-      who:    who(),
-      data: {
-        upserts:    upserts,
-        deletes:    deletes,
-        emps:       localEmps,
-        arch:       localArch,
-        empDeletes: empDeletes
-      }
-    });
-
-    fetch(u, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body:payload})
-      .then(function(r){ return r.text(); })
-      .then(function(t){
-        var j = JSON.parse(t);
-        if (!j.ok) throw new Error(j.error || 'Save failed');
-        return fetch(u + '?action=load_att&t=' + Date.now(), {redirect:'follow'});
-      })
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (!j.ok) throw new Error(j.error || 'Load failed');
-        // Replace local with the merged server state.
-        var ov = j.ov || {};
-        sj('kaefer_att_ov', ov);
-        if (j.emps) sj('kaefer_att_emps', j.emps);
-        if (j.arch && j.arch.length) sj('kaefer_att_arch', j.arch);
-
-        // Rebuild snapshot from merged server state
-        var newSnap = {};
-        for (var nm in ov) {
-          for (var d in ov[nm]) {
-            var st = ov[nm][d];
-            if (st === '' || st == null) continue;
-            newSnap[nm + '::' + d] = st;
-          }
-        }
-        setSnap('att', newSnap);
-        clearTombs('emp', empDeletes);
-
-        if (typeof rAtt === 'function') rAtt();
-        if (typeof rFormer === 'function') rFormer();
-        setStatus('ok','Attendance synced');
-      })
-      .catch(function(err){ setStatus('er','Attendance sync failed: ' + err.message); });
-  };
-
-  // ── Bootstrap snapshots on first run ────────────────────────
-  // If snapshots don't exist yet, seed them from whatever is locally
-  // present so a first sync after this patch doesn't try to re-upsert
-  // everything as "new". (The server will merge those upserts safely
-  // either way, but seeding avoids needless writes.)
-  (function seedSnapshots(){
-    if (!getSnap('log')) {
-      var snap = {};
-      (lj('kaefer_log', []) || []).forEach(function(en){
-        if (en && en.id != null) snap[String(en.id)] = hashLogEntry(en);
-      });
-      setSnap('log', snap);
-    }
-    if (!getSnap('rr')) {
-      var snap = {};
-      (lj('kaefer_rr', []) || []).forEach(function(en){
-        if (en && en.id != null) snap[String(en.id)] = hashRREntry(en);
-      });
-      setSnap('rr', snap);
-    }
-    if (!getSnap('att')) {
-      var ov = lj('kaefer_att_ov', {}) || {};
-      var snap = {};
-      for (var nm in ov) {
-        for (var d in ov[nm]) {
-          var st = ov[nm][d];
-          if (st === '' || st == null) continue;
-          snap[nm + '::' + d] = st;
-        }
-      }
-      setSnap('att', snap);
-    }
-  })();
-
-  // ── Diagnostic console ─────────────────────────────────────
-  // Run from devtools: kaeferSyncDebug()
-  window.kaeferSyncDebug = function(){
-    console.log('Supervisor:', who() || '(none — set localStorage.kaefer_supervisor)');
-    console.log('Tombstones:', getTombs());
-    console.log('Log snapshot size:',  Object.keys(getSnap('log')||{}).length);
-    console.log('RR snapshot size:',   Object.keys(getSnap('rr')||{}).length);
-    console.log('Att snapshot size:',  Object.keys(getSnap('att')||{}).length);
-  };
-
-  console.log('[KAEFER] Multi-supervisor sync patch v4 installed. who=', who() || '(set localStorage.kaefer_supervisor)');
-})();
-</script>
-
-<!-- ============================================================
-     KAEFER Safety Tool — Auto-Sync Patch v2 (with in-flight guards)
-     ------------------------------------------------------------
-     Changes vs v1:
-       * Each sync function is now guarded — a second call while one
-         is in flight is silently dropped, preventing lock pile-up
-         on the Apps Script backend.
-       * Background pull is per-dataset rather than firing all three
-         simultaneously.
-     ============================================================ -->
-<script>
-(function(){
-  'use strict';
-
-  var DEBOUNCE_MS         = 3000;
-  var BACKGROUND_PULL_MS  = 15*1000;
-  var FOCUS_PULL_COOLDOWN = 5*1000;
-
-  var timers   = {};
-  var inFlight = {};
-
-  function debounce(name, fn){
-    clearTimeout(timers[name]);
-    timers[name] = setTimeout(function(){
-      guardedRun(name, fn);
-    }, DEBOUNCE_MS);
-  }
-
-  function guardedRun(name, fn){
-    if (inFlight[name]) return; // already running, drop this call
-    inFlight[name] = true;
-    var releaseTimer = setTimeout(function(){ inFlight[name] = false; }, 60000); // hard release after 60s
-    try {
-      var result = fn();
-      // The patched sync functions don't return a promise we can hook,
-      // but they finish in <~5s typically. We release the guard after a
-      // short delay to give the chained fetch+load time to complete.
-      setTimeout(function(){
-        clearTimeout(releaseTimer);
-        inFlight[name] = false;
-      }, 6000);
-      return result;
-    } catch(e){
-      console.warn('[KAEFER] auto-sync '+name+' threw:', e);
-      clearTimeout(releaseTimer);
-      inFlight[name] = false;
-    }
-  }
-
-  function exists(name){ return typeof window[name] === 'function'; }
-
-  function wrapWithSync(funcNames, syncName){
-    funcNames.forEach(function(fn){
-      if (!exists(fn)) return;
-      var orig = window[fn];
-      window[fn] = function(){
-        var r = orig.apply(this, arguments);
-        if (exists(syncName)) debounce(syncName, window[syncName]);
-        return r;
-      };
-    });
-  }
-
-  wrapWithSync(['addRR','dRR','clrRRLog'],                                   'syncRR');
-  wrapWithSync(['saveInsp','dLog','clrLog'],                                 'syncLog');
-  wrapWithSync(['setStatus','saveAddEmp','removeEmp','restoreEmp'],          'syncAtt');
-
-  // ── Periodic background pull — staggered so all three don't fire at once
-  function pullOne(name){
-    if (typeof window.getURL === 'function' && !window.getURL()) return;
-    if (exists(name)) guardedRun(name, window[name]);
-  }
-
-  // Stagger the three: 0s, 5s, 10s offset within the 15s window.
-  setInterval(function(){ pullOne('syncRR');  }, BACKGROUND_PULL_MS);
-  setTimeout(function(){
-    setInterval(function(){ pullOne('syncLog'); }, BACKGROUND_PULL_MS);
-  }, 5000);
-  setTimeout(function(){
-    setInterval(function(){ pullOne('syncAtt'); }, BACKGROUND_PULL_MS);
-  }, 10000);
-
-  // ── On tab focus — pull each, guarded
-  var lastFocusSync = 0;
-  function onFocus(){
-    var now = Date.now();
-    if (now - lastFocusSync < FOCUS_PULL_COOLDOWN) return;
-    lastFocusSync = now;
-    pullOne('syncRR');
-    pullOne('syncLog');
-    pullOne('syncAtt');
-  }
-  window.addEventListener('focus', onFocus);
-  document.addEventListener('visibilitychange', function(){
-    if (document.visibilityState === 'visible') onFocus();
-  });
-
-  // ── Diagnostic helper
-  window.kaeferAutoSyncStatus = function(){
-    console.log('Auto-sync v2 installed. Debounce:', DEBOUNCE_MS+'ms,',
-                'background pull every', (BACKGROUND_PULL_MS/1000)+'s,',
-                'focus cooldown', (FOCUS_PULL_COOLDOWN/1000)+'s.');
-    console.log('Pending debounced timers:', Object.keys(timers).filter(function(k){ return timers[k]; }));
-    console.log('In flight:', Object.keys(inFlight).filter(function(k){ return inFlight[k]; }));
-  };
-
-  console.log('[KAEFER] Auto-sync v2 installed (with in-flight guards).');
-})();
-</script>
-
-<!-- ============================================================
-     KAEFER Safety Tool — setStatus "Present" Fix v2
-     ------------------------------------------------------------
-     Changes vs v1:
-       * When a cell is cleared (set to Present), immediately
-         push the delete to the server INSTEAD of debouncing.
-         This avoids a race where a background pull overwrites
-         the local clear before the debounced push fires.
-       * Marks the cleared cell in a "pending deletes" map so
-         even if a pull runs concurrently, the local clear is
-         re-applied after the pull completes.
-     ============================================================ -->
-<script>
-(function(){
-  'use strict';
-
-  if (typeof window.setStatus !== 'function') {
-    console.log('[KAEFER] setStatus-fix v2: setStatus not found, skipping');
-    return;
-  }
-
-  // Strip any previous (v1) wrapper if it's already in place.
-  // We re-wrap the underlying chain ourselves.
-  var origSetStatus = window.setStatus;
-
-  // Pending deletes: cells the user has cleared but the server may not
-  // yet know about. We re-apply these after every load to prevent a
-  // race with background pulls.
-  var PEND_KEY = 'kaefer_att_pending_clears';
-  function getPending(){
-    try { return JSON.parse(localStorage.getItem(PEND_KEY)||'{}') || {}; }
-    catch(e){ return {}; }
-  }
-  function setPending(p){
-    try { localStorage.setItem(PEND_KEY, JSON.stringify(p)); } catch(e){}
-  }
-  function addPending(name, dateKey){
-    var p = getPending();
-    if (!p[name]) p[name] = {};
-    p[name][dateKey] = Date.now();
-    setPending(p);
-  }
-  function clearPending(name, dateKey){
-    var p = getPending();
-    if (p[name]) {
-      delete p[name][dateKey];
-      if (Object.keys(p[name]).length === 0) delete p[name];
-    }
-    setPending(p);
-  }
-  function reapplyPending(){
-    // Called after every load to ensure any pending clears stay cleared
-    // until the server has acknowledged them.
-    var p = getPending();
-    if (Object.keys(p).length === 0) return;
-    var ov;
-    try { ov = JSON.parse(localStorage.getItem('kaefer_att_ov')||'{}'); }
-    catch(e){ return; }
-    var changed = false;
-    var TWO_MIN = 2*60*1000;
-    var now = Date.now();
-    for (var name in p) {
-      for (var dk in p[name]) {
-        // Expire pending after 2 min — by then sync should have completed
-        // or genuinely failed, and we don't want to hold the clear forever.
-        if (now - p[name][dk] > TWO_MIN) {
-          clearPending(name, dk);
-          continue;
-        }
-        if (ov[name] && (dk in ov[name])) {
-          delete ov[name][dk];
-          if (Object.keys(ov[name]).length === 0) delete ov[name];
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
-    }
-  }
-
-  // Wrap syncAtt so we can drop pending entries once the server has
-  // acknowledged the push.
-  if (typeof window.syncAtt === 'function') {
-    var origSyncAtt = window.syncAtt;
-    window.syncAtt = function(){
-      // Take a snapshot of what we're about to push — if it includes
-      // any pending clears, we can drop them from the pending map
-      // once the call completes successfully.
-      var pendingBeforeSync = getPending();
-      var r = origSyncAtt.apply(this, arguments);
-      // We can't easily await origSyncAtt because it doesn't return
-      // a promise. Schedule a re-apply + cleanup after a generous wait.
-      setTimeout(function(){
-        // After the sync completes, clear pending entries whose
-        // server-side value is now empty (acknowledged).
-        var u = (typeof getURL === 'function') ? getURL() : localStorage.getItem('kaefer_url');
-        if (!u) return;
-        fetch(u + '?action=load_att&t=' + Date.now(), {redirect:'follow'})
-          .then(function(r){ return r.json(); })
-          .then(function(j){
-            if (!j.ok) return;
-            var ov = j.ov || {};
-            for (var name in pendingBeforeSync) {
-              for (var dk in pendingBeforeSync[name]) {
-                // Server has no value for this cell → ack the clear
-                if (!ov[name] || !(dk in ov[name])) {
-                  clearPending(name, dk);
-                }
-              }
-            }
-            // Always re-apply remaining pending clears in case the load
-            // step in syncAtt reasserted them.
-            reapplyPending();
-            if (typeof rAtt === 'function') rAtt();
-          })
-          .catch(function(){});
-      }, 4000);
-      return r;
-    };
-  }
-
-  // Wrap setStatus itself
-  window.setStatus = function(name, dateKey, val){
-    var r = origSetStatus.apply(this, arguments);
-
-    if (arguments.length >= 3 && name && dateKey) {
-      try {
-        var ov = JSON.parse(localStorage.getItem('kaefer_att_ov') || '{}');
-        var emp = ov[name];
-        if (val === '' || val == null) {
-          // Clearing the cell
-          if (emp && (dateKey in emp)) {
-            delete emp[dateKey];
-            if (Object.keys(emp).length === 0) delete ov[name];
-            localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
-            if (typeof rAtt === 'function') rAtt();
-          }
-          // Track this as a pending clear so it survives any racing pulls
-          addPending(name, dateKey);
-          // Push IMMEDIATELY (not debounced) so the server learns before
-          // any background pull can re-assert the old value.
-          if (typeof syncAtt === 'function') {
-            setTimeout(syncAtt, 50);
-          }
-        } else {
-          if (!ov[name]) ov[name] = {};
-          if (ov[name][dateKey] !== val) {
-            ov[name][dateKey] = val;
-            localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
-          }
-          // Setting a value cancels any pending clear for the same cell
-          clearPending(name, dateKey);
-          // Push (debounced, since rapid changes are likely for this case)
-          if (typeof syncAtt === 'function') {
-            clearTimeout(window.__attDebounce);
-            window.__attDebounce = setTimeout(syncAtt, 1500);
-          }
-        }
-      } catch(e) {
-        console.warn('[KAEFER] setStatus-fix v2 error:', e);
-      }
-    }
-
-    return r;
-  };
-
-  // Re-apply pending clears whenever the page loads (in case sync was
-  // interrupted mid-flow)
-  setTimeout(reapplyPending, 1000);
-
-  console.log('[KAEFER] setStatus "Present" fix v2 installed (race-safe).');
-})();
-</script>
-
   
 
 </body></html>

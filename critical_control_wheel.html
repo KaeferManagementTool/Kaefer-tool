@@ -7673,79 +7673,180 @@ scfPrintPDF = function(){
 </script>
 
 <!-- ============================================================
-     KAEFER Safety Tool — setStatus "Present" Fix
+     KAEFER Safety Tool — setStatus "Present" Fix v2
      ------------------------------------------------------------
-     Fixes a pre-existing bug where clicking "Present" in the
-     attendance cell picker doesn't actually clear the cell from
-     storage. setStatus(name, date, '') was a no-op, so clicking
-     AL → Present visually changed the cell but the AL value
-     remained in kaefer_att_ov, then re-rendered as AL on next
-     redraw or background sync pull.
-     This patch wraps setStatus so that when called with an empty
-     status, it explicitly deletes the cell from kaefer_att_ov
-     and triggers a sync (which will push the delete to other
-     supervisors as a "blank cell" via the patch's diff logic).
-     Paste this AFTER all other patches, BEFORE </body></html>.
+     Changes vs v1:
+       * When a cell is cleared (set to Present), immediately
+         push the delete to the server INSTEAD of debouncing.
+         This avoids a race where a background pull overwrites
+         the local clear before the debounced push fires.
+       * Marks the cleared cell in a "pending deletes" map so
+         even if a pull runs concurrently, the local clear is
+         re-applied after the pull completes.
      ============================================================ -->
 <script>
 (function(){
   'use strict';
 
   if (typeof window.setStatus !== 'function') {
-    console.log('[KAEFER] setStatus-fix: setStatus not found, skipping');
+    console.log('[KAEFER] setStatus-fix v2: setStatus not found, skipping');
     return;
   }
 
+  // Strip any previous (v1) wrapper if it's already in place.
+  // We re-wrap the underlying chain ourselves.
   var origSetStatus = window.setStatus;
-  var attDebounce;
 
+  // Pending deletes: cells the user has cleared but the server may not
+  // yet know about. We re-apply these after every load to prevent a
+  // race with background pulls.
+  var PEND_KEY = 'kaefer_att_pending_clears';
+  function getPending(){
+    try { return JSON.parse(localStorage.getItem(PEND_KEY)||'{}') || {}; }
+    catch(e){ return {}; }
+  }
+  function setPending(p){
+    try { localStorage.setItem(PEND_KEY, JSON.stringify(p)); } catch(e){}
+  }
+  function addPending(name, dateKey){
+    var p = getPending();
+    if (!p[name]) p[name] = {};
+    p[name][dateKey] = Date.now();
+    setPending(p);
+  }
+  function clearPending(name, dateKey){
+    var p = getPending();
+    if (p[name]) {
+      delete p[name][dateKey];
+      if (Object.keys(p[name]).length === 0) delete p[name];
+    }
+    setPending(p);
+  }
+  function reapplyPending(){
+    // Called after every load to ensure any pending clears stay cleared
+    // until the server has acknowledged them.
+    var p = getPending();
+    if (Object.keys(p).length === 0) return;
+    var ov;
+    try { ov = JSON.parse(localStorage.getItem('kaefer_att_ov')||'{}'); }
+    catch(e){ return; }
+    var changed = false;
+    var TWO_MIN = 2*60*1000;
+    var now = Date.now();
+    for (var name in p) {
+      for (var dk in p[name]) {
+        // Expire pending after 2 min — by then sync should have completed
+        // or genuinely failed, and we don't want to hold the clear forever.
+        if (now - p[name][dk] > TWO_MIN) {
+          clearPending(name, dk);
+          continue;
+        }
+        if (ov[name] && (dk in ov[name])) {
+          delete ov[name][dk];
+          if (Object.keys(ov[name]).length === 0) delete ov[name];
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
+    }
+  }
+
+  // Wrap syncAtt so we can drop pending entries once the server has
+  // acknowledged the push.
+  if (typeof window.syncAtt === 'function') {
+    var origSyncAtt = window.syncAtt;
+    window.syncAtt = function(){
+      // Take a snapshot of what we're about to push — if it includes
+      // any pending clears, we can drop them from the pending map
+      // once the call completes successfully.
+      var pendingBeforeSync = getPending();
+      var r = origSyncAtt.apply(this, arguments);
+      // We can't easily await origSyncAtt because it doesn't return
+      // a promise. Schedule a re-apply + cleanup after a generous wait.
+      setTimeout(function(){
+        // After the sync completes, clear pending entries whose
+        // server-side value is now empty (acknowledged).
+        var u = (typeof getURL === 'function') ? getURL() : localStorage.getItem('kaefer_url');
+        if (!u) return;
+        fetch(u + '?action=load_att&t=' + Date.now(), {redirect:'follow'})
+          .then(function(r){ return r.json(); })
+          .then(function(j){
+            if (!j.ok) return;
+            var ov = j.ov || {};
+            for (var name in pendingBeforeSync) {
+              for (var dk in pendingBeforeSync[name]) {
+                // Server has no value for this cell → ack the clear
+                if (!ov[name] || !(dk in ov[name])) {
+                  clearPending(name, dk);
+                }
+              }
+            }
+            // Always re-apply remaining pending clears in case the load
+            // step in syncAtt reasserted them.
+            reapplyPending();
+            if (typeof rAtt === 'function') rAtt();
+          })
+          .catch(function(){});
+      }, 4000);
+      return r;
+    };
+  }
+
+  // Wrap setStatus itself
   window.setStatus = function(name, dateKey, val){
-    // Always call the original first — it handles the visual side and
-    // any logic for valid statuses.
     var r = origSetStatus.apply(this, arguments);
 
-    // If this looks like an attendance call (3 args, dateKey present),
-    // and the value is empty (Present), explicitly delete the cell so
-    // it doesn't get reasserted on the next render or sync.
     if (arguments.length >= 3 && name && dateKey) {
       try {
         var ov = JSON.parse(localStorage.getItem('kaefer_att_ov') || '{}');
         var emp = ov[name];
         if (val === '' || val == null) {
+          // Clearing the cell
           if (emp && (dateKey in emp)) {
             delete emp[dateKey];
-            // Clean up empty employee entry too
             if (Object.keys(emp).length === 0) delete ov[name];
             localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
             if (typeof rAtt === 'function') rAtt();
           }
+          // Track this as a pending clear so it survives any racing pulls
+          addPending(name, dateKey);
+          // Push IMMEDIATELY (not debounced) so the server learns before
+          // any background pull can re-assert the old value.
+          if (typeof syncAtt === 'function') {
+            setTimeout(syncAtt, 50);
+          }
         } else {
-          // Defensive: also ensure non-empty values are persisted.
-          // (If the original setStatus already did this, we're a no-op.)
           if (!ov[name]) ov[name] = {};
           if (ov[name][dateKey] !== val) {
             ov[name][dateKey] = val;
             localStorage.setItem('kaefer_att_ov', JSON.stringify(ov));
           }
-        }
-
-        // Trigger a sync after the dust settles. Debounced so rapid
-        // clicks coalesce.
-        if (typeof syncAtt === 'function') {
-          clearTimeout(attDebounce);
-          attDebounce = setTimeout(syncAtt, 1500);
+          // Setting a value cancels any pending clear for the same cell
+          clearPending(name, dateKey);
+          // Push (debounced, since rapid changes are likely for this case)
+          if (typeof syncAtt === 'function') {
+            clearTimeout(window.__attDebounce);
+            window.__attDebounce = setTimeout(syncAtt, 1500);
+          }
         }
       } catch(e) {
-        console.warn('[KAEFER] setStatus-fix error:', e);
+        console.warn('[KAEFER] setStatus-fix v2 error:', e);
       }
     }
 
     return r;
   };
 
-  console.log('[KAEFER] setStatus "Present" fix installed.');
+  // Re-apply pending clears whenever the page loads (in case sync was
+  // interrupted mid-flow)
+  setTimeout(reapplyPending, 1000);
+
+  console.log('[KAEFER] setStatus "Present" fix v2 installed (race-safe).');
 })();
 </script>
+
   
 
 </body></html>

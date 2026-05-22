@@ -2655,6 +2655,48 @@ function flushSyncAtt(){
   setTimeout(function(){runSyncGuarded('att',syncAtt);},50);
 }
 
+// ── Retry helpers for intermittent Apps Script 404s ─────────
+// Going direct to Apps Script, the 302→googleusercontent redirect leg
+// intermittently 404s (~1 in 5 on mobile networks). A single retry
+// almost always succeeds. These wrap POST-then-parse and GET-then-parse
+// with up to 3 attempts and a short backoff.
+function _isBadResponse(text){
+  // Apps Script 404 returns an HTML page, not JSON.
+  return !text || text.charAt(0)==='<' || text.indexOf('<!DOCTYPE')!==-1;
+}
+function postJsonRetry(url,body,attempt){
+  attempt=attempt||1;
+  return fetch(url,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:body})
+    .then(function(r){return r.text();})
+    .then(function(t){
+      if(_isBadResponse(t))throw new Error('Bad response (likely redirect 404)');
+      var j=JSON.parse(t);
+      if(!j.ok)throw new Error(j.error||'Save failed');
+      return j;
+    })
+    .catch(function(err){
+      if(attempt>=3)throw err;
+      return new Promise(function(res){setTimeout(res,700*attempt);})
+        .then(function(){return postJsonRetry(url,body,attempt+1);});
+    });
+}
+function getJsonRetry(url,attempt){
+  attempt=attempt||1;
+  return fetch(url,{redirect:'follow'})
+    .then(function(r){return r.text();})
+    .then(function(t){
+      if(_isBadResponse(t))throw new Error('Bad response (likely redirect 404)');
+      var j=JSON.parse(t);
+      if(!j.ok)throw new Error(j.error||'Load failed');
+      return j;
+    })
+    .catch(function(err){
+      if(attempt>=3)throw err;
+      return new Promise(function(res){setTimeout(res,700*attempt);})
+        .then(function(){return getJsonRetry(url,attempt+1);});
+    });
+}
+
 // ── syncAtt (delta + cell merge) ────────────────────────────
 function syncAtt(){
   var u=getURL();if(!u){alert('Set up sync URL first (Setup Sync button).');return;}
@@ -2692,15 +2734,11 @@ function syncAtt(){
     data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes}
   });
 
-  return fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
-  .then(function(r){return r.text();})
-  .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
-    return fetch(u+'?action=load_att&t='+Date.now(),{redirect:'follow'});
+  return postJsonRetry(u,payload)
+  .then(function(){
+    return getJsonRetry(u+'?action=load_att&t='+Date.now());
   })
-  .then(function(r){return r.json();})
   .then(function(j){
-    if(!j.ok)throw new Error(j.error||'Load failed');
     var ov=normaliseOvDates(j.ov||{});
     sl('kaefer_att_ov',ov);
     if(j.emps)sl('kaefer_att_emps',j.emps);
@@ -2767,15 +2805,11 @@ function syncRR(){
 
   var payload=JSON.stringify({action:'save_rr',who:whoSync(),data:{upserts:upserts,deletes:deletes}});
 
-  return fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
-  .then(function(r){return r.text();})
-  .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
-    return fetch(u+'?action=load_rr&t='+Date.now(),{redirect:'follow'});
+  return postJsonRetry(u,payload)
+  .then(function(){
+    return getJsonRetry(u+'?action=load_rr&t='+Date.now());
   })
-  .then(function(r){return r.json();})
   .then(function(j){
-    if(!j.ok)throw new Error(j.error||'Load failed');
     var serverArr=j.data||[];
     sl('kaefer_rr',serverArr);
     var newSnap={};
@@ -2802,15 +2836,11 @@ function syncLog(){
 
   var payload=JSON.stringify({action:'save_log',who:whoSync(),data:{upserts:upserts,deletes:deletes}});
 
-  return fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
-  .then(function(r){return r.text();})
-  .then(function(t){
-    var j=JSON.parse(t);if(!j.ok)throw new Error(j.error||'Save failed');
-    return fetch(u+'?action=load_log&t='+Date.now(),{redirect:'follow'});
+  return postJsonRetry(u,payload)
+  .then(function(){
+    return getJsonRetry(u+'?action=load_log&t='+Date.now());
   })
-  .then(function(r){return r.json();})
   .then(function(j){
-    if(!j.ok)throw new Error(j.error||'Load failed');
     var serverArr=j.data||[];
     sl('kaefer_log',serverArr);
     var newSnap={};

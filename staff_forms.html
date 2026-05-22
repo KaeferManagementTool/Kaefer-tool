@@ -269,10 +269,12 @@ window.onerror = function(msg, url, line, col, err) {
 };
 
 function getURL(){
-  try {
-    var u = localStorage.getItem('kaefer_url');
-    return u || APPS_URL;
-  } catch(e){ return APPS_URL; }
+  // Staff submissions ALWAYS go through the Cloudflare Worker, which handles
+  // save_submission via image-tag GET (CORS-safe on mobile). We deliberately
+  // ignore localStorage 'kaefer_url' here — the main tool sets that to the
+  // Apps Script URL for attendance sync, and Apps Script's doGet can't handle
+  // submissions. Using the shared key would silently break form submits.
+  return APPS_URL;
 }
 
 // Helper: parse URL params without using URLSearchParams (older iOS Safari compatibility)

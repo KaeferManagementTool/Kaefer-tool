@@ -1537,8 +1537,8 @@ function editEmp(oldName){
   rAtt();
 }
 function editEmpByEl(btn){editEmp(decodeURIComponent(btn.getAttribute('data-name')));}
-function removeEmp(n){if(!confirm('Move '+n+' to No Longer Employed?'))return;var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'})});sl(ATT_ARCH,arch);}rAtt();rFormer();if(getURL())scheduleSyncAtt();}
-function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}rAtt();rFormer();if(getURL())scheduleSyncAtt();}
+function removeEmp(n){if(!confirm('Move '+n+' to No Longer Employed?'))return;var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'})});sl(ATT_ARCH,arch);}addTomb('arch',n);rAtt();rFormer();if(getURL())flushSyncAtt();}
+function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}clearTombs('arch',[n]);var pr=glj('kaefer_arch_restore',[]);if(pr.indexOf(n)<0){pr.push(n);sl('kaefer_arch_restore',pr);}rAtt();rFormer();if(getURL())flushSyncAtt();}
 function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+'</td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
 function restoreEmpByEl(btn){restoreEmp(decodeURIComponent(btn.getAttribute('data-name')));}
 function rAtt(){
@@ -2525,7 +2525,7 @@ function whoSync(){ return (localStorage.getItem('kaefer_supervisor')||'').toStr
 
 // Tombstones — queued deletes that survive until the server has them.
 var TOMB_KEY='kaefer_tombstones_v4';
-function getTombs(){var t=glj(TOMB_KEY,null);if(!t||typeof t!=='object')t={};if(!t.log)t.log={};if(!t.rr)t.rr={};if(!t.emp)t.emp={};return t;}
+function getTombs(){var t=glj(TOMB_KEY,null);if(!t||typeof t!=='object')t={};if(!t.log)t.log={};if(!t.rr)t.rr={};if(!t.emp)t.emp={};if(!t.arch)t.arch={};return t;}
 function addTomb(type,id){if(id==null||id==='')return;var t=getTombs();t[type][String(id)]=true;sl(TOMB_KEY,t);}
 function clearTombs(type,ids){var t=getTombs();if(!t[type])return;ids.forEach(function(id){delete t[type][String(id)];});sl(TOMB_KEY,t);}
 function tombList(type){return Object.keys(getTombs()[type]||{});}
@@ -2726,6 +2726,8 @@ function syncAtt(){
   var deletes=[];
   for(var k2 in snap){if(!(k2 in flat))deletes.push(k2);}
   var empDeletes=tombList('emp');
+  var archTombs=tombList('arch');
+  var archRestore=glj('kaefer_arch_restore',[])||[];
 
   // Exclude-from-manning flags: same snapshot-delta approach as cells.
   var localExc=glj('kaefer_att_exc',{})||{};
@@ -2746,7 +2748,7 @@ function syncAtt(){
   var payload=JSON.stringify({
     action:'save_att',
     who:whoSync(),
-    data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes,excUpserts:excUpserts,excDeletes:excDeletes}
+    data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes,archTombs:archTombs,archRestore:archRestore,excUpserts:excUpserts,excDeletes:excDeletes}
   });
 
   return postJsonRetry(u,payload)
@@ -2764,6 +2766,7 @@ function syncAtt(){
     for(var nm in ov){for(var d in ov[nm]){var st=ov[nm][d];if(st===''||st==null)continue;newSnap[nm+'::'+d]=st;}}
     setSnap('att',newSnap);
     clearTombs('emp',empDeletes);
+    if(archRestore.length)sl('kaefer_arch_restore',[]);
 
     // Merge exclude flags from server (server is authoritative after merge)
     var excServer=j.exc||{};

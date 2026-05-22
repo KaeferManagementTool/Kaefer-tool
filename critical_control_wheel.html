@@ -1473,10 +1473,11 @@ function toggleExc(enc,dk){
   var n=decodeURIComponent(enc);
   var exc=getExc(),ak=aKey(n);
   if(!exc[ak])exc[ak]={};
-  if(exc[ak][dk])delete exc[ak][dk];
+  if(exc[ak][dk]){delete exc[ak][dk];if(Object.keys(exc[ak]).length===0)delete exc[ak];}
   else exc[ak][dk]=1;
   sl(ATT_EXC,exc);
   rAtt();rDM();
+  if(getURL())flushSyncAtt();
 }
 function aKey(n){return n.toLowerCase().replace(/[^a-z0-9]/g,'_');}
 function getBaseExc(n){var b=ATT_BASE.filter(function(e){return e.n===n;});return b.length?b[0].e:{};}
@@ -2726,12 +2727,26 @@ function syncAtt(){
   for(var k2 in snap){if(!(k2 in flat))deletes.push(k2);}
   var empDeletes=tombList('emp');
 
+  // Exclude-from-manning flags: same snapshot-delta approach as cells.
+  var localExc=glj('kaefer_att_exc',{})||{};
+  var excSnap=getSnap('exc')||{};      // flat { "ak::date": 1 }
+  var excFlat={};
+  for(var eak in localExc){
+    for(var edk in localExc[eak]){
+      if(localExc[eak][edk])excFlat[eak+'::'+normDateKey(edk)]=1;
+    }
+  }
+  var excUpserts={};
+  for(var ek in excFlat){if(!excSnap[ek])excUpserts[ek]=1;}
+  var excDeletes=[];
+  for(var ek2 in excSnap){if(!(ek2 in excFlat))excDeletes.push(ek2);}
+
   var pendingBeforeSync=getPendingClears();
 
   var payload=JSON.stringify({
     action:'save_att',
     who:whoSync(),
-    data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes}
+    data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes,excUpserts:excUpserts,excDeletes:excDeletes}
   });
 
   return postJsonRetry(u,payload)
@@ -2749,6 +2764,19 @@ function syncAtt(){
     for(var nm in ov){for(var d in ov[nm]){var st=ov[nm][d];if(st===''||st==null)continue;newSnap[nm+'::'+d]=st;}}
     setSnap('att',newSnap);
     clearTombs('emp',empDeletes);
+
+    // Merge exclude flags from server (server is authoritative after merge)
+    var excServer=j.exc||{};
+    var cleanExc={};
+    for(var xnm in excServer){
+      for(var xd in excServer[xnm]){
+        if(excServer[xnm][xd]){if(!cleanExc[xnm])cleanExc[xnm]={};cleanExc[xnm][normDateKey(xd)]=1;}
+      }
+    }
+    sl('kaefer_att_exc',cleanExc);
+    var newExcSnap={};
+    for(var xnm2 in cleanExc){for(var xd2 in cleanExc[xnm2]){newExcSnap[xnm2+'::'+xd2]=1;}}
+    setSnap('exc',newExcSnap);
 
     // For every pending clear we sent: if the server now has no value
     // for that cell, the clear is acknowledged.
@@ -2882,6 +2910,11 @@ function syncLog(){
       var ov=glj('kaefer_att_ov',{})||{},s={};
       for(var nm in ov){for(var d in ov[nm]){var st=ov[nm][d];if(st===''||st==null)continue;s[nm+'::'+d]=st;}}
       setSnap('att',s);
+    }
+    if(!getSnap('exc')){
+      var ex=glj('kaefer_att_exc',{})||{},se={};
+      for(var xn in ex){for(var xdd in ex[xn]){if(ex[xn][xdd])se[xn+'::'+xdd]=1;}}
+      setSnap('exc',se);
     }
   }
   seedSnapshots();

@@ -1134,7 +1134,7 @@ function connSync(){
 }
 function setSS(s,m){document.getElementById('sd').className='sd '+s;document.getElementById('sm').textContent=m;}
 function setLS(){document.getElementById('syl').textContent='Synced: '+new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});}
-function ldSh(){var u=localStorage.getItem(UK);if(!u){setSS('er','Not connected');return;}setSS('bz','Loading...');fetch(u+'?action=load_ccv&month='+cM+'&year='+cY+'&t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).then(function(j){if(!j.ok)throw 0;localStorage.removeItem('ccv_'+cY+'_'+cM);wd=eWD();for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}dW();setLS();setSS('ok','Synced – '+MNS3[cM]+' '+cY);svLoc();}).catch(function(){ldLoc();dW();var u2=localStorage.getItem(UK);if(u2)setSS('bz','Using local data – click Sync to refresh');});}
+function ldSh(){var u=localStorage.getItem(UK);if(!u){setSS('er','Not connected');return;}setSS('bz','Loading...');fetch(u+'?action=load_ccv&month='+cM+'&year='+cY+'&t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).then(function(j){if(!j.ok)throw 0;localStorage.removeItem('ccv_'+cY+'_'+cM);wd=eWD();for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}wd.forEach(migrateSegment);dW();setLS();setSS('ok','Synced – '+MNS3[cM]+' '+cY);svLoc();}).catch(function(){ldLoc();wd.forEach(migrateSegment);dW();var u2=localStorage.getItem(UK);if(u2)setSS('bz','Using local data – click Sync to refresh');});}
 function svSh(){var u=localStorage.getItem(UK);if(!u)return;setSS('bz','Saving...');var payload=JSON.stringify({action:'save_ccv',month:cM,year:cY,data:wd});fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload}).then(function(r){return r.text();}).then(function(t){try{var j=JSON.parse(t);if(!j.ok)throw 0;setLS();setSS('ok','Saved');}catch(e){setSS('er','Save error');}}).catch(function(){setSS('er','Save failed');});}
 function svLoc(){sl('ccv_'+cY+'_'+cM,wd);}
 function ldLoc(){var s=glj('ccv_'+cY+'_'+cM,null);if(!s)return;s.forEach(function(seg,i){if(!wd[i])return;if(seg.entries&&seg.entries.length)wd[i].entries=seg.entries;if(!wd[i].ccc&&seg.ccc)wd[i].ccc=seg.ccc;if(!wd[i].ccfv&&seg.ccfv)wd[i].ccfv=seg.ccfv;if(!wd[i].red&&seg.red){wd[i].red=seg.red;wd[i].dl=seg.dl||'';}});}
@@ -1146,12 +1146,13 @@ var wd=eWD();
 var cvEl=document.getElementById('cv'),ctx=cvEl.getContext('2d');
 var CX=260,CY=260,RO=220,RI=157,RH=52,N=12,SLCE=(2*Math.PI)/N,OFF=-Math.PI/2;
 // Recompute counts (ccc/ccfv/red) from inspections array. Migrates old data on load.
-function recomputeCounts(seg){
+function migrateSegment(seg){
+  // One-time migration of legacy count-only data into inspection entries.
+  // Guarded by _migrated so it never re-runs and resurrects deleted items.
   if(!seg) return;
   if(!Array.isArray(seg.inspections)) seg.inspections = [];
-  // Backward-compat: if we have old-style counts but no inspections, synthesize them
+  if(seg._migrated) return;
   if(seg.inspections.length === 0 && (seg.ccc > 0 || seg.ccfv > 0)){
-    // Distribute red entries: assume all red were CCFV (supervisor checks) if any CCFV exist, else CCC
     var redTotal = seg.red || 0;
     var redOnCCFV = seg.ccfv > 0 ? Math.min(redTotal, seg.ccfv) : 0;
     var redOnCCC = redTotal - redOnCCFV;
@@ -1163,7 +1164,14 @@ function recomputeCounts(seg){
     for(k=0;k<ccfvGreen;k++) seg.inspections.push({type:'CCFV', result:'green', notes:'', date:seg.dl||''});
     for(k=0;k<redOnCCFV;k++) seg.inspections.push({type:'CCFV', result:'red', notes:seg.notes||'', date:seg.dl||''});
   }
-  // Recompute counts from inspections
+  seg._migrated = true;
+}
+function recomputeCounts(seg){
+  if(!seg) return;
+  if(!Array.isArray(seg.inspections)) seg.inspections = [];
+  // Pure recompute from inspections. Does NOT synthesize — synthesizing
+  // here would resurrect entries the user just deleted (counts still set
+  // momentarily). Migration of legacy data happens once in migrateSegment.
   var ccc=0, ccfv=0, red=0;
   seg.inspections.forEach(function(it){
     if(it.type==='CCC') ccc++;
@@ -2983,7 +2991,7 @@ function syncAll(){
             localStorage.removeItem('ccv_'+cY+'_'+cM);
             wd=eWD();
             for(var i in j2.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j2.data[i];}
-            dW();setLS();svLoc();
+            wd.forEach(migrateSegment);dW();setLS();svLoc();
           });
       });
   });
@@ -4264,6 +4272,7 @@ function doSyncCCV(u){
         localStorage.removeItem('ccv_'+cY+'_'+cM);
         wd = eWD();
         for(var i in j.data){var n=parseInt(i);if(n>=0&&n<12)wd[n]=j.data[i];}
+        wd.forEach(migrateSegment);
         dW();
         try{svLoc();}catch(e){}
         resolve();

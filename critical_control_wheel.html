@@ -895,6 +895,7 @@ if(localStorage.getItem('kaefer_setup_done')){
     <label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mu);white-space:nowrap">Search:</label>
     <input type="text" id="scf-filter" placeholder="Tag, location, erector..." oninput="scfRender()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:240px">
     <button class="ob" style="font-size:11px;padding:3px 8px" onclick="document.getElementById('scf-filter').value='';scfRender()">Clear</button>
+    <button class="rb" style="font-size:11px;padding:3px 10px;margin-left:auto;background:#1565c0" onclick="scfOpenBulkExport()">&#128424; Bulk PDF Export</button>
   </div>
 
   <!-- Loading state -->
@@ -5065,14 +5066,9 @@ function scfConfirmDelete(){
 // Opens a print-styled window matching the original Layher
 // gear list template. User prints to PDF via browser dialog.
 // ============================================================
-function scfPrintPDF(){
-  if(!SCF_OPEN_SCAFFOLD) return;
-  var s = SCF_OPEN_SCAFFOLD.scaffold;
-  var qtys = s.quantities || {};
-
-  // Header info
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Scaffold Gear List - '+scfEscHtml(s.tag||'')+'</title>';
-  html += '<style>'
+// Shared CSS for the gear list PDF (used by single + bulk export)
+function scfGearListCSS(){
+  return '<style>'
        +'@page{size:A4;margin:10mm 10mm 12mm 10mm}'
        +'*{box-sizing:border-box}'
        +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:0;background:#f0f0f0;font-size:9pt}'
@@ -5102,11 +5098,16 @@ function scfPrintPDF(){
        +'.totals .t-val{font-size:18pt;font-weight:900}'
        +'.totals .t-lbl{font-size:9pt;opacity:.85;text-transform:uppercase;letter-spacing:.5px}'
        +'.foot{margin-top:5mm;padding-top:2mm;border-top:1px solid #999;font-size:8pt;color:#666;display:flex;justify-content:space-between}'
-       +'@media print{body{background:#fff;margin:0;padding:0}.wrap{max-width:100%;box-shadow:none;padding:0;margin:0}.no-print{display:none}.cat-hdr{break-after:avoid}.comp-tbl{break-inside:auto}.comp-tbl tr{break-inside:avoid}}'
-       +'</style></head><body>';
+       +'@media print{body{background:#fff;margin:0;padding:0}.wrap{max-width:100%;box-shadow:none;padding:0;margin:0}.no-print{display:none}.cat-hdr{break-after:avoid}.comp-tbl{break-inside:auto}.comp-tbl tr{break-inside:avoid}.gl-page{break-after:page}.gl-page:last-child{break-after:auto}}'
+       +'.gl-page{break-after:page}.gl-page:last-child{break-after:auto}'
+       +'</style>';
+}
 
-  html += '<div class="print-bar no-print">In the print dialog, choose <b>"Save as PDF"</b> as destination.<button onclick="window.print()">&#128424; Print / Save PDF</button></div>';
-  html += '<div class="wrap">';
+// Build the gear-list body for ONE scaffold (no <html>/<style> wrapper).
+// `s` is the scaffold object, `tabLabel` the status text (PENDING/ACTIVE/etc).
+function scfBuildGearListBody(s, tabLabel){
+  var qtys = s.quantities || {};
+  var html = '<div class="wrap gl-page">';
 
   // Header
   html += '<div class="kheader">';
@@ -5117,7 +5118,7 @@ function scfPrintPDF(){
   // Info block
   html += '<table class="info"><tbody>';
   html += '<tr><td class="lbl">Scaffold Tag</td><td class="val"><b>'+scfEscHtml(s.tag||'')+'</b></td>';
-  html += '<td class="lbl">Status</td><td class="val">'+(SCF_OPEN_SCAFFOLD.tab.toUpperCase())+'</td></tr>';
+  html += '<td class="lbl">Status</td><td class="val">'+scfEscHtml((tabLabel||'').toUpperCase())+'</td></tr>';
   html += '<tr><td class="lbl">Location / Area</td><td class="val" colspan="3">'+scfEscHtml(s.location||'')+'</td></tr>';
   html += '<tr><td class="lbl">Erected By</td><td class="val">'+scfEscHtml(s.erectedBy||'')+'</td>';
   html += '<td class="lbl">Date Erected</td><td class="val">'+scfFmtDate(s.dateErected)+'</td></tr>';
@@ -5132,7 +5133,7 @@ function scfPrintPDF(){
   }
   html += '</tbody></table>';
 
-  // All 220 components, grouped by category (matches the original template)
+  // All components, grouped by category (matches the original template)
   SCF_COMPONENTS.forEach(function(cat){
     html += '<div class="cat-hdr">'+scfEscHtml(cat.category)+'</div>';
     html += '<table class="comp-tbl"><thead><tr><th>Description</th><th class="num">Wt (kg)</th><th class="num">Qty</th><th class="num">Total (kg)</th></tr></thead><tbody>';
@@ -5159,17 +5160,110 @@ function scfPrintPDF(){
 
   // Footer
   html += '<div class="foot"><span><b>KAEFER Scaffold Gear List</b> - Layher System</span><span>Generated: '+new Date().toLocaleString('en-AU')+'</span></div>';
+  html += '</div>';
+  return html;
+}
 
-  html += '</div></body></html>';
-
+function scfOpenPrintWindow(title, bodyHtml){
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+scfEscHtml(title)+'</title>';
+  html += scfGearListCSS() + '</head><body>';
+  html += '<div class="print-bar no-print">In the print dialog, choose <b>"Save as PDF"</b> as destination.<button onclick="window.print()">&#128424; Print / Save PDF</button></div>';
+  html += bodyHtml;
+  html += '</body></html>';
   var w = window.open('', '_blank');
-  if(!w){
-    alert('Please allow popups for this site to generate the PDF.');
-    return;
-  }
+  if(!w){ alert('Please allow popups for this site to generate the PDF.'); return; }
   w.document.write(html);
   w.document.close();
 }
+
+function scfPrintPDF(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var s = SCF_OPEN_SCAFFOLD.scaffold;
+  scfOpenPrintWindow('Scaffold Gear List - '+(s.tag||''),
+    scfBuildGearListBody(s, SCF_OPEN_SCAFFOLD.tab));
+}
+
+// ============================================================
+// BULK PDF EXPORT — weekly backup. Pick scaffolds, one PDF, each
+// gear list on its own page using the same template.
+// ============================================================
+function scfOpenBulkExport(){
+  var items = (SCF_CACHE[SCF_CURRENT_TAB] || []).slice();
+  if(!items.length){ alert('No scaffolds in the '+SCF_CURRENT_TAB+' tab to export.'); return; }
+
+  // Pre-tick scaffolds newer than the last export (per tab).
+  var lastExport = 0;
+  try { lastExport = parseInt(localStorage.getItem('scf_last_export_'+SCF_CURRENT_TAB)||'0',10) || 0; } catch(e){}
+
+  function tsOf(s){
+    var d = new Date(s.submittedAt || s.dateErected || 0).getTime();
+    return isNaN(d) ? 0 : d;
+  }
+
+  var rowsHtml = items.map(function(s, i){
+    var isNew = tsOf(s) > lastExport;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer">'
+      + '<input type="checkbox" class="scf-bulk-cb" data-id="'+scfEscHtml(s.id)+'"'+(isNew?' checked':'')+' style="width:18px;height:18px;flex:none">'
+      + '<div style="flex:1"><div style="font-weight:700;font-size:13px">'+scfEscHtml(s.tag||'(no tag)')
+      + (isNew?' <span style="background:#2e7d32;color:#fff;font-size:9px;padding:1px 5px;border-radius:6px;margin-left:4px">NEW</span>':'')
+      + '</div><div style="font-size:11px;color:#607d8b">'+scfEscHtml(s.location||'')+' &middot; '+scfFmtDate(s.dateErected)+'</div></div>'
+      + '</label>';
+  }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.id = 'scf-bulk-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:8px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">'
+    + '<div style="background:#1565c0;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">'
+    + '<span style="font-weight:700">Bulk PDF Export — '+SCF_CURRENT_TAB.toUpperCase()+'</span>'
+    + '<button onclick="document.getElementById(\'scf-bulk-modal\').remove()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1">&times;</button>'
+    + '</div>'
+    + '<div style="padding:8px 12px;display:flex;gap:8px;border-bottom:1px solid #eee;flex-wrap:wrap">'
+    + '<button class="ob" style="font-size:11px;padding:4px 10px" onclick="scfBulkSelectAll(true)">Select all</button>'
+    + '<button class="ob" style="font-size:11px;padding:4px 10px" onclick="scfBulkSelectAll(false)">Select none</button>'
+    + '<span style="font-size:11px;color:#607d8b;align-self:center;margin-left:auto">New since last export are pre-ticked</span>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1">'+rowsHtml+'</div>'
+    + '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="ob" style="font-size:12px;padding:7px 14px" onclick="document.getElementById(\'scf-bulk-modal\').remove()">Cancel</button>'
+    + '<button class="rb" style="font-size:12px;padding:7px 16px;background:#1565c0" onclick="scfRunBulkExport()">&#128424; Generate PDF</button>'
+    + '</div></div>';
+  document.body.appendChild(overlay);
+}
+
+function scfBulkSelectAll(state){
+  document.querySelectorAll('.scf-bulk-cb').forEach(function(cb){ cb.checked = state; });
+}
+
+function scfRunBulkExport(){
+  var ids = [];
+  document.querySelectorAll('.scf-bulk-cb:checked').forEach(function(cb){ ids.push(cb.getAttribute('data-id')); });
+  if(!ids.length){ alert('Tick at least one scaffold to export.'); return; }
+
+  var items = SCF_CACHE[SCF_CURRENT_TAB] || [];
+  var byId = {};
+  items.forEach(function(s){ byId[String(s.id)] = s; });
+
+  var body = '';
+  var maxTs = 0;
+  ids.forEach(function(id){
+    var s = byId[String(id)];
+    if(!s) return;
+    body += scfBuildGearListBody(s, SCF_CURRENT_TAB);
+    var d = new Date(s.submittedAt || s.dateErected || 0).getTime();
+    if(!isNaN(d) && d > maxTs) maxTs = d;
+  });
+
+  scfOpenPrintWindow('Scaffold Gear Lists - Bulk Export ('+ids.length+')', body);
+
+  // Remember the newest exported timestamp so next week pre-ticks only newer ones.
+  try { if(maxTs) localStorage.setItem('scf_last_export_'+SCF_CURRENT_TAB, String(maxTs)); } catch(e){}
+
+  var modal = document.getElementById('scf-bulk-modal');
+  if(modal) modal.remove();
+}
+
 
 // ============================================================
 // SCAFFOLD REGISTER - STAGE 3
@@ -5595,17 +5689,17 @@ scfPrintPDF = function(){
         '<div class="sc" style="border-top:4px solid #e65100;text-align:center">'
       +   '<div class="sl2">Pending Tonnage</div>'
       +   '<div class="sv" id="scf-stat-pending" style="color:#e65100">0.000 t</div>'
-      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-pending-items">0</span> items</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-pending-items">0</span> scaffolds</div>'
       + '</div>'
       + '<div class="sc" style="border-top:4px solid #2e7d32;text-align:center">'
       +   '<div class="sl2">Active Tonnage</div>'
       +   '<div class="sv" id="scf-stat-active" style="color:#2e7d32">0.000 t</div>'
-      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-active-items">0</span> items</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-active-items">0</span> scaffolds</div>'
       + '</div>'
       + '<div class="sc" style="border-top:4px solid #607d8b;text-align:center">'
       +   '<div class="sl2">Dismantled Tonnage</div>'
       +   '<div class="sv" id="scf-stat-dismantled" style="color:#607d8b">0.000 t</div>'
-      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-dismantled-items">0</span> items</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-dismantled-items">0</span> scaffolds</div>'
       + '</div>';
     // Insert after the intro card but before the sub-tabs
     introCard.parentNode.insertBefore(statsDiv, introCard.nextSibling);
@@ -5620,7 +5714,7 @@ function scfUpdateStats(){
     var totalKg = 0, totalItems = 0;
     list.forEach(function(s){
       totalKg += (s.totalWeightKg || 0);
-      totalItems += (s.totalItems || 0);
+      totalItems += 1; // count scaffolds, not components
     });
     var totalT = totalKg / 1000;
     var statEl = document.getElementById('scf-stat-'+tab);
@@ -5739,7 +5833,7 @@ scfUpdateStats = function(){
     var totalKg = 0, totalItems = 0;
     list.forEach(function(s){
       totalKg += (s.totalWeightKg || 0);
-      totalItems += (s.totalItems || 0);
+      totalItems += 1; // count scaffolds, not components
     });
     var totalT = totalKg / 1000;
     var statEl = document.getElementById('scf-stat-' + tab);
@@ -5802,7 +5896,7 @@ var SCF_AREA_COLORS = {
     html += '<div class="sc" style="border-top:4px solid #1a1a1a;text-align:center;background:#fafafa">'
       +   '<div class="sl2" style="font-weight:800">TOTAL ACTIVE</div>'
       +   '<div class="sv" id="scf-stat-total" style="color:#1a1a1a">0.000 t</div>'
-      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-total-items">0</span> items</div>'
+      +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-total-items">0</span> scaffolds</div>'
       + '</div>';
     SCF_AREAS.forEach(function(area){
       var color = SCF_AREA_COLORS[area] || '#607d8b';
@@ -5810,7 +5904,7 @@ var SCF_AREA_COLORS = {
       html += '<div class="sc" style="border-top:4px solid '+color+';text-align:center">'
         +   '<div class="sl2">'+scfEscHtml(area)+'</div>'
         +   '<div class="sv" id="scf-stat-'+key+'" style="color:'+color+'">0.000 t</div>'
-        +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-'+key+'-items">0</span> items</div>'
+        +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-'+key+'-items">0</span> scaffolds</div>'
         + '</div>';
     });
     old.innerHTML = html;
@@ -6293,7 +6387,7 @@ SCF_AREA_COLORS['HYDRATE'] = '#ad1457';   // deep magenta - contrasts with the e
         + '  <div style="font-size:'+(opts.isTotal?'24px':'20px')+';font-weight:800;color:'+(opts.isTotal?'#1a1a1a':color)+';'
         +    'margin-top:4px;line-height:1" id="'+opts.valueId+'">0.000 t</div>'
         + '  <div style="font-size:10px;color:#888;margin-top:4px">'
-        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        +    '<span id="'+opts.itemsId+'">0</span> scaffolds</div>'
         + '</div>';
     }
 
@@ -6564,7 +6658,7 @@ scfConfirmAction = function(action){
         + '  <div style="font-size:'+valSize+';font-weight:800;color:'+valColor+';'
         +    'margin-top:4px;line-height:1" id="'+opts.valueId+'">0.000 t</div>'
         + '  <div style="font-size:10px;color:#888;margin-top:4px">'
-        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        +    '<span id="'+opts.itemsId+'">0</span> scaffolds</div>'
         +    splitHtml
         + '</div>';
     }
@@ -6631,12 +6725,11 @@ scfUpdateStats = function(){
 
   active.forEach(function(s){
     var kg = s.totalWeightKg || 0;
-    var items = s.totalItems || 0;
-    totalKg += kg; totalItems += items;
-    if(s.longTerm){ ltKg += kg; ltItems += items; }
+    totalKg += kg; totalItems += 1; // count scaffolds, not components
+    if(s.longTerm){ ltKg += kg; ltItems += 1; }
     if(s.area && buckets[s.area]){
       buckets[s.area].kg += kg;
-      buckets[s.area].items += items;
+      buckets[s.area].items += 1;
       if(s.stage === '1') buckets[s.area].s1 += kg;
       else if(s.stage === '2') buckets[s.area].s2 += kg;
     }
@@ -7049,7 +7142,7 @@ scfUpdateBadges = function(){
         +    'margin-top:6px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,0.20);pointer-events:none" '
         +    'id="'+opts.valueId+'">0.000 t</div>'
         + '  <div style="font-size:10px;color:rgba(255,255,255,0.9);margin-top:5px;font-weight:600;pointer-events:none">'
-        +    '<span id="'+opts.itemsId+'">0</span> items</div>'
+        +    '<span id="'+opts.itemsId+'">0</span> scaffolds</div>'
         +    splitHtml
         + '</div>';
     }
@@ -7123,7 +7216,7 @@ scfUpdateStats = function(){
   active.forEach(function(s){
     if(s.failed){
       failedKg += s.totalWeightKg || 0;
-      failedItems += s.totalItems || 0;
+      failedItems += 1;
     }
   });
 

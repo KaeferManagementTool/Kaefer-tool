@@ -1682,18 +1682,26 @@ function submitPPEManual(){
   rows.forEach(function(tr){
     var d=(tr.querySelector('.ppem-desc').value||'').trim();
     var s=(tr.querySelector('.ppem-size').value||'').trim();
-    var q=(tr.querySelector('.ppem-qty').value||'').trim();
+    var q=(tr.querySelector('.ppem-qty').value||'').trim()||'1';
     if(d)items.push({desc:d,size:s,qty:q});
   });
   if(!items.length){alert('Add at least one item.');return;}
+  // Build the comma-separated items string in the same format scanned
+  // submissions use, so buildPPEFormHTML can render a proper Clothing Request.
+  var itemsText=items.map(function(it){
+    return it.desc+(it.size?' ('+it.size+')':'')+(it.qty?' x'+it.qty:'');
+  }).join(', ');
   // Display name suffix from optional fields (matches scanned-form behaviour)
   var nameDisplay=name+(empno?' ('+empno+')':'')+(pos?' - '+pos:'');
   var log=getPPELog();
-  var baseId=Date.now();
-  items.forEach(function(it,i){
-    var itemText=it.desc+(it.size?' '+it.size:'')+(it.qty&&it.qty!=='1'?' x'+it.qty:'');
-    if(notes&&i===items.length-1)itemText+=' (Notes: '+notes+')';
-    log.push({id:baseId+i,date:date,name:nameDisplay,item:itemText,status:status});
+  log.push({
+    id:Date.now(),
+    date:date,
+    name:nameDisplay,
+    item:itemsText,
+    status:status,
+    // Structured fields preserved so the PDF view can rebuild the form exactly.
+    _empNo:empno, _pos:pos, _notes:notes, _itemsStruct:items
   });
   savePPELog(log);
   closePPEManual();
@@ -1707,53 +1715,40 @@ function viewPPEEntry(id){
   var en = getPPELog().filter(function(e){return e.id===id;})[0];
   if(!en){ alert('Entry not found.'); return; }
 
-  // The displayed name may be "Full Name (EmpNo) - Position" from the manual entry form.
-  // Split it back into parts for the PDF header.
+  // Parse the displayed name back into Name / EmpNo / Position. Manual-entry
+  // rows also stash these as _empNo/_pos so we can use them directly.
   var rawName = String(en.name||'');
-  var empNo = '', position = '', displayName = rawName;
-  var mEmp = rawName.match(/^(.*?)\s*\(([^)]+)\)\s*(?:-\s*(.+))?$/);
-  if(mEmp){ displayName = mEmp[1].trim(); empNo = mEmp[2].trim(); if(mEmp[3]) position = mEmp[3].trim(); }
-  else {
-    var mPos = rawName.match(/^(.*?)\s*-\s*(.+)$/);
-    if(mPos){ displayName = mPos[1].trim(); position = mPos[2].trim(); }
+  var displayName = rawName, empNo = en._empNo || '', position = en._pos || '';
+  if(!empNo && !position){
+    var mEmp = rawName.match(/^(.*?)\s*\(([^)]+)\)\s*(?:-\s*(.+))?$/);
+    if(mEmp){ displayName = mEmp[1].trim(); empNo = mEmp[2].trim(); if(mEmp[3]) position = mEmp[3].trim(); }
+    else {
+      var mPos = rawName.match(/^(.*?)\s*-\s*(.+)$/);
+      if(mPos){ displayName = mPos[1].trim(); position = mPos[2].trim(); }
+    }
+  } else {
+    // Strip suffix from display name when structured fields are present.
+    var stripIdx = rawName.indexOf(' (');
+    if(stripIdx>0) displayName = rawName.slice(0,stripIdx).trim();
+    else {
+      var dashIdx = rawName.indexOf(' - ');
+      if(dashIdx>0) displayName = rawName.slice(0,dashIdx).trim();
+    }
   }
 
-  // Item field may have an embedded "(Notes: ...)" suffix from the manual form.
-  var rawItem = String(en.item||''), itemText = rawItem, notesText = '';
-  var mNotes = rawItem.match(/^(.*?)\s*\(Notes:\s*(.*?)\)\s*$/);
-  if(mNotes){ itemText = mNotes[1].trim(); notesText = mNotes[2].trim(); }
+  // Build a submission-shaped object for buildPPEFormHTML.
+  var sub = {
+    name: displayName,
+    employeeNumber: empNo,
+    position: position,
+    site: '',
+    date: en.date,
+    notes: en._notes || '',
+    items: String(en.item || '')
+  };
 
-  var dateStr = en.date ? fmtDateAU(en.date) : '';
-  var status = en.status || 'Pending';
-
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PPE Request - '+escHtml(displayName)+'</title>';
-  html += commonFormStyles();
-  html += '</head><body>';
-  html += printBar();
-  html += '<div class="wrap">';
-  html += kHeaderBlock('PPE Request');
-  html += '<table class="frm"><tbody>';
-  html += '<tr><td class="lbl">Name</td><td class="val">'+escHtml(displayName)+'</td>';
-  html += '<td class="lbl">Date</td><td class="val">'+escHtml(dateStr)+'</td></tr>';
-  html += '<tr><td class="lbl">Employee Number</td><td class="val">'+escHtml(empNo||'-')+'</td>';
-  html += '<td class="lbl">Status</td><td class="val"><b>'+escHtml(status)+'</b></td></tr>';
-  html += '<tr><td class="lbl">Position / Role</td><td class="val" colspan="3">'+escHtml(position||'-')+'</td></tr>';
-  html += '</tbody></table>';
-  html += '<div class="sec-hdr">Item Requested</div>';
-  html += '<table class="frm" style="margin-top:2mm"><tbody>';
-  html += '<tr><td class="val" style="padding:5mm;font-size:12pt">'+escHtml(itemText)+'</td></tr>';
-  html += '</tbody></table>';
-  if(notesText){
-    html += '<div class="sec-hdr">Notes</div>';
-    html += '<table class="frm" style="margin-top:2mm"><tbody>';
-    html += '<tr><td class="val" style="padding:4mm">'+escHtml(notesText)+'</td></tr>';
-    html += '</tbody></table>';
-  }
-  html += '<div class="foot"><span><b>KAEFER PPE Request</b></span><span>Entry ID: '+escHtml(String(en.id||''))+'</span></div>';
-  html += '<div style="font-size:8pt;color:#999;margin-top:2mm;text-align:center">Generated from KAEFER Safety Tool &middot; '+new Date().toLocaleString('en-AU')+'</div>';
-  html += '</div></body></html>';
-
-  var w = window.open('','_blank');
+  var html = buildPPEFormHTML(sub);
+  var w = window.open('', '_blank');
   if(!w){ alert('Please allow popups for this site to generate the PDF.'); return; }
   w.document.write(html);
   w.document.close();

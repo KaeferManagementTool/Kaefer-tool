@@ -549,14 +549,25 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div id="r-tool" class="reg-panel">
     <div class="card" style="border-top-left-radius:0">
       <div class="ch" style="background:#37474f;justify-content:space-between"><span>&#128295; Tooling Register</span><span class="cbg" id="tool-bg">0</span></div>
+      <div style="padding:8px 0">
+        <button class="rb" style="background:#37474f" onclick="openToolManual()">&#43; Manual Entry</button>
+        <button class="rb" style="background:#1565c0;margin-left:6px" onclick="exportToolStocktake()">&#128424; Stocktake PDF</button>
+      </div>
       <div class="filter-bar">
         <label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mu);white-space:nowrap">Search:</label>
         <input type="text" id="tool-filter" placeholder="Filter tools..." oninput="filterTool()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:220px">
       </div>
       <div style="overflow-x:auto"><table id="tool-tbl">
-        <thead><tr><th>Asset ID</th><th>Description</th><th>Category</th><th>Supplier</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
+        <thead><tr><th class="np" style="width:32px" title="Mark out of use">Out</th><th>Asset ID</th><th>Description</th><th>Category</th><th>Supplier</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
         <tbody id="tool-body"></tbody>
       </table></div>
+      <div id="tool-retired-section" style="margin-top:14px;display:none">
+        <div style="font-size:12px;font-weight:700;color:#b71c1c;text-transform:uppercase;letter-spacing:0.4px;padding:6px 0 4px;border-top:2px solid #ffcdd2">&#9888; No Longer In Use (<span id="tool-retired-count">0</span>)</div>
+        <div style="overflow-x:auto"><table id="tool-retired-tbl">
+          <thead><tr><th class="np" style="width:32px" title="Return to active">Back</th><th>Asset ID</th><th>Description</th><th>Category</th><th>Supplier</th><th>Reason</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
+          <tbody id="tool-retired-body"></tbody>
+        </table></div>
+      </div>
     </div>
   </div>
 
@@ -1800,11 +1811,244 @@ function editVehReg(idx){var r=getVehLog().filter(function(x){return x._idx===id
 var TOOL_DATA=[{"id":"ET-174-0009","supplier":"G&S QLD","description":"CORDLESS FUEL CIRCULAR SAW 165MM - M18CCS55-0","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-174"},{"id":"ET-174-0010","supplier":"G&S QLD","description":"CORDLESS FUEL CIRCULAR SAW 165MM - M18CCS55-0","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-174"},{"id":"ET-401-0029","supplier":"G&S QLD","description":"CORDLESS JIGSAW - M18FJS","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-401"},{"id":"ET-401-0030","supplier":"G&S QLD","description":"CORDLESS JIGSAW - M18FJS","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-401"},{"id":"ET-034-0064","supplier":"G&S QLD","description":"CORDLESS SAW RECIPROCATING - M18FSX","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-034"},{"id":"ET-034-0065","supplier":"G&S QLD","description":"CORDLESS SAW RECIPROCATING - M18FSX","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-034"},{"id":"ET-175-0636","supplier":"G&S QLD","description":"CORDLESS DRILL 1/2\" - M18BLPD2","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-175"},{"id":"ET-175-0640","supplier":"G&S QLD","description":"CORDLESS DRILL 1/2\" - M18BLPD2","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-175"},{"id":"ET-309-0142","supplier":"G&S QLD","description":"CORDLESS 1/4\" HEX IMPACT DRIVER - M18FID30","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-309"},{"id":"ET-309-0144","supplier":"G&S QLD","description":"CORDLESS 1/4\" HEX IMPACT DRIVER - M18FID30","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-309"},{"id":"ET-021-0244","supplier":"G&S QLD","description":"CORDLESS IMPACT WRENCH 1/2\" - M18FHIWF12","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-021"},{"id":"ET-021-0301","supplier":"G&S QLD","description":"CORDLESS IMPACT WRENCH 1/2\" - M18FHIWF12","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-021"},{"id":"ET-340-0052","supplier":"G&S QLD","description":"CORDLESS WET/DRY VACUUM 7.5L - M18WDV","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-340"},{"id":"ET-340-0044","supplier":"G&S QLD","description":"CORDLESS WET/DRY VACUUM 7.5L - M18WDV","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-340"},{"id":"ET-357-0283","supplier":"G&S QLD","description":"CORDLESS LED LIGHT SMALL 1500 LUMENS PIVOTING MAGNETIC BASE","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-357"},{"id":"ET-357-0298","supplier":"G&S QLD","description":"CORDLESS LED LIGHT SMALL 1500 LUMENS PIVOTING MAGNETIC BASE","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-357"},{"id":"ET-397-0017","supplier":"G&S QLD","description":"CORDLESS LED LIGHT LARGE 6000 LUMENS TRIPOD STAND BASE","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-397"},{"id":"ET-397-0025","supplier":"G&S QLD","description":"CORDLESS LED LIGHT LARGE 6000 LUMENS TRIPOD STAND BASE","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-397"},{"id":"ET-398-0036","supplier":"G&S QLD","description":"CHARGER MILWAUKEE 6 BAY: SUITS 18V BATTERY - M1418C6","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-398"},{"id":"ET-398-0037","supplier":"G&S QLD","description":"CHARGER MILWAUKEE 6 BAY: SUITS 18V BATTERY - M1418C6","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-398"},{"id":"ET-398-0106","supplier":"G&S QLD","description":"CHARGER MILWAUKEE 6 BAY: SUITS 18V BATTERY - M1418C6","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-398"},{"id":"ET-398-0156","supplier":"G&S QLD","description":"CHARGER MILWAUKEE 6 BAY: SUITS 18V BATTERY - M1418C6","project":"9-0313793-01 - 2024 (QLD): Yarwun Scaffold Maintenance","category":"ET-398"}];
 var TOOL_KEY='kaefer_tool_ov';
 var TOOL_DEL_KEY='kaefer_tool_del';
-function getToolLog(){var ov=glj(TOOL_KEY,{});var del=glj(TOOL_DEL_KEY,[]);return TOOL_DATA.map(function(r,i){return Object.assign({},r,ov[i]||{},{_idx:i});}).filter(function(r){return del.indexOf(r._idx)<0;});}
-function filterTool(){var f=(document.getElementById('tool-filter').value||'').toLowerCase();document.getElementById('tool-body').querySelectorAll('tr').forEach(function(tr){tr.style.display=(!f||tr.textContent.toLowerCase().indexOf(f)>=0)?'':'none';});}
-function rToolReg(){var log=getToolLog();document.getElementById('tool-bg').textContent=log.length;var tb=document.getElementById('tool-body');tb.innerHTML='';log.forEach(function(r){var tr=document.createElement('tr');tr.innerHTML='<td style="font-family:monospace;font-size:11px;font-weight:600">'+r.id+'</td><td style="font-size:11px">'+r.description+'</td><td style="font-size:11px;color:#607d8b">'+r.category+'</td><td style="font-size:11px">'+r.supplier+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editToolReg('+r._idx+')">&#9998;</button></td><td class="np"><button class="db" onclick="dToolReg('+r._idx+')">&#215;</button></td>';tb.appendChild(tr);});}
-function dToolReg(idx){if(!confirm('Permanently delete this tool?'))return;var del=glj(TOOL_DEL_KEY,[]);if(del.indexOf(idx)<0)del.push(idx);sl(TOOL_DEL_KEY,del);rToolReg();}
-function editToolReg(idx){var r=getToolLog().filter(function(x){return x._idx===idx;})[0];if(!r)return;openEdit({title:'Edit Tool',fields:[{key:'id',label:'Asset ID',type:'text',val:r.id},{key:'description',label:'Description',type:'text',val:r.description},{key:'category',label:'Category',type:'text',val:r.category},{key:'supplier',label:'Supplier',type:'text',val:r.supplier},{key:'status',label:'Status',type:'select',val:r.status||'Active',options:['Active','Tagged Out','In Repair','Retired']}],onSave:function(v){var ov=glj(TOOL_KEY,{});if(!ov[idx])ov[idx]={};Object.assign(ov[idx],v);sl(TOOL_KEY,ov);rToolReg();}});}
+var TOOL_USER_KEY='kaefer_tool_user';
+
+function getToolUser(){return glj(TOOL_USER_KEY,[]);}
+function saveToolUser(arr){sl(TOOL_USER_KEY,arr);}
+
+function getToolLog(){
+  var ov=glj(TOOL_KEY,{});
+  var del=glj(TOOL_DEL_KEY,[]);
+  var baked=TOOL_DATA.map(function(r,i){return Object.assign({},r,ov[i]||{},{_idx:i,_user:false});}).filter(function(r){return del.indexOf(r._idx)<0;});
+  var user=getToolUser().map(function(r,i){return Object.assign({},r,{_idx:'u'+i,_user:true});});
+  return baked.concat(user);
+}
+
+function isRetired(r){return (r.status==='Retired'||r.status==='Tagged Out'||r.status==='In Repair'||r.retired);}
+
+function filterTool(){
+  var f=(document.getElementById('tool-filter').value||'').toLowerCase();
+  ['tool-body','tool-retired-body'].forEach(function(bid){
+    var body=document.getElementById(bid);if(!body)return;
+    body.querySelectorAll('tr').forEach(function(tr){tr.style.display=(!f||tr.textContent.toLowerCase().indexOf(f)>=0)?'':'none';});
+  });
+}
+
+function _toolIdAttr(idx){ return JSON.stringify(String(idx)).replace(/"/g,'&quot;'); }
+
+function toolRowHtml(r,retiredTable){
+  var idAttr=_toolIdAttr(r._idx);
+  var cb=retiredTable
+    ? '<td class="np" style="text-align:center"><button class="ob" style="font-size:11px;padding:2px 7px" onclick="restoreTool('+idAttr+')" title="Move back to active">&#8634;</button></td>'
+    : '<td class="np" style="text-align:center"><input type="checkbox" onchange="retireTool('+idAttr+',this.checked)" title="Mark out of use"></td>';
+  var reasonCell=retiredTable?'<td style="font-size:11px;color:#b71c1c">'+(r.status||'Retired')+(r.retireNote?' &middot; '+r.retireNote:'')+'</td>':'';
+  return cb
+    +'<td style="font-family:monospace;font-size:11px;font-weight:600">'+(r.id||'')+'</td>'
+    +'<td style="font-size:11px">'+(r.description||'')+'</td>'
+    +'<td style="font-size:11px;color:#607d8b">'+(r.category||'')+'</td>'
+    +'<td style="font-size:11px">'+(r.supplier||'')+'</td>'
+    +reasonCell
+    +'<td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editToolReg('+idAttr+')">&#9998;</button></td>'
+    +'<td class="np"><button class="db" onclick="dToolReg('+idAttr+')">&#215;</button></td>';
+}
+
+function rToolReg(){
+  var log=getToolLog();
+  document.getElementById('tool-bg').textContent=log.length;
+  var active=log.filter(function(r){return !isRetired(r);});
+  var retired=log.filter(isRetired);
+  var tb=document.getElementById('tool-body');tb.innerHTML='';
+  active.forEach(function(r){var tr=document.createElement('tr');tr.innerHTML=toolRowHtml(r,false);tb.appendChild(tr);});
+  var sec=document.getElementById('tool-retired-section'),rb=document.getElementById('tool-retired-body'),rc=document.getElementById('tool-retired-count');
+  if(sec){
+    if(retired.length){sec.style.display='';rc.textContent=retired.length;rb.innerHTML='';retired.forEach(function(r){var tr=document.createElement('tr');tr.innerHTML=toolRowHtml(r,true);rb.appendChild(tr);});}
+    else{sec.style.display='none';}
+  }
+  filterTool();
+}
+
+function _toolApplyEdit(idx, patch){
+  if(typeof idx==='string' && idx.charAt(0)==='u'){
+    var ui=parseInt(idx.slice(1),10);
+    var users=getToolUser();
+    if(users[ui]){ Object.assign(users[ui], patch); saveToolUser(users); }
+  } else {
+    var ni=parseInt(idx,10);
+    var ov=glj(TOOL_KEY,{});
+    if(!ov[ni])ov[ni]={};
+    Object.assign(ov[ni], patch);
+    sl(TOOL_KEY,ov);
+  }
+}
+
+function retireTool(idx, on){
+  if(on){
+    var note=prompt('Reason (e.g. broken, lost, returned):','')||'';
+    _toolApplyEdit(idx,{status:'Retired',retired:true,retireNote:note,retiredAt:new Date().toISOString()});
+  }
+  rToolReg();
+}
+function restoreTool(idx){
+  if(!confirm('Return this tool to the active list?'))return;
+  _toolApplyEdit(idx,{status:'Active',retired:false,retireNote:'',retiredAt:''});
+  rToolReg();
+}
+
+function dToolReg(idx){
+  if(!confirm('Permanently delete this tool?'))return;
+  if(typeof idx==='string' && idx.charAt(0)==='u'){
+    var ui=parseInt(idx.slice(1),10);
+    var users=getToolUser();
+    users.splice(ui,1);
+    saveToolUser(users);
+  } else {
+    var ni=parseInt(idx,10);
+    var del=glj(TOOL_DEL_KEY,[]);
+    if(del.indexOf(ni)<0)del.push(ni);
+    sl(TOOL_DEL_KEY,del);
+  }
+  rToolReg();
+}
+
+function editToolReg(idx){
+  var r=getToolLog().filter(function(x){return String(x._idx)===String(idx);})[0];
+  if(!r)return;
+  openEdit({title:'Edit Tool',fields:[
+    {key:'id',label:'Asset ID',type:'text',val:r.id||''},
+    {key:'description',label:'Description',type:'text',val:r.description||''},
+    {key:'category',label:'Category',type:'text',val:r.category||''},
+    {key:'supplier',label:'Supplier',type:'text',val:r.supplier||''},
+    {key:'status',label:'Status',type:'select',val:r.status||'Active',options:['Active','Tagged Out','In Repair','Retired']}
+  ],onSave:function(v){
+    v.retired = (v.status==='Retired'||v.status==='Tagged Out'||v.status==='In Repair');
+    _toolApplyEdit(idx, v);
+    rToolReg();
+  }});
+}
+
+function openToolManual(){
+  closeToolManual();
+  var overlay=document.createElement('div');
+  overlay.id='tool-manual-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  overlay.innerHTML=''
+    +'<div style="background:#fff;border-radius:8px;max-width:520px;width:100%;display:flex;flex-direction:column;overflow:hidden;margin:auto">'
+    +  '<div style="background:#37474f;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">'
+    +    '<span style="font-weight:700">&#128295; Add Tool — Manual Entry</span>'
+    +    '<button onclick="closeToolManual()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>'
+    +  '</div>'
+    +  '<div style="padding:14px 18px">'
+    +    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Asset ID *</label><input type="text" id="toolm-id" placeholder="e.g. ET-174-0011" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Category</label><input type="text" id="toolm-cat" placeholder="e.g. ET-174" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +    '</div>'
+    +    '<div style="margin-top:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Description *</label><input type="text" id="toolm-desc" placeholder="e.g. CORDLESS DRILL 1/2&quot; - M18BLPD2" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Supplier</label><input type="text" id="toolm-sup" placeholder="e.g. G&S QLD" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Status</label><select id="toolm-status" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"><option>Active</option><option>Tagged Out</option><option>In Repair</option><option>Retired</option></select></div>'
+    +    '</div>'
+    +    '<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">'
+    +      '<button class="ob" style="font-size:12px;padding:7px 14px" onclick="closeToolManual()">Cancel</button>'
+    +      '<button class="rb" style="font-size:12px;padding:7px 16px;background:#37474f" onclick="submitToolManual()">&#10003; Add Tool</button>'
+    +    '</div>'
+    +  '</div>'
+    +'</div>';
+  document.body.appendChild(overlay);
+  setTimeout(function(){var el=document.getElementById('toolm-id');if(el)el.focus();},50);
+}
+function closeToolManual(){var m=document.getElementById('tool-manual-modal');if(m)m.remove();}
+function submitToolManual(){
+  var id=(document.getElementById('toolm-id').value||'').trim();
+  var desc=(document.getElementById('toolm-desc').value||'').trim();
+  if(!id){alert('Asset ID is required.');return;}
+  if(!desc){alert('Description is required.');return;}
+  var entry={
+    id:id, description:desc,
+    category:(document.getElementById('toolm-cat').value||'').trim(),
+    supplier:(document.getElementById('toolm-sup').value||'').trim(),
+    status:document.getElementById('toolm-status').value||'Active',
+    project:'', _addedAt:new Date().toISOString()
+  };
+  entry.retired = (entry.status==='Retired'||entry.status==='Tagged Out'||entry.status==='In Repair');
+  var users=getToolUser();
+  users.push(entry);
+  saveToolUser(users);
+  closeToolManual();
+  rToolReg();
+}
+
+function exportToolStocktake(){
+  var log=getToolLog().filter(function(r){return !isRetired(r);});
+  if(!log.length){ alert('No active tools to export.'); return; }
+  var groups={};
+  log.forEach(function(r){
+    var k=r.category||'(uncategorised)';
+    if(!groups[k])groups[k]=[];
+    groups[k].push(r);
+  });
+  var cats=Object.keys(groups).sort();
+  var today=new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});
+
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Tooling Stocktake - '+today+'</title>';
+  html+='<style>'
+    +'@page{size:A4;margin:12mm 10mm 14mm 10mm}'
+    +'*{box-sizing:border-box}'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:0;background:#f0f0f0;font-size:10pt}'
+    +'.wrap{max-width:200mm;margin:0 auto;background:#fff;padding:12mm 10mm;box-shadow:0 0 8px rgba(0,0,0,.1)}'
+    +'.print-bar{background:#1565c0;color:#fff;padding:10px;text-align:center;font-size:12px}'
+    +'.print-bar button{background:#fff;color:#1565c0;border:none;padding:6px 14px;font-weight:700;border-radius:4px;cursor:pointer;font-size:12px;margin-left:10px}'
+    +'.kheader{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4mm}'
+    +'h1.title{font-size:22pt;font-weight:400;margin:0;color:#444}'
+    +'.sub{font-size:10pt;color:#666;margin-top:1mm}'
+    +'.klogo{display:flex;align-items:center;gap:6px}'
+    +'.klogo .ring{width:30px;height:30px;border:3px solid #cc0000;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#cc0000;font-weight:900;font-size:10px}'
+    +'.klogo .kw{font-size:22pt;font-weight:900;color:#cc0000;letter-spacing:1px}'
+    +'.info{font-size:10pt;color:#444;margin:2mm 0 5mm 0;display:flex;gap:18px}'
+    +'.info b{color:#000}'
+    +'table.stk{width:100%;border-collapse:collapse;margin-bottom:5mm}'
+    +'table.stk th,table.stk td{border:1px solid #888;padding:2mm 2.5mm;font-size:9.5pt;vertical-align:middle}'
+    +'table.stk th{background:#37474f;color:#fff;text-align:left;font-weight:700}'
+    +'table.stk td.tick{text-align:center;width:14mm;font-size:14pt}'
+    +'table.stk td.notes{width:38mm;background:#fafafa}'
+    +'.cat-hdr{background:#cfd8dc;color:#000;font-weight:700;padding:2mm 3mm;font-size:10.5pt;margin:4mm 0 1mm 0;border-left:4px solid #37474f}'
+    +'.foot{margin-top:6mm;padding-top:3mm;border-top:1px solid #999;font-size:9pt;color:#555;display:flex;justify-content:space-between}'
+    +'.sig{margin-top:8mm;display:flex;gap:12mm}'
+    +'.sig-block{flex:1}'
+    +'.sig-line{border-bottom:1px solid #000;height:10mm}'
+    +'.sig-lbl{font-size:9pt;color:#555;margin-top:1mm}'
+    +'@media print{body{background:#fff;margin:0;padding:0}.wrap{max-width:100%;box-shadow:none;padding:0;margin:0}.no-print{display:none}.cat-block{break-inside:avoid}}'
+    +'</style></head><body>';
+  html+='<div class="print-bar no-print">In the print dialog, choose <b>"Save as PDF"</b> as destination.<button onclick="window.print()">&#128424; Print / Save PDF</button></div>';
+  html+='<div class="wrap">';
+  html+='<div class="kheader"><div><h1 class="title">Tooling Stocktake</h1><div class="sub">KAEFER Integrated Services - Yarwun</div></div>'
+       +'<div class="klogo"><div class="ring">K</div><div class="kw">KAEFER</div></div></div>';
+  html+='<div class="info"><div><b>Date:</b> '+today+'</div><div><b>Total Active Tools:</b> '+log.length+'</div><div><b>Categories:</b> '+cats.length+'</div></div>';
+
+  cats.forEach(function(cat){
+    var items=groups[cat];
+    html+='<div class="cat-block">';
+    html+='<div class="cat-hdr">'+escHtml(cat)+' <span style="font-weight:400;color:#555">('+items.length+')</span></div>';
+    html+='<table class="stk"><thead><tr><th style="width:14mm">&#10003;</th><th style="width:32mm">Asset ID</th><th>Description</th><th style="width:30mm">Supplier</th><th class="notes">Notes</th></tr></thead><tbody>';
+    items.forEach(function(r){
+      html+='<tr><td class="tick">&#9744;</td><td style="font-family:monospace;font-size:9pt">'+escHtml(r.id||'')+'</td><td>'+escHtml(r.description||'')+'</td><td>'+escHtml(r.supplier||'')+'</td><td class="notes">&nbsp;</td></tr>';
+    });
+    html+='</tbody></table>';
+    html+='</div>';
+  });
+
+  html+='<div class="sig">'
+       +'<div class="sig-block"><div class="sig-line"></div><div class="sig-lbl">Counted by (print name &amp; sign)</div></div>'
+       +'<div class="sig-block"><div class="sig-line"></div><div class="sig-lbl">Verified by</div></div>'
+       +'<div class="sig-block" style="flex:0 0 36mm"><div class="sig-line"></div><div class="sig-lbl">Date completed</div></div>'
+       +'</div>';
+  html+='<div class="foot"><span><b>KAEFER Tooling Stocktake</b></span><span>Generated: '+new Date().toLocaleString('en-AU')+'</span></div>';
+  html+='</div></body></html>';
+
+  var w=window.open('','_blank');
+  if(!w){ alert('Please allow popups for this site to generate the PDF.'); return; }
+  w.document.write(html);
+  w.document.close();
+}
 var TR_BASE=[["Active","Acosta, Ricson","Scaffolder Advanced","2030-07-31","2027-05-20","","2028-01-24","","2030-07-31","2028-03-17","","","","","2027-05-30","2031-03-09","2027-05-30","","","","","","",""],["Active","Barrett, Clinton","Scaffolder Advanced","2028-01-18","2028-03-23","2003-10-30","2027-01-13","","2026-08-26","2028-04-24","","","","","2027-11-05","2026-08-07","2027-07-07","2026-04-09","2026-08-26","2026-08-26","2026-08-26","2026-08-26","2026-11-25","2029-02-06"],["Active","Gosley, Raymond","Scaffolder Advanced","2026-09-16","2027-01-20","","2027-06-20","","","","2026-09-16","2027-01-14","","","2028-04-10","2031-03-02","2028-04-10","","2026-09-16","","","","",""],["Active","Granger, Daniel","Scaffolder Intermediate","2027-07-16","2026-08-13","2022-06-23","2026-07-23","2026-07-01","","","2027-07-16","2026-11-26","","","2028-04-10","2026-10-02","2028-04-10","2026-03-27","2027-07-16","2027-07-16","","2027-07-16","2027-04-23",""],["Active","Grotas. Chris","Scaffolder Advanced","2031-12-17","2027-06-09","","2028-01-25","","2030-07-31","2028-03-17","","","","","2027-05-30","2031-03-09","2027-05-30","","","","","","",""],["Active","Madla, Nelson","Scaffolder Advanced","2031-11-19","2027-06-09","","2028-01-25","","","","","","","","","","","","","","","","",""],["Active","MANTGARIS, Zachary","Scaffolder Basic","2028-09-02","2028-01-11","2018-01-31","2027-10-09","","","","","","2028-09-02","2028-02-26","2026-04-26","2025-10-20","2026-04-21","2025-10-20","2028-09-02","","","","2027-04-23",""],["Active","Mariner Jesse","L Hand Scaffolder","2030-11-03","2026-07-02","","2026-05-11","","","","2030-11-03","2026-11-26","","","2027-01-08","2027-06-16","2027-07-15","2028-01-30","","","2030-11-03","2030-11-03","2026-11-24","2026-09-17"],["Active","Marr, Kim","L Hand Scaffolder","2028-02-19","2028-01-19","2017-11-06","2028-01-05","","2028-02-19","2026-11-26","","","","","k","2027-01-15","2027-07-07","2026-08-29","2028-02-19","2028-02-19","","2028-02-19","2026-09-13","2027-10-31"],["Active","Melaney, Lukas","Scaffolder Intermediate","2030-03-24","2027-04-29","2020-10-30","2027-03-05","","","","2030-03-24","2027-11-26","","","2027-11-14","2026-08-07","2027-11-05","2026-08-13","2030-03-24","2030-03-24","","","2027-06-06","2028-04-16"],["Active","Middleton Lachlan","Scaffolder Basic","2029-08-26","2026-08-29","2021-03-17","2026-08-27","","","","","","2029-08-26","2027-06-11","2026-08-15","2026-10-02","2027-07-15","","2029-08-26","","","","",""],["Active","Ownsworth, Mathew","Scaffolder Intermediate","2029-03-10","2027-02-27","","2028-02-07","","","","2029-03-10","2027-06-12","","","2027-06-16","2031-04-10","2026-03-06","2025-03-10","2029-03-10","","","","",""],["Active","Santos, Rene","Scaffolder Advanced ","2028-04-18","2027-05-16","","2028-01-22","","2028-04-18","2028-01-28","","","","","2027-08-04","2028-01-29","2026-02-16","","","","","","",""],["Active","Shelford, Kerrin","Scaffolder Advanced ","2028-06-12","2027-11-20","","2027-11-19","2026-07-01","2028-06-12","2027-11-24","","","","","2026-09-30","2031-03-02","","","2028-06-12","2028-06-12","","","2027-11-24",""],["Active","VICKERY, Connor","Scaffolder Basic","2027-12-20","2027-09-18","2016-02-22","2027-10-09","","","","","","2028-10-20","2028-02-26","2027-01-08","2028-01-29","2030-09-20","2028-01-30","2028-10-20","","","","2028-01-23",""],["Active","Voss, Tristan","Yards Person","2030-07-08","31/07/2027","","2027-06-08","","","","","","","","","","","","2030-07-08","","","","2027-01-09",""],["active","Windress, Brad","Scaffolder Advanced ","2028-10-25","2027-03-28","","2026-05-08","","2028-10-25","2028-03-02","","","","","2027-07-07","2026-10-02","2027-11-14","2028-01-30","2028-10-25","2028-10-25","","2028-10-25","2027-06-06","2028-04-16"],["active","Windress, Chris","Scaffolder Advanced ","2028-03-03","2028-01-12","","2028-03-28","","2028-01-25","2028-03-31","","","","","2026-10-15","","","","","","","","2028-03-31",""],["Active","Middleton, Steven","Supervisor Scaffolding","2030-04-14","2026-02-21","2006-07-06","2027-01-13","2026-07-01","2028-11-26","2025-09-26","","","","","2027-07-07","2024-03-21","2027-07-07","","2028-11-26","2028-11-26","","","2026-11-25","2027-06-09"],["Active","Smith, Jason","Inspection Officer","2028-04-18","2027-03-18","2009-03-02","2025-03-10","2028-05-01","2027-09-07","2026-11-05","","","","","2027-11-05","2027-01-15","2027-11-05","2028-01-30","2027-09-07","2027-09-07","","","2026-11-25",""],["Active","Nixon, Boz","Supervisor Scaffolding","2030-04-21","2026-08-25","","2027-05-01","2026-07-01","2030-04-21","2027-06-06","","","","","2026-07-17","2028-01-29","2027-11-05","","2030-04-21","","","2030-04-21","2027-06-03",""],["Active","Phillips, Connor","L Hand Scaffolder","2029-10-29","2027-10-20","2023-08-22","2027-10-09","2027-05-01","2029-11-19","2027-03-24","","","","","2027-02-12","2026-01-17","2027-07-07","2028-01-30","2029-11-19","2029-11-19","","2029-11-19","2026-11-26","2026-12-08"],["Active","Silvester, Christine","Scaffolder Basic","","2026-04-12","","","","","","","","","","","","","","","","","","",""],["Active","MORRIS, Daniel","Scaffolder Basic","2029-01-26","2025-07-25","2023-08-14","2025-08-15","","","","","","2027-04-18","2025-10-30","2025-10-05","2025-10-20","2025-11-22","2025-12-18","2027-04-18","","","","",""],["Active","Anderson, Jason","Scaffolder Advanced ","2026-07-15","2026-01-16","2003-11-20","2025-04-19","2026-07-01","2026-07-15","2026-01-18","","","","","2026-10-11","2024-10-12","2025-01-25","2026-03-27","2026-07-15","2026-07-15","2026-07-15","2026-07-15","2026-04-16",""],["Active","Ngametua Ponsonby","Scaffolder Intermediate","2027-05-02","2026-05-22","","2026-11-06","","","","2027-05-02","","","","2027-01-08","","2026-04-08","","2027-05-02","","","2027-05-02","",""],["Active","Blake, Kyle","","","","","","","","","","","","","","","","","2027-04-28","","","","2026-12-16",""],["Active","Johnson, Chris","Supervisor Scaffolding","2027-09-21","2026-01-14","","2025-12-11","","2025-12-02","2025-12-21","","","","","2026-12-15","2025-12-18","","","","2025-12-02","","","2026-11-26",""],["Active","GALLAGHER, Braith","Scaffolder Intermediate","2026-06-02","2025-09-13","2019-04-05","2025-09-15","","","","2027-06-22","2025-09-18","","","2026-01-15","2025-09-18","2025-10-20","2025-10-20","2027-06-22","2027-06-22","","2027-06-22","2025-12-19","2026-12-07"],["Active","Lindley, Jason","Scaffolder Advanced ","2027-09-26","2026-12-10","","2026-12-05","","2027-07-17","2026-12-16","","","","","2027-01-08","","2026-02-09","2027-03-24","2027-07-17","2027-07-17","2027-07-17","2027-07-17","2026-12-16",""],["Active","Ngamata, jason","Yards Person","2026-03-04","2026-03-12","2026-03-08","2026-03-17","","","","","","2026-11-26","2026-11-26","2026-03-01","2026-08-07","2026-03-01","2026-08-13","2029-03-09","2029-03-09","","","2026-04-16",""],["Active","Coles, Marcus","Scaffolder Basic","2028-11-18","2027-08-01","","2025-12-04","","","","","","2028-11-18","2026-01-12","2026-03-12","2026-01-12","","","","","","","2026-01-29",""],["Active","Pengelly, Thomas","L Hand Scaffolder","2027-12-09","2026-07-02","2014-06-03","2026-07-02","","2027-12-09","2025-09-19","","","","","2027-01-08","2026-08-07","2026-04-11","2026-04-17","2027-12-09","2027-12-09","","","2026-11-20","2026-12-07"],["Active","Yarrow, Jarred","L Hand Scaffolder","2028-03-08","2026-08-19","2011-08-10","2026-08-27","2026-02-01","2028-03-08","2027-11-26","","","","","2026-01-15","2027-06-16","2027-01-18","2027-03-24","2028-03-08","2028-03-08","","","2026-11-25","2028-10-31"],["Active","Yow Yeh, Jodene","Scaffolder Basic","2030-02-06","2026-11-11","","2026-11-11","","","","","","2030-02-06","2027-06-12","2026-12-02","2028-01-29","2027-07-15","","2030-02-06","","","","",""],["Active","Tapera, Tausika","Scaffolder Basic","2026-12-26","2027-10-09","","2027-10-09","","","","","","2026-12-26","2026-03-04","2026-03-11","2028-01-29","2026-03-11","2026-04-17","2026-12-26","","","","2026-04-19",""]];
 var TR_LABELS=["Status", "Name", "Role", "Govt ID", "Medical", "GCI", "Site Ind", "MSIC", "HRWL-SA", "Scaff Adv CTO", "HRWL-SI", "Scaff Int CTO", "HRWL-SB", "Scaff Bas CTO", "W@H Stmt", "W@H CTO", "CS Gen", "CS CTO", "HRWL-FL", "HRWL-EWP", "HRWL-RB", "HRWL-DG", "Light Veh", "Permit Rec"];
 var TR_TYPES=["text", "text", "text", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date", "date"];

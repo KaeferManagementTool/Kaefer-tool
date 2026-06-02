@@ -481,18 +481,17 @@ if(localStorage.getItem('kaefer_setup_done')){
         <label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mu);white-space:nowrap">Filter by name:</label>
         <input type="text" id="ppe-filter" placeholder="Type to filter..." oninput="rPPEReg()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:200px">
         <button class="ob" style="font-size:11px;padding:3px 8px" onclick="document.getElementById('ppe-filter').value='';rPPEReg()">Clear</button>
-        <button class="rb" style="font-size:11px;padding:3px 10px;background:#1a2a4a;margin-left:auto" onclick="emailPPESelected()">&#9993; Email Selected</button>
       </div>
       <div style="padding-bottom:4px"></div>
       <div id="ppe-empty" class="le" style="display:none">No entries match.</div>
       <div style="overflow-x:auto"><table id="ppe-tbl">
-        <thead><tr><th class="np" style="width:30px"><input type="checkbox" id="ppe-sel-all" onchange="ppeSelAll(this)" title="Select all"></th><th>Date</th><th>Name</th><th>Item</th><th>Status</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
+        <thead><tr><th class="np" style="width:30px"><input type="checkbox" id="ppe-sel-all" onchange="ppeSelAll(this)" title="Select all"></th><th>Date</th><th>Name</th><th>Item</th><th>Status</th><th class="np">PDF</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
         <tbody id="ppe-body"></tbody>
       </table></div>
       <div id="ppe-collected-section" style="margin-top:14px;display:none">
         <div style="font-size:12px;font-weight:700;color:#2e7d32;text-transform:uppercase;letter-spacing:0.4px;padding:6px 0 4px;border-top:2px solid #c8e6c9">&#10003; Collected (<span id="ppe-collected-count">0</span>)</div>
         <div style="overflow-x:auto"><table id="ppe-collected-tbl">
-          <thead><tr><th class="np" style="width:30px"><input type="checkbox" id="ppe-col-sel-all" onchange="ppeColSelAll(this)" title="Select all"></th><th>Date</th><th>Name</th><th>Item</th><th>Status</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
+          <thead><tr><th class="np" style="width:30px"><input type="checkbox" id="ppe-col-sel-all" onchange="ppeColSelAll(this)" title="Select all"></th><th>Date</th><th>Name</th><th>Item</th><th>Status</th><th class="np">PDF</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
           <tbody id="ppe-collected-body"></tbody>
         </table></div>
       </div>
@@ -1703,10 +1702,66 @@ function submitPPEManual(){
 }
 function editPPEReg(id){var log=getPPELog(),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit PPE Entry',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'name',label:'Name',type:'text',val:en.name},{key:'item',label:'Item',type:'text',val:en.item},{key:'status',label:'Status',type:'select',val:en.status,options:['Pending','Waiting on Quote','Ordered','Collected']}],onSave:function(v){var log2=getPPELog();log2.forEach(function(e){if(e.id===id){e.date=v.date;e.name=v.name;e.item=v.item;e.status=v.status;}});savePPELog(log2);rPPEReg();}});}
 function dPPEReg(id){if(!confirm('Delete?'))return;savePPELog(getPPELog().filter(function(e){return e.id!==id;}));rPPEReg();}
+
+function viewPPEEntry(id){
+  var en = getPPELog().filter(function(e){return e.id===id;})[0];
+  if(!en){ alert('Entry not found.'); return; }
+
+  // The displayed name may be "Full Name (EmpNo) - Position" from the manual entry form.
+  // Split it back into parts for the PDF header.
+  var rawName = String(en.name||'');
+  var empNo = '', position = '', displayName = rawName;
+  var mEmp = rawName.match(/^(.*?)\s*\(([^)]+)\)\s*(?:-\s*(.+))?$/);
+  if(mEmp){ displayName = mEmp[1].trim(); empNo = mEmp[2].trim(); if(mEmp[3]) position = mEmp[3].trim(); }
+  else {
+    var mPos = rawName.match(/^(.*?)\s*-\s*(.+)$/);
+    if(mPos){ displayName = mPos[1].trim(); position = mPos[2].trim(); }
+  }
+
+  // Item field may have an embedded "(Notes: ...)" suffix from the manual form.
+  var rawItem = String(en.item||''), itemText = rawItem, notesText = '';
+  var mNotes = rawItem.match(/^(.*?)\s*\(Notes:\s*(.*?)\)\s*$/);
+  if(mNotes){ itemText = mNotes[1].trim(); notesText = mNotes[2].trim(); }
+
+  var dateStr = en.date ? fmtDateAU(en.date) : '';
+  var status = en.status || 'Pending';
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PPE Request - '+escHtml(displayName)+'</title>';
+  html += commonFormStyles();
+  html += '</head><body>';
+  html += printBar();
+  html += '<div class="wrap">';
+  html += kHeaderBlock('PPE Request');
+  html += '<table class="frm"><tbody>';
+  html += '<tr><td class="lbl">Name</td><td class="val">'+escHtml(displayName)+'</td>';
+  html += '<td class="lbl">Date</td><td class="val">'+escHtml(dateStr)+'</td></tr>';
+  html += '<tr><td class="lbl">Employee Number</td><td class="val">'+escHtml(empNo||'-')+'</td>';
+  html += '<td class="lbl">Status</td><td class="val"><b>'+escHtml(status)+'</b></td></tr>';
+  html += '<tr><td class="lbl">Position / Role</td><td class="val" colspan="3">'+escHtml(position||'-')+'</td></tr>';
+  html += '</tbody></table>';
+  html += '<div class="sec-hdr">Item Requested</div>';
+  html += '<table class="frm" style="margin-top:2mm"><tbody>';
+  html += '<tr><td class="val" style="padding:5mm;font-size:12pt">'+escHtml(itemText)+'</td></tr>';
+  html += '</tbody></table>';
+  if(notesText){
+    html += '<div class="sec-hdr">Notes</div>';
+    html += '<table class="frm" style="margin-top:2mm"><tbody>';
+    html += '<tr><td class="val" style="padding:4mm">'+escHtml(notesText)+'</td></tr>';
+    html += '</tbody></table>';
+  }
+  html += '<div class="foot"><span><b>KAEFER PPE Request</b></span><span>Entry ID: '+escHtml(String(en.id||''))+'</span></div>';
+  html += '<div style="font-size:8pt;color:#999;margin-top:2mm;text-align:center">Generated from KAEFER Safety Tool &middot; '+new Date().toLocaleString('en-AU')+'</div>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank');
+  if(!w){ alert('Please allow popups for this site to generate the PDF.'); return; }
+  w.document.write(html);
+  w.document.close();
+}
 function upPPEStatus(id,v){var log=getPPELog();log.forEach(function(e){if(e.id===id)e.status=v;});savePPELog(log);rPPEReg();}
 function ppeRowHtml(en){
   var sel='<select class="sts '+ppeStCls(en.status)+'" onchange="upPPEStatus('+en.id+',this.value);this.className=\'sts \'+ppeStCls(this.value)"><option'+(en.status==='Pending'?' selected':'')+'>Pending</option><option'+(en.status==='Waiting on Quote'?' selected':'')+'>Waiting on Quote</option><option'+(en.status==='Ordered'?' selected':'')+'>Ordered</option><option'+(en.status==='Collected'?' selected':'')+'>Collected</option></select>';
-  return '<td class="np" style="text-align:center"><input type="checkbox" class="ppe-sel" data-id="'+en.id+'" data-name="'+en.name+'" data-item="'+en.item+'" data-date="'+fd(en.date)+'" data-status="'+en.status+'"></td><td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:600">'+en.name+'</td><td style="font-size:12px">'+en.item+'</td><td>'+sel+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editPPEReg('+en.id+')">&#9998;</button></td><td class="np"><button class="db" onclick="dPPEReg('+en.id+')">&#215;</button></td>';
+  return '<td class="np" style="text-align:center"><input type="checkbox" class="ppe-sel" data-id="'+en.id+'" data-name="'+en.name+'" data-item="'+en.item+'" data-date="'+fd(en.date)+'" data-status="'+en.status+'"></td><td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:600">'+en.name+'</td><td style="font-size:12px">'+en.item+'</td><td>'+sel+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px;background:#1565c0;color:#fff" onclick="viewPPEEntry('+en.id+')" title="View / Save as PDF">&#128424;</button></td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editPPEReg('+en.id+')">&#9998;</button></td><td class="np"><button class="db" onclick="dPPEReg('+en.id+')">&#215;</button></td>';
 }
 function rPPEReg(){
   var log=getPPELog();

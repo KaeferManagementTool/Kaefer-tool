@@ -473,14 +473,9 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div id="r-ppe" class="reg-panel on">
     <div class="card" style="border-top-left-radius:0">
       <div class="ch ch-r" style="justify-content:space-between"><span>&#129455; PPE Register</span><span class="cbg" id="ppe-bg">0</span></div>
-      <div class="tfr">
-        <div class="tf" style="width:110px"><label>Date</label><input type="date" id="ppe-d"></div>
-        <div class="tf gr"><label>Name</label><input type="text" id="ppe-n" placeholder="Employee name"></div>
-        <div class="tf gr"><label>Item (Boots / Overalls / Shirts etc)</label><input type="text" id="ppe-i" placeholder="e.g. Boots 11.5, Overalls 117R"></div>
-        <div class="tf" style="width:155px"><label>Status</label>
-          <select id="ppe-st"><option>Pending</option><option>Waiting on Quote</option><option>Ordered</option><option selected>Collected</option></select>
-        </div>
-        <button class="addbtn" onclick="addPPEReg()">&#10003; Add</button>
+      <div style="padding:8px 0">
+        <button class="rb" style="background:#e65100" onclick="openPPEManual()">&#43; Manual Entry</button>
+        <span style="font-size:11px;color:#607d8b;margin-left:8px">Same form layout as the QR-scanned PPE Request</span>
       </div>
       <div class="filter-bar">
         <label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mu);white-space:nowrap">Filter by name:</label>
@@ -494,6 +489,13 @@ if(localStorage.getItem('kaefer_setup_done')){
         <thead><tr><th class="np" style="width:30px"><input type="checkbox" id="ppe-sel-all" onchange="ppeSelAll(this)" title="Select all"></th><th>Date</th><th>Name</th><th>Item</th><th>Status</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
         <tbody id="ppe-body"></tbody>
       </table></div>
+      <div id="ppe-collected-section" style="margin-top:14px;display:none">
+        <div style="font-size:12px;font-weight:700;color:#2e7d32;text-transform:uppercase;letter-spacing:0.4px;padding:6px 0 4px;border-top:2px solid #c8e6c9">&#10003; Collected (<span id="ppe-collected-count">0</span>)</div>
+        <div style="overflow-x:auto"><table id="ppe-collected-tbl">
+          <thead><tr><th class="np" style="width:30px"><input type="checkbox" id="ppe-col-sel-all" onchange="ppeColSelAll(this)" title="Select all"></th><th>Date</th><th>Name</th><th>Item</th><th>Status</th><th class="np">Edit</th><th class="np">Del</th></tr></thead>
+          <tbody id="ppe-collected-body"></tbody>
+        </table></div>
+      </div>
       <div class="stat-bar">
         <div class="stat-pill"><strong id="ppe-c0">0</strong><span>Pending</span></div>
         <div class="stat-pill"><strong id="ppe-c1">0</strong><span>W/Quote</span></div>
@@ -1613,11 +1615,124 @@ var PPE_SEED=[{"id":2,"date":"2025-10-20","name":"Connor Vickery","item":"Boots:
 function getPPELog(){var s=glj(PPE_KEY,null);return s!==null?s:JSON.parse(JSON.stringify(PPE_SEED));}
 function savePPELog(log){sl(PPE_KEY,log);}
 function ppeStCls(v){return v==='Ordered'?'so':v==='Collected'?'sc2':v==='Waiting on Quote'?'swq':'sp';}
-function addPPEReg(){var n=document.getElementById('ppe-n').value.trim(),it=document.getElementById('ppe-i').value.trim();if(!n||!it){alert('Enter name and item.');return;}var log=getPPELog();log.push({id:Date.now(),date:document.getElementById('ppe-d').value,name:n,item:it,status:document.getElementById('ppe-st').value});savePPELog(log);document.getElementById('ppe-n').value='';document.getElementById('ppe-i').value='';rPPEReg();}
+function addPPEReg(){openPPEManual();} // legacy alias - opens the manual entry modal
+function openPPEManual(){
+  closePPEManual();
+  var today=new Date().toISOString().slice(0,10);
+  var overlay=document.createElement('div');
+  overlay.id='ppe-manual-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  overlay.innerHTML=''
+    +'<div style="background:#fff;border-radius:8px;max-width:640px;width:100%;display:flex;flex-direction:column;overflow:hidden;margin:auto">'
+    +  '<div style="background:#e65100;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">'
+    +    '<span style="font-weight:700">&#129455; PPE Request — Manual Entry</span>'
+    +    '<button onclick="closePPEManual()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>'
+    +  '</div>'
+    +  '<div style="padding:14px 18px;overflow-y:auto;max-height:78vh">'
+    +    '<div style="background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;margin-bottom:10px">'
+    +      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +        '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Full Name *</label><input type="text" id="ppem-name" placeholder="e.g. John Smith" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +        '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Employee Number</label><input type="text" id="ppem-empno" placeholder="e.g. 03/co233" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +      '</div>'
+    +      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">'
+    +        '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Position / Role</label><input type="text" id="ppem-pos" placeholder="e.g. Scaffolder Advanced" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +        '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Date</label><input type="date" id="ppem-date" value="'+today+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +      '</div>'
+    +    '</div>'
+    +    '<div style="background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;margin-bottom:10px">'
+    +      '<div style="font-size:11px;font-weight:700;color:#e65100;text-transform:uppercase;margin-bottom:6px">Items Required *</div>'
+    +      '<table style="width:100%;font-size:12px;border-collapse:collapse">'
+    +        '<thead><tr style="background:#fff"><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #ddd;width:48%">Item Description</th><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #ddd;width:30%">Size / Spec</th><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #ddd;width:14%">Qty</th><th style="width:8%;border-bottom:1px solid #ddd"></th></tr></thead>'
+    +        '<tbody id="ppem-rows"></tbody>'
+    +      '</table>'
+    +      '<button type="button" onclick="addPPEManualRow()" style="background:none;border:1px dashed #bbb;border-radius:4px;padding:6px 12px;font-size:12px;color:#607d8b;cursor:pointer;width:100%;font-family:inherit;margin-top:8px">+ Add another item</button>'
+    +      '<div style="margin-top:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Additional Notes</label><textarea id="ppem-notes" placeholder="Any specific requirements or urgency..." style="width:100%;min-height:50px;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:12px;resize:vertical"></textarea></div>'
+    +      '<div style="margin-top:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Initial Status</label><select id="ppem-status" style="padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"><option>Pending</option><option>Waiting on Quote</option><option>Ordered</option><option>Collected</option></select></div>'
+    +    '</div>'
+    +    '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +      '<button class="ob" style="font-size:12px;padding:7px 14px" onclick="closePPEManual()">Cancel</button>'
+    +      '<button class="rb" style="font-size:12px;padding:7px 16px;background:#e65100" onclick="submitPPEManual()">&#10003; Add to PPE Register</button>'
+    +    '</div>'
+    +  '</div>'
+    +'</div>';
+  document.body.appendChild(overlay);
+  addPPEManualRow();
+  setTimeout(function(){var el=document.getElementById('ppem-name');if(el)el.focus();},50);
+}
+function closePPEManual(){var m=document.getElementById('ppe-manual-modal');if(m)m.remove();}
+function addPPEManualRow(){
+  var tb=document.getElementById('ppem-rows');if(!tb)return;
+  var tr=document.createElement('tr');
+  tr.innerHTML=''
+    +'<td style="padding:3px 4px"><input type="text" class="ppem-desc" placeholder="e.g. Boots, Overalls" style="width:100%;padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:12px"></td>'
+    +'<td style="padding:3px 4px"><input type="text" class="ppem-size" placeholder="e.g. 11.5 / 117R / XXL" style="width:100%;padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:12px"></td>'
+    +'<td style="padding:3px 4px"><input type="number" class="ppem-qty" placeholder="1" min="1" value="1" style="width:100%;padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:12px"></td>'
+    +'<td style="padding:3px 4px;text-align:center"><button onclick="this.closest(\'tr\').remove()" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:16px;line-height:1" title="Remove row">&#215;</button></td>';
+  tb.appendChild(tr);
+}
+function submitPPEManual(){
+  var name=(document.getElementById('ppem-name').value||'').trim();
+  if(!name){alert('Enter the employee name.');return;}
+  var empno=(document.getElementById('ppem-empno').value||'').trim();
+  var pos=(document.getElementById('ppem-pos').value||'').trim();
+  var date=document.getElementById('ppem-date').value||new Date().toISOString().slice(0,10);
+  var notes=(document.getElementById('ppem-notes').value||'').trim();
+  var status=document.getElementById('ppem-status').value||'Pending';
+  var rows=document.querySelectorAll('#ppem-rows tr');
+  var items=[];
+  rows.forEach(function(tr){
+    var d=(tr.querySelector('.ppem-desc').value||'').trim();
+    var s=(tr.querySelector('.ppem-size').value||'').trim();
+    var q=(tr.querySelector('.ppem-qty').value||'').trim();
+    if(d)items.push({desc:d,size:s,qty:q});
+  });
+  if(!items.length){alert('Add at least one item.');return;}
+  // Display name suffix from optional fields (matches scanned-form behaviour)
+  var nameDisplay=name+(empno?' ('+empno+')':'')+(pos?' - '+pos:'');
+  var log=getPPELog();
+  var baseId=Date.now();
+  items.forEach(function(it,i){
+    var itemText=it.desc+(it.size?' '+it.size:'')+(it.qty&&it.qty!=='1'?' x'+it.qty:'');
+    if(notes&&i===items.length-1)itemText+=' (Notes: '+notes+')';
+    log.push({id:baseId+i,date:date,name:nameDisplay,item:itemText,status:status});
+  });
+  savePPELog(log);
+  closePPEManual();
+  rPPEReg();
+  if(typeof autoSyncOne==='function'&&getURL())autoSyncOne('ppe');
+}
 function editPPEReg(id){var log=getPPELog(),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit PPE Entry',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'name',label:'Name',type:'text',val:en.name},{key:'item',label:'Item',type:'text',val:en.item},{key:'status',label:'Status',type:'select',val:en.status,options:['Pending','Waiting on Quote','Ordered','Collected']}],onSave:function(v){var log2=getPPELog();log2.forEach(function(e){if(e.id===id){e.date=v.date;e.name=v.name;e.item=v.item;e.status=v.status;}});savePPELog(log2);rPPEReg();}});}
 function dPPEReg(id){if(!confirm('Delete?'))return;savePPELog(getPPELog().filter(function(e){return e.id!==id;}));rPPEReg();}
-function upPPEStatus(id,v){var log=getPPELog();log.forEach(function(e){if(e.id===id)e.status=v;});savePPELog(log);}
-function rPPEReg(){var log=getPPELog();var flt=(document.getElementById('ppe-filter').value||'').trim().toLowerCase();document.getElementById('ppe-bg').textContent=log.length;var cnt={'Pending':0,'Waiting on Quote':0,'Ordered':0,'Collected':0};log.forEach(function(e){if(cnt[e.status]!==undefined)cnt[e.status]++;});document.getElementById('ppe-c0').textContent=cnt['Pending'];document.getElementById('ppe-c1').textContent=cnt['Waiting on Quote'];document.getElementById('ppe-c2').textContent=cnt['Ordered'];document.getElementById('ppe-c3').textContent=cnt['Collected'];var filtered=flt?log.filter(function(e){return e.name.toLowerCase().indexOf(flt)>=0;}):log;var em=document.getElementById('ppe-empty'),tb=document.getElementById('ppe-body');em.style.display=(!log.length||!filtered.length)?'':'none';em.textContent=!log.length?'No entries yet.':'No entries match "'+flt+'".';tb.innerHTML='';filtered.forEach(function(en){var tr=document.createElement('tr');var sel='<select class="sts '+ppeStCls(en.status)+'" onchange="upPPEStatus('+en.id+',this.value);this.className=\'sts \'+ppeStCls(this.value)"><option'+(en.status==='Pending'?' selected':'')+'>Pending</option><option'+(en.status==='Waiting on Quote'?' selected':'')+'>Waiting on Quote</option><option'+(en.status==='Ordered'?' selected':'')+'>Ordered</option><option'+(en.status==='Collected'?' selected':'')+'>Collected</option></select>';tr.innerHTML='<td class="np" style="text-align:center"><input type="checkbox" class="ppe-sel" data-id="'+en.id+'" data-name="'+en.name+'" data-item="'+en.item+'" data-date="'+fd(en.date)+'" data-status="'+en.status+'"></td><td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:600">'+en.name+'</td><td style="font-size:12px">'+en.item+'</td><td>'+sel+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editPPEReg('+en.id+')">&#9998;</button></td><td class="np"><button class="db" onclick="dPPEReg('+en.id+')">&#215;</button></td>';tb.appendChild(tr);});}
+function upPPEStatus(id,v){var log=getPPELog();log.forEach(function(e){if(e.id===id)e.status=v;});savePPELog(log);rPPEReg();}
+function ppeRowHtml(en){
+  var sel='<select class="sts '+ppeStCls(en.status)+'" onchange="upPPEStatus('+en.id+',this.value);this.className=\'sts \'+ppeStCls(this.value)"><option'+(en.status==='Pending'?' selected':'')+'>Pending</option><option'+(en.status==='Waiting on Quote'?' selected':'')+'>Waiting on Quote</option><option'+(en.status==='Ordered'?' selected':'')+'>Ordered</option><option'+(en.status==='Collected'?' selected':'')+'>Collected</option></select>';
+  return '<td class="np" style="text-align:center"><input type="checkbox" class="ppe-sel" data-id="'+en.id+'" data-name="'+en.name+'" data-item="'+en.item+'" data-date="'+fd(en.date)+'" data-status="'+en.status+'"></td><td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:600">'+en.name+'</td><td style="font-size:12px">'+en.item+'</td><td>'+sel+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editPPEReg('+en.id+')">&#9998;</button></td><td class="np"><button class="db" onclick="dPPEReg('+en.id+')">&#215;</button></td>';
+}
+function rPPEReg(){
+  var log=getPPELog();
+  var flt=(document.getElementById('ppe-filter').value||'').trim().toLowerCase();
+  document.getElementById('ppe-bg').textContent=log.length;
+  var cnt={'Pending':0,'Waiting on Quote':0,'Ordered':0,'Collected':0};
+  log.forEach(function(e){if(cnt[e.status]!==undefined)cnt[e.status]++;});
+  document.getElementById('ppe-c0').textContent=cnt['Pending'];
+  document.getElementById('ppe-c1').textContent=cnt['Waiting on Quote'];
+  document.getElementById('ppe-c2').textContent=cnt['Ordered'];
+  document.getElementById('ppe-c3').textContent=cnt['Collected'];
+  var filtered=flt?log.filter(function(e){return e.name.toLowerCase().indexOf(flt)>=0;}):log;
+  var active=filtered.filter(function(e){return e.status!=='Collected';});
+  var collected=filtered.filter(function(e){return e.status==='Collected';});
+  var em=document.getElementById('ppe-empty'),tb=document.getElementById('ppe-body');
+  em.style.display=(!active.length)?'':'none';
+  em.textContent=!log.length?'No entries yet.':(active.length?'':(flt?'No active entries match "'+flt+'".':'No active entries (all collected).'));
+  tb.innerHTML='';
+  active.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML=ppeRowHtml(en);tb.appendChild(tr);});
+  var sec=document.getElementById('ppe-collected-section'),cb=document.getElementById('ppe-collected-body'),cc=document.getElementById('ppe-collected-count');
+  if(sec){
+    if(collected.length){sec.style.display='';cc.textContent=collected.length;cb.innerHTML='';collected.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML=ppeRowHtml(en);cb.appendChild(tr);});}
+    else{sec.style.display='none';}
+  }
+}
+function ppeColSelAll(cb){var els=document.querySelectorAll('#ppe-collected-body .ppe-sel');els.forEach(function(e){e.checked=cb.checked;});}
 var PURCH_KEY='kaefer_purch3';
 function purchStCls(v){return v==='Ordered'?'so':v==='Received'?'sc2':v==='Waiting on Quote'?'swq':'sp';}
 function addPurchReg(){var sup=document.getElementById('purch-s').value.trim(),desc=document.getElementById('purch-i').value.trim();if(!sup||!desc){alert('Enter supplier and description.');return;}var log=glj(PURCH_KEY,[]);log.push({id:Date.now(),date:document.getElementById('purch-d').value,supplier:sup,desc:desc,po:document.getElementById('purch-po').value.trim(),cost:document.getElementById('purch-cost').value,status:document.getElementById('purch-st').value});sl(PURCH_KEY,log);['purch-s','purch-i','purch-po','purch-cost'].forEach(function(id){document.getElementById(id).value='';});rPurchReg();}

@@ -1063,6 +1063,17 @@ if(localStorage.getItem('kaefer_setup_done')){
         <div class="mf"><label>Erected By *</label><input type="text" id="scf-e-erector" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
         <div class="mf"><label>Date Erected *</label><input type="date" id="scf-e-date" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
         <div class="mf" style="grid-column:span 2"><label>Notes</label><input type="text" id="scf-e-notes" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf" style="grid-column:span 2;background:#fff3e0;border:1px solid #ffcc80;border-radius:5px;padding:8px 10px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:#bf360c;margin-bottom:6px">
+            <input type="checkbox" id="scf-e-failed" onchange="document.getElementById('scf-e-failed-reason-row').style.display=this.checked?'':'none'" style="width:16px;height:16px;cursor:pointer">
+            <span>&#9888; Mark as Failed</span>
+            <span style="font-weight:400;font-size:11px;color:#bf360c;margin-left:auto">Use when handover/inspection failed</span>
+          </label>
+          <div id="scf-e-failed-reason-row" style="display:none">
+            <label style="font-size:10px;font-weight:700;color:#bf360c;text-transform:uppercase;display:block;margin-bottom:2px">Reason for failure</label>
+            <input type="text" id="scf-e-failed-reason" placeholder="e.g. missing toe board, incorrect ledger spacing" style="width:100%;padding:6px 8px;border:1px solid #ffb74d;border-radius:4px;font-size:12px;font-family:inherit;background:#fff">
+          </div>
+        </div>
       </div>
       <div style="background:#1a2a4a;color:#fff;padding:10px 13px;border-radius:5px;display:flex;gap:18px;font-size:13px;margin-bottom:10px">
         <div><b id="scf-e-totItems" style="font-size:16px">0</b> <span style="opacity:.8;font-size:11px">items</span></div>
@@ -5488,6 +5499,14 @@ function scfOpenEdit(){
   document.getElementById('scf-e-date').value = dateVal;
   document.getElementById('scf-e-notes').value = s.notes || '';
 
+  // Failed state
+  var failedCb = document.getElementById('scf-e-failed');
+  var failedReason = document.getElementById('scf-e-failed-reason');
+  var failedReasonRow = document.getElementById('scf-e-failed-reason-row');
+  if(failedCb){ failedCb.checked = !!s.failed; }
+  if(failedReason){ failedReason.value = s.failedReason || ''; }
+  if(failedReasonRow){ failedReasonRow.style.display = s.failed ? '' : 'none'; }
+
   // Working copy of quantities
   SCF_EDIT_QTYS = {};
   var origQtys = s.quantities || {};
@@ -5654,6 +5673,10 @@ function scfSaveEdit(){
     totalKg += q * comp.kg;
   });
 
+  // Failed state from modal
+  var markFailed = !!document.getElementById('scf-e-failed').checked;
+  var failedReason = (document.getElementById('scf-e-failed-reason').value || '').trim();
+
   var btn = document.getElementById('scf-e-save-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   setSS('bz', 'Saving changes...');
@@ -5670,7 +5693,9 @@ function scfSaveEdit(){
       notes: notes,
       quantities: SCF_EDIT_QTYS,
       totalItems: totalItems,
-      totalWeightKg: parseFloat(totalKg.toFixed(2))
+      totalWeightKg: parseFloat(totalKg.toFixed(2)),
+      failed: markFailed,
+      failedReason: markFailed ? failedReason : ''
     }
   });
 
@@ -5989,6 +6014,14 @@ function scfOpenManualAdd(){
   document.getElementById('scf-e-date').value    = SCF_OPEN_SCAFFOLD.scaffold.dateErected;
   document.getElementById('scf-e-notes').value   = '';
 
+  // Reset Failed controls
+  var failedCb = document.getElementById('scf-e-failed');
+  var failedReason = document.getElementById('scf-e-failed-reason');
+  var failedReasonRow = document.getElementById('scf-e-failed-reason-row');
+  if(failedCb) failedCb.checked = false;
+  if(failedReason) failedReason.value = '';
+  if(failedReasonRow) failedReasonRow.style.display = 'none';
+
   SCF_EDIT_QTYS = {};
   scfRenderEditComponents();
   scfUpdateEditTotals();
@@ -6038,6 +6071,10 @@ scfSaveEdit = function(){
     totalKg += q * comp.kg;
   });
 
+  // Failed state from modal
+  var markFailed = !!document.getElementById('scf-e-failed').checked;
+  var failedReason = (document.getElementById('scf-e-failed-reason').value || '').trim();
+
   var btn = document.getElementById('scf-e-save-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   setSS('bz', 'Adding scaffold...');
@@ -6052,7 +6089,9 @@ scfSaveEdit = function(){
       notes: notes,
       quantities: SCF_EDIT_QTYS,
       totalItems: totalItems,
-      totalWeightKg: parseFloat(totalKg.toFixed(2))
+      totalWeightKg: parseFloat(totalKg.toFixed(2)),
+      failed: markFailed,
+      failedReason: markFailed ? failedReason : ''
     }
   });
 
@@ -6061,7 +6100,19 @@ scfSaveEdit = function(){
     .then(function(j){
       btn.disabled = false; btn.innerHTML = '\u2713 Add to Active Register';
       if(!j.ok) throw new Error(j.error || 'Add failed');
-      setSS('ok', 'Scaffold added');
+      setSS('ok', 'Scaffold added' + (markFailed ? ' (marked as Failed)' : ''));
+      // If the user ticked Failed, fire a follow-up edit so the flag persists.
+      // Manual-add writes scaffolds directly to Active, so target that tab.
+      if(markFailed && j.id){
+        fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({
+            action: 'scaffold_edit',
+            id: j.id,
+            fromTab: 'active',
+            fields: { failed: true, failedReason: failedReason }
+          })
+        }).then(function(){ scfLoad(); }).catch(function(){ /* non-blocking */ });
+      }
       // Reset modal back to edit mode for next use
       SCF_EDIT_MODE = 'edit';
       var hdr = document.querySelector('#scf-edit-ml .mhd h3');

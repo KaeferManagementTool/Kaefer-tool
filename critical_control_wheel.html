@@ -1757,8 +1757,8 @@ function submitPPEManual(){
   rPPEReg();
   if(typeof autoSyncOne==='function'&&getURL())autoSyncOne('ppe');
 }
-function editPPEReg(id){var log=getPPELog(),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit PPE Entry',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'name',label:'Name',type:'text',val:en.name},{key:'item',label:'Item',type:'text',val:en.item},{key:'status',label:'Status',type:'select',val:en.status,options:['Pending','Waiting on Quote','Ordered','Collected']}],onSave:function(v){var log2=getPPELog();log2.forEach(function(e){if(e.id===id){e.date=v.date;e.name=v.name;e.item=v.item;e.status=v.status;}});savePPELog(log2);rPPEReg();}});}
-function dPPEReg(id){if(!confirm('Delete?'))return;savePPELog(getPPELog().filter(function(e){return e.id!==id;}));rPPEReg();}
+function editPPEReg(id){var log=getPPELog(),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit PPE Entry',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'name',label:'Name',type:'text',val:en.name},{key:'item',label:'Item',type:'text',val:en.item},{key:'status',label:'Status',type:'select',val:en.status,options:['Pending','Waiting on Quote','Ordered','Collected']}],onSave:function(v){var log2=getPPELog();log2.forEach(function(e){if(e.id===id){e.date=v.date;e.name=v.name;e.item=v.item;e.status=v.status;}});savePPELog(log2);rPPEReg();if(typeof autoSyncOne==='function'&&getURL())autoSyncOne('ppe');}});}
+function dPPEReg(id){if(!confirm('Delete?'))return;savePPELog(getPPELog().filter(function(e){return e.id!==id;}));rPPEReg();if(typeof autoSyncOne==='function'&&getURL())autoSyncOne('ppe');}
 
 function viewPPEEntry(id){
   var en = getPPELog().filter(function(e){return e.id===id;})[0];
@@ -1802,7 +1802,7 @@ function viewPPEEntry(id){
   w.document.write(html);
   w.document.close();
 }
-function upPPEStatus(id,v){var log=getPPELog();log.forEach(function(e){if(e.id===id)e.status=v;});savePPELog(log);rPPEReg();}
+function upPPEStatus(id,v){var log=getPPELog();log.forEach(function(e){if(e.id===id)e.status=v;});savePPELog(log);rPPEReg();if(typeof autoSyncOne==='function'&&getURL())autoSyncOne('ppe');}
 function ppeRowHtml(en){
   var sel='<select class="sts '+ppeStCls(en.status)+'" onchange="upPPEStatus('+en.id+',this.value);this.className=\'sts \'+ppeStCls(this.value)"><option'+(en.status==='Pending'?' selected':'')+'>Pending</option><option'+(en.status==='Waiting on Quote'?' selected':'')+'>Waiting on Quote</option><option'+(en.status==='Ordered'?' selected':'')+'>Ordered</option><option'+(en.status==='Collected'?' selected':'')+'>Collected</option></select>';
   return '<td class="np" style="text-align:center"><input type="checkbox" class="ppe-sel" data-id="'+en.id+'" data-name="'+en.name+'" data-item="'+en.item+'" data-date="'+fd(en.date)+'" data-status="'+en.status+'"></td><td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:600">'+en.name+'</td><td style="font-size:12px">'+en.item+'</td><td>'+sel+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px;background:#1565c0;color:#fff" onclick="viewPPEEntry('+en.id+')" title="View / Save as PDF">&#128424;</button></td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px" onclick="editPPEReg('+en.id+')">&#9998;</button></td><td class="np"><button class="db" onclick="dPPEReg('+en.id+')">&#215;</button></td>';
@@ -1906,16 +1906,19 @@ function rToolReg(){
 }
 
 function _toolApplyEdit(idx, patch){
-  if(typeof idx==='string' && idx.charAt(0)==='u'){
+  var isUser = (typeof idx==='string' && idx.charAt(0)==='u');
+  if(isUser){
     var ui=parseInt(idx.slice(1),10);
     var users=getToolUser();
     if(users[ui]){ Object.assign(users[ui], patch); saveToolUser(users); }
+    if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('tool_user');
   } else {
     var ni=parseInt(idx,10);
     var ov=glj(TOOL_KEY,{});
     if(!ov[ni])ov[ni]={};
     Object.assign(ov[ni], patch);
     sl(TOOL_KEY,ov);
+    if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('tool');
   }
 }
 
@@ -1934,16 +1937,19 @@ function restoreTool(idx){
 
 function dToolReg(idx){
   if(!confirm('Permanently delete this tool?'))return;
-  if(typeof idx==='string' && idx.charAt(0)==='u'){
+  var isUser = (typeof idx==='string' && idx.charAt(0)==='u');
+  if(isUser){
     var ui=parseInt(idx.slice(1),10);
     var users=getToolUser();
     users.splice(ui,1);
     saveToolUser(users);
+    if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('tool_user');
   } else {
     var ni=parseInt(idx,10);
     var del=glj(TOOL_DEL_KEY,[]);
     if(del.indexOf(ni)<0)del.push(ni);
     sl(TOOL_DEL_KEY,del);
+    if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('tool');
   }
   rToolReg();
 }
@@ -2013,6 +2019,7 @@ function submitToolManual(){
   saveToolUser(users);
   closeToolManual();
   rToolReg();
+  if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('tool_user');
 }
 
 function exportToolStocktake(){
@@ -2149,6 +2156,7 @@ function _hgtApplyEdit(idx, patch){
   var ui=parseInt(String(idx).slice(1),10);
   var users=getHgtUser();
   if(users[ui]){ Object.assign(users[ui], patch); saveHgtUser(users); }
+  if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('hgt');
 }
 
 function retireHgt(idx, on){
@@ -2171,6 +2179,7 @@ function dHgtReg(idx){
   users.splice(ui,1);
   saveHgtUser(users);
   rHgtReg();
+  if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('hgt');
 }
 
 function editHgtReg(idx){
@@ -2238,6 +2247,7 @@ function submitHgtManual(){
   saveHgtUser(users);
   closeHgtManual();
   rHgtReg();
+  if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('hgt');
 }
 
 function exportHgtStocktake(){
@@ -4878,6 +4888,15 @@ function autoSyncOne(action){
     if(action==='log') doSyncSimpleAction(u,'log','kaefer_log',rLog).catch(function(){});
     else if(action==='rr') doSyncSimpleAction(u,'rr','kaefer_rr',rRR).catch(function(){});
     else if(action==='ccv') doSyncCCV(u).catch(function(){});
+    else if(action==='ppe') doSyncSimpleStore(u,'ppe','kaefer_ppe3',rPPEReg).catch(function(){});
+    else if(action==='purch') doSyncSimpleStore(u,'purch','kaefer_purch3',rPurchReg).catch(function(){});
+    else if(action==='veh') doSyncSimpleStore(u,'veh','kaefer_veh_ov',rVehReg).catch(function(){});
+    else if(action==='tool') doSyncSimpleStore(u,'tool','kaefer_tool_ov',rToolReg).catch(function(){});
+    else if(action==='tool_user') doSyncSimpleStore(u,'tool_user','kaefer_tool_user',rToolReg).catch(function(){});
+    else if(action==='hgt') doSyncSimpleStore(u,'hgt','kaefer_hgt_user',rHgtReg).catch(function(){});
+    else if(action==='train') doSyncSimpleStore(u,'train','kaefer_train_ov',rTraining).catch(function(){});
+    else if(action==='bth') doSyncSimpleStore(u,'bth','kaefer_bth3',rBth).catch(function(){});
+    else if(action==='act') doSyncSimpleStore(u,'act','kaefer_act',typeof rAct==='function'?rAct:function(){}).catch(function(){});
   } catch(e) {}
 }
 
@@ -4898,6 +4917,8 @@ function syncAll(){
     {label:'Purchasing', fn:function(){return doSyncSimpleStore(u,'purch','kaefer_purch3',rPurchReg);}},
     {label:'Vehicle', fn:function(){return doSyncSimpleStore(u,'veh','kaefer_veh_ov',rVehReg);}},
     {label:'Tooling', fn:function(){return doSyncSimpleStore(u,'tool','kaefer_tool_ov',rToolReg);}},
+    {label:'Tool Manual Entries', fn:function(){return doSyncSimpleStore(u,'tool_user','kaefer_tool_user',rToolReg);}},
+    {label:'Heights Equipment', fn:function(){return doSyncSimpleStore(u,'hgt','kaefer_hgt_user',rHgtReg);}},
     {label:'Training', fn:function(){return doSyncSimpleStore(u,'train','kaefer_train_ov',rTraining);}},
     {label:'Breathalyser', fn:function(){return doSyncSimpleStore(u,'bth','kaefer_bth3',rBth);}},
     {label:'Actions', fn:function(){return doSyncSimpleStore(u,'act','kaefer_act',typeof rAct==='function'?rAct:function(){});}},

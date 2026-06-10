@@ -383,7 +383,7 @@ if(localStorage.getItem('kaefer_setup_done')){
 <!-- T7: Attendance -->
 <div class="tp" id="t7"><div class="w">
   <div class="card" style="margin-bottom:11px">
-    <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Attendance Register</span><div style="display:flex;gap:7px"><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openAddEmp()">&#43; Add Employee</button></div></div>
+    <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Attendance Register</span><div style="display:flex;gap:7px"><button class="hb" style="font-size:11px;padding:3px 9px;background:#1565c0" onclick="openLeaveEntry()">&#43; Leave Entry</button><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openAddEmp()">&#43; Add Employee</button></div></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;padding:9px 13px 6px">
       <div class="tf"><label>Month</label><select id="at-mon" onchange="rAtt()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select></div>
       <div class="tf"><label>Year</label><select id="at-yr" onchange="rAtt()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option></select></div>
@@ -1099,6 +1099,7 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="mbd">
     <p style="font-size:12px;color:#607d8b;margin-bottom:11px" id="ce-sub"></p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px" id="ce-btns"></div>
+    <div style="margin-top:10px;text-align:center"><button class="ob" style="font-size:11px;padding:5px 10px" onclick="editLeaveFromCellFromCE()">&#9998; Edit as date range...</button></div>
   </div>
 </div></div>
 
@@ -1559,10 +1560,177 @@ function setStatus(n,dk,v){
     if(getURL()) scheduleSyncAtt();       // debounced
   }
 }
+
+// ── Leave Entry (range-based manual attendance entry) ────────
+function openLeaveEntry(prefill){
+  closeLeaveEntry();
+  var today=new Date().toISOString().slice(0,10);
+  var emps=getEmps().slice().sort(function(a,b){return a.n.localeCompare(b.n);});
+  var empOptions=emps.map(function(e){
+    var sel = prefill && prefill.name===e.n ? ' selected' : '';
+    return '<option value="'+e.n.replace(/"/g,'&quot;')+'"'+sel+'>'+e.n+'</option>';
+  }).join('');
+  var statusOptions=[
+    {v:'AL',l:'Annual Leave'},
+    {v:'SL',l:'Sick Leave'},
+    {v:'PH',l:'Public Holiday'},
+    {v:'BL',l:'Bereavement'},
+    {v:'LATE',l:'Late'},
+    {v:'X',l:'Absent'},
+    {v:'',l:'Present (clear)'}
+  ];
+  var statusOptsHtml=statusOptions.map(function(s){
+    var sel = prefill && prefill.status===s.v ? ' selected' : (!prefill && s.v==='AL' ? ' selected' : '');
+    return '<option value="'+s.v+'"'+sel+'>'+s.l+'</option>';
+  }).join('');
+  var startDate = prefill && prefill.start ? prefill.start : today;
+  var endDate = prefill && prefill.end ? prefill.end : (prefill && prefill.start ? prefill.start : today);
+  var isEdit = !!(prefill && prefill.editMode);
+  var title = isEdit ? 'Edit Leave Entry' : 'New Leave Entry';
+  var btnText = isEdit ? '&#10003; Update' : '&#10003; Apply to Attendance';
+  var deleteBtn = isEdit ? '<button class="ob" style="font-size:12px;padding:7px 14px;background:#c62828;color:#fff;border-color:#c62828" onclick="deleteLeaveEntry()">&#215; Delete</button>' : '';
+
+  var overlay=document.createElement('div');
+  overlay.id='leave-entry-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  overlay.innerHTML=''
+    +'<div style="background:#fff;border-radius:8px;max-width:520px;width:100%;display:flex;flex-direction:column;overflow:hidden;margin:auto">'
+    +  '<div style="background:#1565c0;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">'
+    +    '<span style="font-weight:700">&#128203; '+title+'</span>'
+    +    '<button onclick="closeLeaveEntry()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>'
+    +  '</div>'
+    +  '<div style="padding:14px 18px">'
+    +    '<div style="margin-bottom:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Employee *</label>'
+    +    '<select id="le-name" '+(isEdit?'disabled style="background:#f5f5f5;"':'')+' style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px">'+empOptions+'</select></div>'
+    +    '<div style="margin-bottom:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Leave Type *</label>'
+    +    '<select id="le-status" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px">'+statusOptsHtml+'</select></div>'
+    +    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Start Date *</label><input type="date" id="le-start" value="'+startDate+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">End Date *</label><input type="date" id="le-end" value="'+endDate+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +    '</div>'
+    +    '<div style="margin-bottom:14px"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#607d8b;cursor:pointer"><input type="checkbox" id="le-weekends" style="cursor:pointer"> Include weekends</label></div>'
+    +    '<div id="le-preview" style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;padding:8px 10px;font-size:11px;color:#555;margin-bottom:14px"></div>'
+    +    '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
+    +      deleteBtn
+    +      +'<button class="ob" style="font-size:12px;padding:7px 14px" onclick="closeLeaveEntry()">Cancel</button>'
+    +      +'<button class="rb" style="font-size:12px;padding:7px 16px;background:#1565c0" onclick="submitLeaveEntry('+(isEdit?'true':'false')+')">'+btnText+'</button>'
+    +    '</div>'
+    +  '</div>'
+    +'</div>';
+  document.body.appendChild(overlay);
+  // Set fields from prefill if needed
+  if(prefill && prefill.name) document.getElementById('le-name').value = prefill.name;
+  if(prefill && prefill.status !== undefined) document.getElementById('le-status').value = prefill.status;
+  // Live preview of day count
+  function updatePreview(){
+    var s=document.getElementById('le-start').value;
+    var e=document.getElementById('le-end').value;
+    var inclWE=document.getElementById('le-weekends').checked;
+    var st=document.getElementById('le-status');
+    var stLabel=st.options[st.selectedIndex].text;
+    if(!s||!e){document.getElementById('le-preview').textContent='Pick a date range.';return;}
+    var d1=new Date(s+'T00:00:00'),d2=new Date(e+'T00:00:00');
+    if(d2<d1){document.getElementById('le-preview').innerHTML='<span style="color:#c62828">End date must be on or after start date.</span>';return;}
+    var count=0;var d=new Date(d1);
+    while(d<=d2){var dow=d.getDay();if(inclWE || (dow!==0 && dow!==6))count++;d.setDate(d.getDate()+1);}
+    document.getElementById('le-preview').innerHTML='Will set <b>'+stLabel+'</b> on <b>'+count+' day'+(count===1?'':'s')+'</b>'+(inclWE?'':' (weekdays only)')+'.';
+  }
+  ['le-start','le-end','le-status','le-weekends'].forEach(function(id){var el=document.getElementById(id);if(el)el.addEventListener('change',updatePreview);});
+  updatePreview();
+  setTimeout(function(){var el=document.getElementById('le-name');if(el&&!isEdit)el.focus();},50);
+}
+function closeLeaveEntry(){var m=document.getElementById('leave-entry-modal');if(m)m.remove();}
+
+// Track the original range when editing so we can clear-then-set on update
+var LE_EDIT_ORIGINAL = null;
+
+function submitLeaveEntry(isEdit){
+  var name=document.getElementById('le-name').value;
+  var status=document.getElementById('le-status').value;
+  var startStr=document.getElementById('le-start').value;
+  var endStr=document.getElementById('le-end').value;
+  var inclWE=document.getElementById('le-weekends').checked;
+  if(!name){alert('Pick an employee.');return;}
+  if(!startStr||!endStr){alert('Pick a date range.');return;}
+  var d1=new Date(startStr+'T00:00:00'),d2=new Date(endStr+'T00:00:00');
+  if(d2<d1){alert('End date must be on or after start date.');return;}
+
+  // If editing, first clear the original range so reduced ranges don't leave orphan days
+  if(isEdit && LE_EDIT_ORIGINAL){
+    var od1=new Date(LE_EDIT_ORIGINAL.start+'T00:00:00'),od2=new Date(LE_EDIT_ORIGINAL.end+'T00:00:00');
+    var od=new Date(od1);
+    while(od<=od2){
+      var dk=od.toISOString().slice(0,10);
+      setStatus(LE_EDIT_ORIGINAL.name, dk, '');
+      od.setDate(od.getDate()+1);
+    }
+  }
+
+  // Apply new range
+  var d=new Date(d1);var applied=0;
+  while(d<=d2){
+    var dow=d.getDay();
+    if(inclWE || (dow!==0 && dow!==6)){
+      var dk2=d.toISOString().slice(0,10);
+      setStatus(name, dk2, status);
+      applied++;
+    }
+    d.setDate(d.getDate()+1);
+  }
+  LE_EDIT_ORIGINAL=null;
+  closeLeaveEntry();
+  if(typeof rAtt==='function')rAtt();
+  if(typeof rDM==='function')rDM();
+}
+
+function deleteLeaveEntry(){
+  if(!LE_EDIT_ORIGINAL){alert('Nothing to delete.');return;}
+  if(!confirm('Clear this leave entry across the date range?'))return;
+  var od1=new Date(LE_EDIT_ORIGINAL.start+'T00:00:00'),od2=new Date(LE_EDIT_ORIGINAL.end+'T00:00:00');
+  var od=new Date(od1);
+  while(od<=od2){
+    var dk=od.toISOString().slice(0,10);
+    setStatus(LE_EDIT_ORIGINAL.name, dk, '');
+    od.setDate(od.getDate()+1);
+  }
+  LE_EDIT_ORIGINAL=null;
+  closeLeaveEntry();
+  if(typeof rAtt==='function')rAtt();
+  if(typeof rDM==='function')rDM();
+}
+
+// Open leave entry modal in edit mode, pre-filled from an existing cell.
+// Detects a contiguous run of the same status around (name, dk) and treats
+// it as the editable range.
+function editLeaveFromCell(name, dk){
+  var current = getStatus(name, dk);
+  if(!current){ alert('No leave entry on this day to edit.'); return; }
+  // Walk backward then forward to find the contiguous block of identical status
+  var ov = glj(ATT_OV, {}), ak = aKey(name);
+  function statusOn(dateKey){ return (ov[ak] && ov[ak][dateKey]!==undefined) ? ov[ak][dateKey] : ''; }
+  function shiftDate(s, days){ var d=new Date(s+'T00:00:00'); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
+  var startDk = dk;
+  while(true){
+    var prev = shiftDate(startDk, -1);
+    if(statusOn(prev) === current) startDk = prev; else break;
+  }
+  var endDk = dk;
+  while(true){
+    var nextD = shiftDate(endDk, 1);
+    if(statusOn(nextD) === current) endDk = nextD; else break;
+  }
+  LE_EDIT_ORIGINAL = { name: name, start: startDk, end: endDk, status: current };
+  openLeaveEntry({ name: name, status: current, start: startDk, end: endDk, editMode: true });
+}
 function aCS(v,wk){if(wk)return'background:#eee;color:#bbb';if(v==='SL')return'background:#ffcdd2;color:#c62828';if(v==='AL')return'background:#bbdefb;color:#1565c0';if(v==='X')return'background:#fce4ec;color:#880e4f';if(v==='PH')return'background:#fff9c4;color:#e65100';if(v==='BL')return'background:#f3e5f5;color:#6a1b9a';if(v==='LATE')return'background:#fff3e0;color:#bf360c';return'background:#c8e6c9;color:#2e7d32';}
 var ce_n='',ce_dk='';
 function openCE(n,dk){ce_n=n;ce_dk=dk;var cur=getStatus(n,dk),d=dk.split('-');document.getElementById('ce-tt').textContent=n;document.getElementById('ce-sub').textContent=d[2]+'/'+d[1]+'/'+d[0]+' — currently: '+(ATT_LBLS[cur]||'Present');document.getElementById('ce-hd').style.background=cur?'#c62828':'#2e7d32';var opts=['','SL','AL','X','PH','BL','LATE'],bgs={'':'#2e7d32','SL':'#c62828','AL':'#1565c0','X':'#880e4f','PH':'#e65100','BL':'#6a1b9a','LATE':'#bf360c'};var h='';opts.forEach(function(v){var act=v===cur,bg=bgs[v];h+='<button onclick="setCE(\''+v+'\')" style="padding:8px 5px;border:2px solid '+(act?bg:'#e0e0e0')+';border-radius:5px;background:'+(act?bg:'#fff')+';color:'+(act?'#fff':bg)+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">'+ATT_LBLS[v]+'</button>';});document.getElementById('ce-btns').innerHTML=h;document.getElementById('ce-ml').classList.add('on');}
 function setCE(v){setStatus(ce_n,ce_dk,v);closeCE();rAtt();}
+function editLeaveFromCellFromCE(){
+  if(!ce_n || !ce_dk){ alert('No cell selected.'); return; }
+  closeCE();
+  editLeaveFromCell(ce_n, ce_dk);
+}
 function closeCE(){document.getElementById('ce-ml').classList.remove('on');}
 function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-ml').classList.add('on');}
 function closeAddEmp(){document.getElementById('ae-ml').classList.remove('on');}
@@ -3588,7 +3756,18 @@ function syncLog(){
     // slow networks.
     runSyncGuarded('log',syncLog)
       .then(function(){return runSyncGuarded('rr',syncRR);})
-      .then(function(){return runSyncGuarded('att',syncAtt);});
+      .then(function(){return runSyncGuarded('att',syncAtt);})
+      .then(function(){
+        // Background pull for the simple registers (PPE, Heights, Tool Manual).
+        // Pull-only (no push) so this poll cycle doesn't overwrite the other
+        // supervisor's recent entries on the server with our stale local list.
+        // User-initiated edits still go through doSyncSimpleStore (push + pull).
+        var u = getURL(); if(!u) return;
+        return doPullSimpleStore(u,'ppe','kaefer_ppe3',rPPEReg)
+          .catch(function(){})
+          .then(function(){return doPullSimpleStore(u,'hgt','kaefer_hgt_user',rHgtReg).catch(function(){});})
+          .then(function(){return doPullSimpleStore(u,'tool_user','kaefer_tool_user',rToolReg).catch(function(){});});
+      });
   }
   // Seed snapshots from current local state so the first sync after a
   // page load doesn't re-upsert everything as "new".
@@ -4888,12 +5067,14 @@ function autoSyncOne(action){
     if(action==='log') doSyncSimpleAction(u,'log','kaefer_log',rLog).catch(function(){});
     else if(action==='rr') doSyncSimpleAction(u,'rr','kaefer_rr',rRR).catch(function(){});
     else if(action==='ccv') doSyncCCV(u).catch(function(){});
-    else if(action==='ppe') doSyncSimpleStore(u,'ppe','kaefer_ppe3',rPPEReg).catch(function(){});
+    // Merge registers - pull-then-merge-then-push to avoid clobbering the other supervisor's adds
+    else if(action==='ppe') pullMergePush(u,'ppe','kaefer_ppe3',rPPEReg).catch(function(){});
+    else if(action==='hgt') pullMergePush(u,'hgt','kaefer_hgt_user',rHgtReg).catch(function(){});
+    else if(action==='tool_user') pullMergePush(u,'tool_user','kaefer_tool_user',rToolReg).catch(function(){});
+    // Plain push-then-pull for single-supervisor registers (no merge needed)
     else if(action==='purch') doSyncSimpleStore(u,'purch','kaefer_purch3',rPurchReg).catch(function(){});
     else if(action==='veh') doSyncSimpleStore(u,'veh','kaefer_veh_ov',rVehReg).catch(function(){});
     else if(action==='tool') doSyncSimpleStore(u,'tool','kaefer_tool_ov',rToolReg).catch(function(){});
-    else if(action==='tool_user') doSyncSimpleStore(u,'tool_user','kaefer_tool_user',rToolReg).catch(function(){});
-    else if(action==='hgt') doSyncSimpleStore(u,'hgt','kaefer_hgt_user',rHgtReg).catch(function(){});
     else if(action==='train') doSyncSimpleStore(u,'train','kaefer_train_ov',rTraining).catch(function(){});
     else if(action==='bth') doSyncSimpleStore(u,'bth','kaefer_bth3',rBth).catch(function(){});
     else if(action==='act') doSyncSimpleStore(u,'act','kaefer_act',typeof rAct==='function'?rAct:function(){}).catch(function(){});
@@ -5020,6 +5201,61 @@ function doSyncSimpleStore(u, action, key, render){
         if(j.data!==undefined && j.data!==null) sl(key, j.data);
         if(render)render();
         resolve();
+      })
+      .catch(reject);
+  });
+}
+
+// Pull-only variant - safe for background polling because it doesn't push.
+// (Push-then-pull on a timer is unsafe: each device's stale push overwrites
+// the other's recent adds on the server.)
+function doPullSimpleStore(u, action, key, render){
+  return new Promise(function(resolve, reject){
+    fetch(u+'?action=load_'+action+'&t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!j.ok)throw new Error(j.error||'load failed');
+        if(j.data!==undefined && j.data!==null) sl(key, j.data);
+        if(render)render();
+        resolve();
+      })
+      .catch(reject);
+  });
+}
+
+// Pull-first-then-push for user-initiated edits on the merge registers.
+// Steps: GET server list -> merge with local by id (local wins on conflict,
+// add local-only entries) -> POST merged list -> GET confirmation.
+// This prevents the "stale local push overwrites the other supervisor's
+// recent adds" race that plain push-then-pull suffers from.
+function pullMergePush(u, action, key, render){
+  return new Promise(function(resolve, reject){
+    var local = glj(key, []) || [];
+    if(!Array.isArray(local)) local = [];
+    fetch(u+'?action=load_'+action+'&t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!j.ok)throw new Error(j.error||'pre-load failed');
+        var server = (j.data && Array.isArray(j.data)) ? j.data : [];
+        // Merge by id: local's version wins on conflict; entries on server
+        // but not local are kept; entries on local but not server are added.
+        var byId = {};
+        server.forEach(function(r){ if(r && r.id != null) byId[String(r.id)] = r; });
+        local.forEach(function(r){ if(r && r.id != null) byId[String(r.id)] = r; });
+        var merged = Object.keys(byId).map(function(k){ return byId[k]; });
+        // Push the merged list back
+        return fetch(u, {
+          method:'POST', redirect:'follow',
+          headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'save_'+action, data: merged})
+        }).then(function(r){return r.text();}).then(function(t){
+          var jp = JSON.parse(t);
+          if(!jp.ok) throw new Error(jp.error||'save failed');
+          // Update local immediately so the UI reflects the merged state
+          sl(key, merged);
+          if(render) render();
+          resolve();
+        });
       })
       .catch(reject);
   });

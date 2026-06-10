@@ -1602,13 +1602,19 @@ function openLeaveEntry(prefill){
     +  '<div style="padding:14px 18px">'
     +    '<div style="margin-bottom:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Employee *</label>'
     +    '<select id="le-name" '+(isEdit?'disabled style="background:#f5f5f5;"':'')+' style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px">'+empOptions+'</select></div>'
+    +    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Employee Number</label><input type="text" id="le-empno" placeholder="e.g. 03/co233" value="'+(prefill&&prefill.empNo?prefill.empNo:'')+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Position / Role</label><input type="text" id="le-pos" placeholder="e.g. Scaffolder" value="'+(prefill&&prefill.pos?prefill.pos:'')+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
+    +    '</div>'
     +    '<div style="margin-bottom:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Leave Type *</label>'
     +    '<select id="le-status" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px">'+statusOptsHtml+'</select></div>'
     +    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
     +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Start Date *</label><input type="date" id="le-start" value="'+startDate+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
     +      '<div><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">End Date *</label><input type="date" id="le-end" value="'+endDate+'" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px"></div>'
     +    '</div>'
-    +    '<div style="margin-bottom:14px"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#607d8b;cursor:pointer"><input type="checkbox" id="le-weekends" style="cursor:pointer"> Include weekends</label></div>'
+    +    '<div style="margin-bottom:10px"><label style="font-size:10px;font-weight:700;color:#607d8b;text-transform:uppercase;display:block;margin-bottom:2px">Notes</label><textarea id="le-notes" placeholder="Reason, comments..." style="width:100%;min-height:42px;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:12px;resize:vertical">'+(prefill&&prefill.notes?String(prefill.notes).replace(/</g,'&lt;'):'')+'</textarea></div>'
+    +    '<div style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#607d8b;cursor:pointer"><input type="checkbox" id="le-weekends" style="cursor:pointer"> Include weekends</label></div>'
+    +    '<div style="margin-bottom:10px;background:#e3f2fd;border:1px solid #90caf9;border-radius:5px;padding:6px 10px"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#0d47a1;cursor:pointer;font-weight:600"><input type="checkbox" id="le-tosubmissions" '+(isEdit?'':'checked')+' style="cursor:pointer"> Also save as Leave Application in Submissions (allows PDF / approve)</label></div>'
     +    '<div id="le-preview" style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;padding:8px 10px;font-size:11px;color:#555;margin-bottom:14px"></div>'
     +    '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +      deleteBtn
@@ -1650,6 +1656,10 @@ function submitLeaveEntry(isEdit){
   var startStr=document.getElementById('le-start').value;
   var endStr=document.getElementById('le-end').value;
   var inclWE=document.getElementById('le-weekends').checked;
+  var toSubmissions=(document.getElementById('le-tosubmissions')||{}).checked;
+  var empNo=(document.getElementById('le-empno').value||'').trim();
+  var pos=(document.getElementById('le-pos').value||'').trim();
+  var notes=(document.getElementById('le-notes').value||'').trim();
   if(!name){alert('Pick an employee.');return;}
   if(!startStr||!endStr){alert('Pick a date range.');return;}
   var d1=new Date(startStr+'T00:00:00'),d2=new Date(endStr+'T00:00:00');
@@ -1677,6 +1687,44 @@ function submitLeaveEntry(isEdit){
     }
     d.setDate(d.getDate()+1);
   }
+
+  // Optionally also create a Leave Application submission record so it appears
+  // in Submissions tab with PDF / approve buttons.
+  // Skip for clearing actions (Present) and when checkbox is unticked.
+  if(toSubmissions && status && applied > 0){
+    var leaveTypeLabel = ({
+      'AL':'Annual Leave','SL':'Sick Leave','PH':'Public Holiday',
+      'BL':'Bereavement','LATE':'Late','X':'Absent'
+    })[status] || status;
+    var fmtAU = function(s){
+      try { return new Date(s+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}); }
+      catch(e){ return s; }
+    };
+    var subData = {
+      name: name,
+      employeeNumber: empNo,
+      position: pos,
+      site: 'Yarwun',
+      leaveType: leaveTypeLabel,
+      leaveCode: status,
+      firstDay: fmtAU(startStr),
+      lastDay: fmtAU(endStr),
+      workingDays: String(applied),
+      notes: notes + (notes?' ':'') + '[Manually entered by supervisor]',
+      signature: ''
+    };
+    try {
+      fetch(SCF_WORKER_URL, {
+        method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'save_submission', formType:'leave', data: subData})
+      }).then(function(r){ return r.text(); }).then(function(t){
+        try { var j = JSON.parse(t); if(j && j.ok){ setSS && setSS('ok','Leave saved to Attendance + Submissions'); } } catch(e){}
+        // Trigger a submissions refresh so the new record appears immediately
+        if(typeof loadSubmissions === 'function') loadSubmissions();
+      }).catch(function(){});
+    } catch(e){}
+  }
+
   LE_EDIT_ORIGINAL=null;
   closeLeaveEntry();
   if(typeof rAtt==='function')rAtt();

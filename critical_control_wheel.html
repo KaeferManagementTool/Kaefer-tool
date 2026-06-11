@@ -397,7 +397,7 @@ if(localStorage.getItem('kaefer_setup_done')){
 <!-- T7: Attendance -->
 <div class="tp" id="t7"><div class="w">
   <div class="card" style="margin-bottom:11px">
-    <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Attendance Register</span><div style="display:flex;gap:7px"><button class="hb" style="font-size:11px;padding:3px 9px;background:#1565c0" onclick="openLeaveEntry()">&#43; Leave Entry</button><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openAddEmp()">&#43; Add Employee</button></div></div>
+    <div class="ch ch-r" style="justify-content:space-between"><span>&#128203; Attendance Register</span><div style="display:flex;gap:7px"><button class="hb" style="font-size:11px;padding:3px 9px;background:#2e7d32" onclick="openYTD()">&#128202; Year to Date</button><button class="hb" style="font-size:11px;padding:3px 9px;background:#1565c0" onclick="openLeaveEntry()">&#43; Leave Entry</button><button class="hb" style="font-size:11px;padding:3px 9px" onclick="openAddEmp()">&#43; Add Employee</button></div></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;padding:9px 13px 6px">
       <div class="tf"><label>Month</label><select id="at-mon" onchange="rAtt()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select></div>
       <div class="tf"><label>Year</label><select id="at-yr" onchange="rAtt()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option></select></div>
@@ -1860,6 +1860,287 @@ function editLeaveFromCell(name, dk){
   }
   LE_EDIT_ORIGINAL = { name: name, start: startDk, end: endDk, status: current };
   openLeaveEntry({ name: name, status: current, start: startDk, end: endDk, editMode: true });
+}
+
+// ── Year to Date Report ──────────────────────────────────────
+// Tally per-employee attendance counts from kaefer_att_ov for a calendar year
+// up to today. Includes archived employees (tagged) so leave taken before they
+// left the company still appears in the report.
+function ytdComputeData(year){
+  var ov = glj(ATT_OV, {}) || {};
+  var exc = glj('kaefer_att_exc', {}) || {};
+  var today = new Date();
+  var yEnd = (year === today.getFullYear()) ? today : new Date(year, 11, 31);
+  var yStart = new Date(year, 0, 1);
+  var startKey = year + '-01-01';
+  // Format yEnd as ISO date string (local timezone)
+  function fmtIso(d){
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var dd = String(d.getDate()).padStart(2,'0');
+    return d.getFullYear() + '-' + m + '-' + dd;
+  }
+  var endKey = fmtIso(yEnd);
+
+  var emps = getEmps() || [];
+  var arch = getArch() || [];
+
+  // Build a list { displayName, key, archived }
+  var people = [];
+  emps.forEach(function(e){ people.push({n: e.n, ak: aKey(e.n), archived: false}); });
+  arch.forEach(function(e){ people.push({n: e.n, ak: aKey(e.n), archived: true}); });
+
+  // Catch any names present in ov but not in current emp/arch lists (orphaned entries)
+  var seen = {};
+  people.forEach(function(p){ seen[p.ak] = true; });
+  Object.keys(ov).forEach(function(ak){
+    if(!seen[ak]){
+      people.push({n: ak.replace(/_/g,' '), ak: ak, archived: false, _orphan: true});
+    }
+  });
+
+  var rows = [];
+  var totals = {present:0, AL:0, SL:0, X:0, PH:0, BL:0, LATE:0, leave:0};
+
+  people.forEach(function(p){
+    var cells = ov[p.ak] || {};
+    var row = {name: p.n, archived: p.archived, orphan: !!p._orphan,
+      present:0, AL:0, SL:0, X:0, PH:0, BL:0, LATE:0};
+    Object.keys(cells).forEach(function(dk){
+      if(dk < startKey || dk > endKey) return;
+      // Skip excluded cells (manning exclusion = not counted)
+      if(exc[p.ak] && exc[p.ak][dk]) return;
+      var v = cells[dk];
+      if(v === '' || v == null){
+        row.present++;
+        totals.present++;
+      } else if(row.hasOwnProperty(v)){
+        row[v]++;
+        totals[v]++;
+        totals.leave++;
+      }
+    });
+    row.totalLeave = row.AL + row.SL + row.X + row.PH + row.BL + row.LATE;
+    row.totalDays = row.present + row.totalLeave;
+    rows.push(row);
+  });
+
+  // Sort: active first by name, archived/orphans at the bottom
+  rows.sort(function(a,b){
+    if(a.archived !== b.archived) return a.archived ? 1 : -1;
+    if(a.orphan !== b.orphan) return a.orphan ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return { year: year, startKey: startKey, endKey: endKey, totals: totals, rows: rows };
+}
+
+var YTD_SORT = {col:'name', dir:1};
+
+function openYTD(){
+  closeYTD();
+  var thisYear = new Date().getFullYear();
+  var overlay = document.createElement('div');
+  overlay.id = 'ytd-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  overlay.innerHTML = ''
+    + '<div style="background:#fff;border-radius:8px;max-width:1100px;width:100%;display:flex;flex-direction:column;overflow:hidden;margin:auto">'
+    +   '<div style="background:#2e7d32;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">'
+    +     '<span style="font-weight:700">&#128202; Attendance — Year to Date Report</span>'
+    +     '<button onclick="closeYTD()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>'
+    +   '</div>'
+    +   '<div style="padding:12px 18px 18px;overflow-y:auto;max-height:88vh">'
+    +     '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
+    +       '<label style="font-size:11px;font-weight:700;color:#607d8b;text-transform:uppercase">Year:</label>'
+    +       '<select id="ytd-year" onchange="ytdRender()" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;font-size:13px">' + ytdYearOptions(thisYear) + '</select>'
+    +       '<span id="ytd-range" style="font-size:11px;color:#607d8b;margin-left:auto"></span>'
+    +       '<button class="rb" style="background:#1565c0;font-size:12px;padding:6px 12px" onclick="ytdExportPDF()">&#128424; Save as PDF</button>'
+    +     '</div>'
+    +     '<div id="ytd-tiles" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>'
+    +     '<div id="ytd-table-wrap" style="overflow-x:auto;border:1px solid #e0e0e0;border-radius:5px"></div>'
+    +     '<div style="margin-top:8px;font-size:10px;color:#999">Excludes cells marked &times; (exclude from manning). Archived employees are shown for historical context.</div>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(overlay);
+  ytdRender();
+}
+function closeYTD(){var m=document.getElementById('ytd-modal');if(m)m.remove();}
+
+function ytdYearOptions(currentYear){
+  // Find earliest year in attendance data
+  var ov = glj(ATT_OV, {}) || {};
+  var minY = currentYear;
+  Object.keys(ov).forEach(function(ak){
+    Object.keys(ov[ak]).forEach(function(dk){
+      var y = parseInt(dk.slice(0,4), 10);
+      if(!isNaN(y) && y < minY) minY = y;
+    });
+  });
+  var html = '';
+  for(var y = currentYear; y >= minY; y--){
+    html += '<option value="'+y+'"'+(y===currentYear?' selected':'')+'>'+y+'</option>';
+  }
+  return html;
+}
+
+function ytdRender(){
+  var year = parseInt(document.getElementById('ytd-year').value, 10);
+  var data = ytdComputeData(year);
+  // Tiles
+  var tiles = [
+    {k:'present', label:'Days Worked', color:'#2e7d32', bg:'#e8f5e9'},
+    {k:'AL', label:'Annual Leave', color:'#1565c0', bg:'#e3f2fd'},
+    {k:'SL', label:'Sick Leave', color:'#c62828', bg:'#ffcdd2'},
+    {k:'PH', label:'Public Holiday', color:'#e65100', bg:'#fff9c4'},
+    {k:'BL', label:'Bereavement', color:'#6a1b9a', bg:'#f3e5f5'},
+    {k:'LATE', label:'Late', color:'#bf360c', bg:'#fff3e0'},
+    {k:'X', label:'Absent', color:'#880e4f', bg:'#fce4ec'},
+    {k:'leave', label:'Total Leave', color:'#37474f', bg:'#eceff1'}
+  ];
+  var tilesHtml = tiles.map(function(t){
+    return '<div style="background:'+t.bg+';border:1px solid '+t.color+'33;border-radius:6px;padding:8px 10px;text-align:center">'
+      + '<div style="font-size:22px;font-weight:700;color:'+t.color+';line-height:1">'+(data.totals[t.k]||0)+'</div>'
+      + '<div style="font-size:10px;font-weight:700;color:'+t.color+';text-transform:uppercase;margin-top:2px">'+t.label+'</div>'
+      + '</div>';
+  }).join('');
+  document.getElementById('ytd-tiles').innerHTML = tilesHtml;
+
+  // Range label
+  var endLabel = (data.endKey === data.startKey) ? data.startKey : (data.startKey + ' to ' + data.endKey);
+  document.getElementById('ytd-range').textContent = 'Range: ' + endLabel;
+
+  // Sort rows
+  var rows = data.rows.slice();
+  rows.sort(function(a,b){
+    if(a.archived !== b.archived) return a.archived ? 1 : -1;
+    if(a.orphan !== b.orphan) return a.orphan ? 1 : -1;
+    var col = YTD_SORT.col;
+    var av = a[col], bv = b[col];
+    if(typeof av === 'string') return YTD_SORT.dir * av.localeCompare(bv);
+    return YTD_SORT.dir * ((av||0) - (bv||0));
+  });
+
+  var sortArrow = function(col){ return YTD_SORT.col===col ? (YTD_SORT.dir>0?' &#9650;':' &#9660;') : ''; };
+  var th = function(col, label){
+    return '<th style="cursor:pointer;user-select:none" onclick="ytdSort(\''+col+'\')">'+label+sortArrow(col)+'</th>';
+  };
+  var tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead style="background:#37474f;color:#fff;font-size:11px"><tr>'
+    +   th('name','Employee')
+    +   th('present','Days Worked')
+    +   th('AL','AL')
+    +   th('SL','SL')
+    +   th('PH','PH')
+    +   th('BL','BL')
+    +   th('LATE','Late')
+    +   th('X','Absent')
+    +   th('totalLeave','Total Leave')
+    + '</tr></thead><tbody>';
+  rows.forEach(function(r){
+    var tag = r.archived ? ' <span style="color:#999;font-size:10px;font-weight:400">(archived)</span>' : (r.orphan ? ' <span style="color:#c62828;font-size:10px;font-weight:400">(no longer in list)</span>' : '');
+    tableHtml += '<tr style="border-bottom:1px solid #eee;'+(r.archived?'opacity:0.7':'')+'">'
+      + '<td style="padding:5px 8px;font-weight:600">' + r.name + tag + '</td>'
+      + '<td style="padding:5px 8px;text-align:center">' + r.present + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;color:#1565c0;font-weight:'+(r.AL>0?'700':'400')+'">' + (r.AL||'-') + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;color:#c62828;font-weight:'+(r.SL>0?'700':'400')+'">' + (r.SL||'-') + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;color:#e65100;font-weight:'+(r.PH>0?'700':'400')+'">' + (r.PH||'-') + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;color:#6a1b9a;font-weight:'+(r.BL>0?'700':'400')+'">' + (r.BL||'-') + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;color:#bf360c;font-weight:'+(r.LATE>0?'700':'400')+'">' + (r.LATE||'-') + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;color:#880e4f;font-weight:'+(r.X>0?'700':'400')+'">' + (r.X||'-') + '</td>'
+      + '<td style="padding:5px 8px;text-align:center;font-weight:700;background:#fafafa">' + r.totalLeave + '</td>'
+      + '</tr>';
+  });
+  if(!rows.length){
+    tableHtml += '<tr><td colspan="9" style="padding:14px;text-align:center;color:#999;font-style:italic">No employees found.</td></tr>';
+  }
+  tableHtml += '</tbody></table>';
+  document.getElementById('ytd-table-wrap').innerHTML = tableHtml;
+}
+
+function ytdSort(col){
+  if(YTD_SORT.col === col) YTD_SORT.dir = -YTD_SORT.dir;
+  else { YTD_SORT.col = col; YTD_SORT.dir = (col==='name') ? 1 : -1; }
+  ytdRender();
+}
+
+function ytdExportPDF(){
+  var year = parseInt(document.getElementById('ytd-year').value, 10);
+  var data = ytdComputeData(year);
+  var today = new Date().toLocaleDateString('en-AU', {day:'2-digit', month:'2-digit', year:'numeric'});
+  var rangeEnd = (year === new Date().getFullYear()) ? today : '31/12/'+year;
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Attendance YTD - '+year+'</title>';
+  html += '<style>'
+    + '@page{size:A4 landscape;margin:10mm 8mm 12mm 8mm}'
+    + 'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:0;background:#f0f0f0;font-size:10pt}'
+    + '.wrap{max-width:280mm;margin:0 auto;background:#fff;padding:10mm 10mm;box-shadow:0 0 8px rgba(0,0,0,.1)}'
+    + '.print-bar{background:#2e7d32;color:#fff;padding:10px;text-align:center;font-size:12px}'
+    + '.print-bar button{background:#fff;color:#2e7d32;border:none;padding:6px 14px;font-weight:700;border-radius:4px;cursor:pointer;font-size:12px;margin-left:10px}'
+    + '.kheader{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3mm}'
+    + 'h1.title{font-size:20pt;font-weight:400;margin:0;color:#444}'
+    + '.sub{font-size:10pt;color:#666;margin-top:1mm}'
+    + '.klogo{display:flex;align-items:center;gap:6px}'
+    + '.klogo .ring{width:28px;height:28px;border:3px solid #cc0000;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#cc0000;font-weight:900;font-size:9px}'
+    + '.klogo .kw{font-size:20pt;font-weight:900;color:#cc0000;letter-spacing:1px}'
+    + '.info{font-size:10pt;color:#444;margin:1mm 0 4mm 0;display:flex;gap:18px}'
+    + '.info b{color:#000}'
+    + '.tiles{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-bottom:5mm}'
+    + '.tile{border:1px solid #ccc;border-radius:4px;padding:4px 6px;text-align:center}'
+    + '.tile .v{font-size:14pt;font-weight:700}'
+    + '.tile .l{font-size:8pt;color:#555;text-transform:uppercase}'
+    + 'table.ytd{width:100%;border-collapse:collapse}'
+    + 'table.ytd th,table.ytd td{border:1px solid #999;padding:2mm 2.5mm;font-size:9pt}'
+    + 'table.ytd th{background:#37474f;color:#fff;text-align:left;font-weight:700}'
+    + 'table.ytd td.num{text-align:center}'
+    + 'table.ytd tr.arch td{background:#fafafa;color:#777}'
+    + '.foot{margin-top:5mm;padding-top:2mm;border-top:1px solid #999;font-size:8pt;color:#555;display:flex;justify-content:space-between}'
+    + '@media print{body{background:#fff;margin:0;padding:0}.wrap{max-width:100%;box-shadow:none;padding:0;margin:0}.no-print{display:none}}'
+    + '</style></head><body>';
+  html += '<div class="print-bar no-print">Choose <b>Save as PDF</b> in the print dialog.<button onclick="window.print()">&#128424; Print / Save PDF</button></div>';
+  html += '<div class="wrap">';
+  html += '<div class="kheader"><div><h1 class="title">Attendance — Year to Date '+year+'</h1><div class="sub">KAEFER Integrated Services - Yarwun</div></div>'
+       + '<div class="klogo"><div class="ring">K</div><div class="kw">KAEFER</div></div></div>';
+  html += '<div class="info"><div><b>Generated:</b> '+today+'</div><div><b>Period:</b> 01/01/'+year+' to '+rangeEnd+'</div><div><b>Employees:</b> '+data.rows.length+'</div></div>';
+
+  var tiles = [
+    {k:'present', label:'Days Worked'},
+    {k:'AL', label:'Annual Leave'},
+    {k:'SL', label:'Sick Leave'},
+    {k:'PH', label:'Public Holiday'},
+    {k:'BL', label:'Bereavement'},
+    {k:'LATE', label:'Late'},
+    {k:'X', label:'Absent'},
+    {k:'leave', label:'Total Leave'}
+  ];
+  html += '<div class="tiles">';
+  tiles.forEach(function(t){
+    html += '<div class="tile"><div class="v">'+(data.totals[t.k]||0)+'</div><div class="l">'+t.label+'</div></div>';
+  });
+  html += '</div>';
+
+  html += '<table class="ytd"><thead><tr><th>Employee</th><th class="num">Days Worked</th><th class="num">AL</th><th class="num">SL</th><th class="num">PH</th><th class="num">BL</th><th class="num">Late</th><th class="num">Absent</th><th class="num">Total Leave</th></tr></thead><tbody>';
+  data.rows.forEach(function(r){
+    var tag = r.archived ? ' (archived)' : (r.orphan ? ' (no longer in list)' : '');
+    var cls = r.archived || r.orphan ? ' class="arch"' : '';
+    html += '<tr'+cls+'>'
+      + '<td>'+escHtml(r.name + tag)+'</td>'
+      + '<td class="num">'+r.present+'</td>'
+      + '<td class="num">'+(r.AL||'-')+'</td>'
+      + '<td class="num">'+(r.SL||'-')+'</td>'
+      + '<td class="num">'+(r.PH||'-')+'</td>'
+      + '<td class="num">'+(r.BL||'-')+'</td>'
+      + '<td class="num">'+(r.LATE||'-')+'</td>'
+      + '<td class="num">'+(r.X||'-')+'</td>'
+      + '<td class="num"><b>'+r.totalLeave+'</b></td>'
+      + '</tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div class="foot"><span><b>KAEFER Attendance YTD '+year+'</b></span><span>Generated: '+new Date().toLocaleString('en-AU')+'</span></div>';
+  html += '</div></body></html>';
+
+  var w = window.open('', '_blank');
+  if(!w){ alert('Please allow popups for this site to generate the PDF.'); return; }
+  w.document.write(html);
+  w.document.close();
 }
 function aCS(v,wk){if(wk)return'background:#eee;color:#bbb';if(v==='SL')return'background:#ffcdd2;color:#c62828';if(v==='AL')return'background:#bbdefb;color:#1565c0';if(v==='X')return'background:#fce4ec;color:#880e4f';if(v==='PH')return'background:#fff9c4;color:#e65100';if(v==='BL')return'background:#f3e5f5;color:#6a1b9a';if(v==='LATE')return'background:#fff3e0;color:#bf360c';return'background:#c8e6c9;color:#2e7d32';}
 var ce_n='',ce_dk='';

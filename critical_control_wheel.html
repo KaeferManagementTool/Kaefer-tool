@@ -1118,22 +1118,40 @@ if(localStorage.getItem('kaefer_setup_done')){
 </div></div>
 
 <!-- PV ENTRY MODAL -->
-<div class="ml" id="pv-ml"><div class="mb" style="width:420px"><div class="mhd" style="background:#1a2a4a"><h3>Add / Edit Monthly Data</h3><button class="mc" onclick="closePVEntry()">&#215;</button></div>
+<div class="ml" id="pv-ml"><div class="mb" style="width:640px;max-width:95vw"><div class="mhd" style="background:#1a2a4a"><h3>Add / Edit Monthly Data &mdash; Weekly Entry</h3><button class="mc" onclick="closePVEntry()">&#215;</button></div>
   <div class="mbd">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
       <div class="mf"><label>Month</label><select id="pve-mon" onchange="pvEntryLoad()" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit">
         <option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option>
       </select></div>
       <div class="mf"><label>Year</label><select id="pve-yr" onchange="pvEntryLoad()" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit">
         <option>2025</option><option>2026</option><option>2027</option><option>2028</option>
       </select></div>
-      <div class="mf"><label>Planned Hours</label><input type="number" id="pve-pl" min="0" step="0.5" placeholder="0"></div>
-      <div class="mf"><label>Executed Hours</label><input type="number" id="pve-ex" min="0" step="0.5" placeholder="0"></div>
-      <div class="mf"><label>Actual Hours</label><input type="number" id="pve-ac" min="0" step="0.5" placeholder="0"></div>
-      <div class="mf"><label>Rescheduled Hours</label><input type="number" id="pve-re" min="0" step="0.5" placeholder="0"></div>
-      <div class="mf" style="grid-column:span 2"><label>Unplanned Hours</label><input type="number" id="pve-un" min="0" step="0.5" placeholder="0"></div>
     </div>
-    <div id="pve-info" style="display:none;background:#f0f7ff;border:1px solid #90caf9;border-radius:4px;padding:7px 10px;font-size:11px;color:#1565c0;margin-top:4px"></div>
+    <div style="overflow-x:auto"><table id="pve-tbl" style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#1a2a4a;color:#fff;font-size:10px;text-transform:uppercase">
+        <tr>
+          <th style="padding:6px 8px;text-align:left">Week</th>
+          <th style="padding:6px 8px;text-align:center">Planned</th>
+          <th style="padding:6px 8px;text-align:center">Executed</th>
+          <th style="padding:6px 8px;text-align:center">Actual</th>
+          <th style="padding:6px 8px;text-align:center">Rescheduled</th>
+          <th style="padding:6px 8px;text-align:center">Unplanned</th>
+        </tr>
+      </thead>
+      <tbody id="pve-wkbody"></tbody>
+      <tfoot>
+        <tr style="background:#f5f5f5;font-weight:700;border-top:2px solid #1a2a4a">
+          <td style="padding:6px 8px">TOTAL</td>
+          <td style="padding:6px 8px;text-align:center;color:#1565c0" id="pve-tot-pl">0</td>
+          <td style="padding:6px 8px;text-align:center;color:#2e7d32" id="pve-tot-ex">0</td>
+          <td style="padding:6px 8px;text-align:center;color:#607d8b" id="pve-tot-ac">0</td>
+          <td style="padding:6px 8px;text-align:center;color:#37474f" id="pve-tot-re">0</td>
+          <td style="padding:6px 8px;text-align:center;color:#c62828" id="pve-tot-un">0</td>
+        </tr>
+      </tfoot>
+    </table></div>
+    <div id="pve-info" style="display:none;background:#f0f7ff;border:1px solid #90caf9;border-radius:4px;padding:7px 10px;font-size:11px;color:#1565c0;margin-top:8px"></div>
   </div>
   <div class="mft">
     <button class="ob" id="pve-del" style="margin-right:auto;color:#c62828;border-color:#c62828;display:none" onclick="delPVEntry()">Delete</button>
@@ -2277,9 +2295,146 @@ function drawBarChart(ctx4,labels,datasets){var W=ctx4.canvas.width,H=300;ctx4.c
 function rPV(){var mode=document.getElementById('pv-mode').value,keys=[],pvAll=getPVAll();if(mode==='quarter'){var m1v=document.getElementById('pv-m1').value,m2v=document.getElementById('pv-m2').value,m3v=document.getElementById('pv-m3').value;keys=[m1v,m2v,m3v].filter(function(k){return pvAll[k];});}else{var fmv=document.getElementById('pv-fm').value,tmv=document.getElementById('pv-tm').value;keys=PV_MONTHS.filter(function(k){return k>=fmv&&k<=tmv&&pvAll[k];});}if(!keys.length){document.getElementById('pv-stats').innerHTML='';return;}var totP=0,totE=0,totA=0,totU=0;keys.forEach(function(k){var d=pvAll[k];totP+=d.planned;totE+=d.executed;totA+=d.actual;totU+=d.unplanned;});var pct=totA>0?Math.round(totU/totA*100):0;document.getElementById('pv-stats').innerHTML='<div class="sc" style="border-top:4px solid #1565c0"><div class="sl2">Planned Hours</div><div class="sv" style="color:#1565c0">'+totP.toLocaleString()+'</div></div><div class="sc" style="border-top:4px solid #2e7d32"><div class="sl2">Executed Planned</div><div class="sv" style="color:#2e7d32">'+totE.toLocaleString()+'</div></div><div class="sc r2"><div class="sl2">Unplanned Hours</div><div class="sv" style="color:#c62828">'+totU.toLocaleString()+'</div></div><div class="sc r3"><div class="sl2">% Unplanned</div><div class="sv" style="color:'+(pct>25?'#c62828':pct>15?'#e65100':'#2e7d32')+'">'+pct+'%</div></div>';var labels=keys.map(function(k){var p=k.split('-'),mn=parseInt(p[1])-1;return MNS3[mn]+" '"+p[0].slice(2);});var dP=keys.map(function(k){return pvAll[k].planned;}),dE=keys.map(function(k){return pvAll[k].executed;}),dA=keys.map(function(k){return pvAll[k].actual;}),dU=keys.map(function(k){return pvAll[k].unplanned;});var cv2=document.getElementById('pv-chart');if(!cv2||!cv2.getContext)return;var cx2=cv2.getContext('2d');cv2.width=cv2.offsetWidth||900;drawBarChart(cx2,labels,[{d:dP,c:'#1565c0',n:'Planned'},{d:dE,c:'#2e7d32',n:'Executed'},{d:dA,c:'#607d8b',n:'Actual'},{d:dU,c:'#c62828',n:'Unplanned'}]);var tb=document.getElementById('pv-tbody');tb.innerHTML='';keys.forEach(function(k){var d=pvAll[k],p=k.split('-'),mn=parseInt(p[1])-1;var pct2=d.actual>0?Math.round(d.unplanned/d.actual*100):0;var col=pct2>25?'#c62828':pct2>15?'#e65100':'#2e7d32';var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:700">'+MNS[mn]+' '+p[0]+'</td><td>'+d.planned.toLocaleString()+'</td><td>'+d.executed.toLocaleString()+'</td><td>'+d.actual.toLocaleString()+'</td><td>'+d.rescheduled.toLocaleString()+'</td><td style="color:#c62828;font-weight:700">'+d.unplanned.toLocaleString()+'</td><td><span class="badge" style="background:'+(pct2>25?'#ffebee':pct2>15?'#fff3e0':'#e8f5e9')+';color:'+col+'">'+pct2+'%</span></td>';tb.appendChild(tr);});var tr2=document.createElement('tr');tr2.style.cssText='font-weight:700;background:#f5f5f5';tr2.innerHTML='<td>TOTAL</td><td>'+totP.toLocaleString()+'</td><td>'+totE.toLocaleString()+'</td><td>'+totA.toLocaleString()+'</td><td>–</td><td style="color:#c62828">'+totU.toLocaleString()+'</td><td>'+pct+'%</td>';tb.appendChild(tr2);}
 function openPVEntry(){var nm=new Date();document.getElementById('pve-mon').value=nm.getMonth();document.getElementById('pve-yr').value=nm.getFullYear();pvEntryLoad();document.getElementById('pv-ml').classList.add('on');}
 function closePVEntry(){document.getElementById('pv-ml').classList.remove('on');}
-function pvEntryLoad(){var mon=document.getElementById('pve-mon').value,yr=document.getElementById('pve-yr').value;var key=yr+'-'+String(parseInt(mon)+1).padStart(2,'0');var all=getPVAll(),info=document.getElementById('pve-info'),del=document.getElementById('pve-del');if(all[key]){var d=all[key];document.getElementById('pve-pl').value=d.planned||'';document.getElementById('pve-ex').value=d.executed||'';document.getElementById('pve-ac').value=d.actual||'';document.getElementById('pve-re').value=d.rescheduled||'';document.getElementById('pve-un').value=d.unplanned||'';var src=glj(PV_OV_KEY,{})[key]?'your entry':'imported data';info.style.display='';info.textContent='Existing data loaded ('+src+').';del.style.display=glj(PV_OV_KEY,{})[key]?'':'none';}else{['pve-pl','pve-ex','pve-ac','pve-re','pve-un'].forEach(function(id){document.getElementById(id).value='';});info.style.display='none';del.style.display='none';}}
-function savePVEntry(){var mon=document.getElementById('pve-mon').value,yr=document.getElementById('pve-yr').value;var key=yr+'-'+String(parseInt(mon)+1).padStart(2,'0');var ov=glj(PV_OV_KEY,{});ov[key]={planned:parseFloat(document.getElementById('pve-pl').value)||0,executed:parseFloat(document.getElementById('pve-ex').value)||0,actual:parseFloat(document.getElementById('pve-ac').value)||0,rescheduled:parseFloat(document.getElementById('pve-re').value)||0,unplanned:parseFloat(document.getElementById('pve-un').value)||0};sl(PV_OV_KEY,ov);PV_MONTHS=Object.keys(getPVAll()).sort();populatePVMonths();closePVEntry();rPV();if(typeof syncPV==='function'&&getURL())try{syncPV();}catch(e){}}
-function delPVEntry(){var mon=document.getElementById('pve-mon').value,yr=document.getElementById('pve-yr').value;var key=yr+'-'+String(parseInt(mon)+1).padStart(2,'0');if(!confirm('Delete entry for '+key+'?'))return;var ov=glj(PV_OV_KEY,{});delete ov[key];sl(PV_OV_KEY,ov);PV_MONTHS=Object.keys(getPVAll()).sort();populatePVMonths();closePVEntry();rPV();if(typeof syncPV==='function'&&getURL())try{syncPV();}catch(e){}}
+function pvBuildWeekRows(){
+  // Render 5 week rows. Each cell has an id like pve-w1-pl, pve-w2-ex etc.
+  var fields = [
+    {k:'pl', color:'#1565c0'},
+    {k:'ex', color:'#2e7d32'},
+    {k:'ac', color:'#607d8b'},
+    {k:'re', color:'#37474f'},
+    {k:'un', color:'#c62828'}
+  ];
+  var body = document.getElementById('pve-wkbody');
+  if(!body) return;
+  var html = '';
+  for(var w=1; w<=5; w++){
+    html += '<tr style="border-bottom:1px solid #eee">'
+      + '<td style="padding:4px 8px;font-weight:600;color:#37474f">Week '+w+'</td>';
+    fields.forEach(function(f){
+      html += '<td style="padding:4px 6px;text-align:center"><input type="number" min="0" step="0.5" placeholder="0" id="pve-w'+w+'-'+f.k+'" oninput="pvRecalcTotals()" style="width:80px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:inherit;text-align:center"></td>';
+    });
+    html += '</tr>';
+  }
+  body.innerHTML = html;
+}
+
+function pvRecalcTotals(){
+  var fields = ['pl','ex','ac','re','un'];
+  fields.forEach(function(f){
+    var total = 0;
+    for(var w=1; w<=5; w++){
+      var el = document.getElementById('pve-w'+w+'-'+f);
+      if(el) total += parseFloat(el.value) || 0;
+    }
+    var totEl = document.getElementById('pve-tot-'+f);
+    if(totEl) totEl.textContent = (total % 1 === 0) ? total.toLocaleString() : total.toFixed(1);
+  });
+}
+
+function pvEntryLoad(){
+  pvBuildWeekRows();
+  var mon = document.getElementById('pve-mon').value;
+  var yr  = document.getElementById('pve-yr').value;
+  var key = yr + '-' + String(parseInt(mon)+1).padStart(2,'0');
+  var ov  = glj(PV_OV_KEY, {});
+  var seeded = (typeof PV_DATA !== 'undefined') ? PV_DATA[key] : null;
+  var entry  = ov[key] || seeded || null;
+  var info   = document.getElementById('pve-info');
+  var del    = document.getElementById('pve-del');
+
+  if(entry){
+    // Existing entry — populate the weeks
+    if(entry.weeks && Array.isArray(entry.weeks) && entry.weeks.length){
+      // Weekly breakdown is stored — use it directly
+      entry.weeks.forEach(function(wk, i){
+        if(i >= 5) return;
+        var w = i + 1;
+        setIf('pve-w'+w+'-pl', wk.planned);
+        setIf('pve-w'+w+'-ex', wk.executed);
+        setIf('pve-w'+w+'-ac', wk.actual);
+        setIf('pve-w'+w+'-re', wk.rescheduled);
+        setIf('pve-w'+w+'-un', wk.unplanned);
+      });
+      info.style.display = '';
+      info.textContent = 'Existing weekly data loaded.';
+    } else {
+      // Legacy whole-month entry — load totals into Week 1, leave Weeks 2-5 empty
+      setIf('pve-w1-pl', entry.planned);
+      setIf('pve-w1-ex', entry.executed);
+      setIf('pve-w1-ac', entry.actual);
+      setIf('pve-w1-re', entry.rescheduled);
+      setIf('pve-w1-un', entry.unplanned);
+      info.style.display = '';
+      info.textContent = 'Existing whole-month total loaded into Week 1. Edit if you want to split it across weeks.';
+    }
+    del.style.display = ov[key] ? '' : 'none';
+  } else {
+    info.style.display = 'none';
+    del.style.display = 'none';
+  }
+  pvRecalcTotals();
+
+  function setIf(id, v){
+    var el = document.getElementById(id);
+    if(el && v) el.value = v;
+  }
+}
+
+function pvCollectWeeks(){
+  var weeks = [];
+  for(var w=1; w<=5; w++){
+    var wk = {
+      planned: parseFloat((document.getElementById('pve-w'+w+'-pl')||{}).value) || 0,
+      executed: parseFloat((document.getElementById('pve-w'+w+'-ex')||{}).value) || 0,
+      actual: parseFloat((document.getElementById('pve-w'+w+'-ac')||{}).value) || 0,
+      rescheduled: parseFloat((document.getElementById('pve-w'+w+'-re')||{}).value) || 0,
+      unplanned: parseFloat((document.getElementById('pve-w'+w+'-un')||{}).value) || 0
+    };
+    weeks.push(wk);
+  }
+  return weeks;
+}
+
+function savePVEntry(){
+  var mon = document.getElementById('pve-mon').value;
+  var yr  = document.getElementById('pve-yr').value;
+  var key = yr + '-' + String(parseInt(mon)+1).padStart(2,'0');
+  var weeks = pvCollectWeeks();
+  // Sum the weeks for the chart/table totals
+  var totals = weeks.reduce(function(acc, w){
+    acc.planned += w.planned;
+    acc.executed += w.executed;
+    acc.actual += w.actual;
+    acc.rescheduled += w.rescheduled;
+    acc.unplanned += w.unplanned;
+    return acc;
+  }, {planned:0, executed:0, actual:0, rescheduled:0, unplanned:0});
+  // Also keep the per-week breakdown so reopening shows the same data
+  totals.weeks = weeks;
+  var ov = glj(PV_OV_KEY, {});
+  ov[key] = totals;
+  sl(PV_OV_KEY, ov);
+  PV_MONTHS = Object.keys(getPVAll()).sort();
+  populatePVMonths();
+  closePVEntry();
+  rPV();
+  if(typeof syncPV === 'function' && getURL()) try{ syncPV(); } catch(e){}
+}
+
+function delPVEntry(){
+  var mon = document.getElementById('pve-mon').value;
+  var yr  = document.getElementById('pve-yr').value;
+  var key = yr + '-' + String(parseInt(mon)+1).padStart(2,'0');
+  if(!confirm('Delete entry for '+key+'?')) return;
+  var ov = glj(PV_OV_KEY, {});
+  delete ov[key];
+  sl(PV_OV_KEY, ov);
+  PV_MONTHS = Object.keys(getPVAll()).sort();
+  populatePVMonths();
+  closePVEntry();
+  rPV();
+  if(typeof syncPV === 'function' && getURL()) try{ syncPV(); } catch(e){}
+}
 function drawLineChart(ctx5,labels,baseline,actual,title){var W=ctx5.canvas.width,H=270;ctx5.canvas.height=H;var pad={t:35,r:15,b:45,l:50};var cW=W-pad.l-pad.r,cH=H-pad.t-pad.b;ctx5.clearRect(0,0,W,H);var maxV=(Math.max.apply(null,baseline.concat(actual))||20)*1.3;var n=labels.length;ctx5.fillStyle='#333';ctx5.font='bold 11px Arial';ctx5.textAlign='center';ctx5.fillText(title,W/2,18);for(var gi=0;gi<=4;gi++){var gy2=pad.t+cH*(1-gi/4);ctx5.strokeStyle='#e0e0e0';ctx5.lineWidth=1;ctx5.beginPath();ctx5.moveTo(pad.l,gy2);ctx5.lineTo(pad.l+cW,gy2);ctx5.stroke();ctx5.fillStyle='#888';ctx5.font='9px Arial';ctx5.textAlign='right';ctx5.fillText(Math.round(maxV*gi/4),pad.l-4,gy2+3);}function xP(i){return pad.l+cW*(n>1?i/(n-1):0.5);}function yP(v){return pad.t+cH*(1-v/maxV);}ctx5.strokeStyle='#1565c0';ctx5.lineWidth=2;ctx5.setLineDash([5,4]);ctx5.beginPath();baseline.forEach(function(v,i){i===0?ctx5.moveTo(xP(i),yP(v)):ctx5.lineTo(xP(i),yP(v));});ctx5.stroke();ctx5.setLineDash([]);ctx5.strokeStyle='#2e7d32';ctx5.lineWidth=2.5;ctx5.beginPath();actual.forEach(function(v,i){i===0?ctx5.moveTo(xP(i),yP(v)):ctx5.lineTo(xP(i),yP(v));});ctx5.stroke();actual.forEach(function(v,i){var col=v<baseline[i]?'#c62828':'#2e7d32';ctx5.fillStyle=col;ctx5.beginPath();ctx5.arc(xP(i),yP(v),4,0,2*Math.PI);ctx5.fill();ctx5.fillStyle='#333';ctx5.font='bold 9px Arial';ctx5.textAlign='center';ctx5.fillText(v,xP(i),yP(v)-8);});labels.forEach(function(l,i){ctx5.fillStyle='#555';ctx5.font='9px Arial';ctx5.textAlign='center';ctx5.fillText(l,xP(i),H-pad.b+12);});ctx5.setLineDash([5,4]);ctx5.strokeStyle='#1565c0';ctx5.lineWidth=2;ctx5.beginPath();ctx5.moveTo(pad.l,H-9);ctx5.lineTo(pad.l+20,H-9);ctx5.stroke();ctx5.setLineDash([]);ctx5.fillStyle='#333';ctx5.font='9px Arial';ctx5.textAlign='left';ctx5.fillText('Baseline',pad.l+23,H-5);ctx5.strokeStyle='#2e7d32';ctx5.lineWidth=2;ctx5.beginPath();ctx5.moveTo(pad.l+90,H-9);ctx5.lineTo(pad.l+110,H-9);ctx5.stroke();ctx5.fillText('Avg Attendance',pad.l+113,H-5);}
 function rDM(){var mon=+document.getElementById('dm-mon').value,yr=+document.getElementById('dm-yr').value;var base=+document.getElementById('dm-base').value||15;var dim=new Date(yr,mon+1,0).getDate();var DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];var rows=[],totAtt=0,totAL=0,totSL=0,totX=0,wdays=0,wNums=[],wAtt=[],wBase=[],curWk=null,wA=0,wD=0;for(var d=1;d<=dim;d++){var dt=new Date(yr,mon,d),wk=dt.getDay();var dk3=yr+'-'+String(mon+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');if(wk===0||wk===6){rows.push({d:d,day:DN[wk],wknd:true});continue;}wdays++;var emps2=getEmps().filter(function(e){return e.g==='YARD STAFF'||e.g==='SCAFFOLDERS';});var att=0,al=0,sl=0,x=0,ph=0;emps2.forEach(function(e){if(isExc(e.n,dk3))return;var v=getStatus(e.n,dk3);if(v==='AL')al++;else if(v==='SL')sl++;else if(v==='X')x++;else if(v==='PH')ph++;else att++;});var absent=al+sl+x,total=emps2.length,absPct=total>0?Math.round(absent/total*100):0;totAtt+=att;totAL+=al;totSL+=sl;totX+=x;rows.push({d:d,day:DN[wk],wknd:false,base:base,att:att,al:al,sl:sl,x:x,ph:ph,pct:absPct});var wNum=Math.ceil(d/7);if(wNum!==curWk){if(curWk!==null){wNums.push('Wk'+curWk);wBase.push(base);wAtt.push(wD>0?Math.round(wA/wD):0);}curWk=wNum;wA=0;wD=0;}wA+=att;wD++;}if(curWk!==null){wNums.push('Wk'+curWk);wBase.push(base);wAtt.push(wD>0?Math.round(wA/wD):0);}var totAbsent=totAL+totSL+totX,totTotal=wdays*(getEmps().filter(function(e){return e.g==='YARD STAFF'||e.g==='SCAFFOLDERS';}).length);var avgPct=totTotal>0?Math.round(totAbsent/totTotal*100):0;document.getElementById('dm-stats').innerHTML='<div class="sc" style="border-top:4px solid #1a2a4a"><div class="sl2">Baseload</div><div class="sv">'+base+'</div></div><div class="sc" style="border-top:4px solid #2e7d32"><div class="sl2">Attendance Days</div><div class="sv" style="color:#2e7d32">'+totAtt+'</div></div><div class="sc r2"><div class="sl2">Absent Days</div><div class="sv" style="color:#c62828">'+totAbsent+'</div></div><div class="sc r3"><div class="sl2">Absenteeism %</div><div class="sv" style="color:'+(avgPct>20?'#c62828':avgPct>10?'#e65100':'#2e7d32')+'">'+avgPct+'%</div></div>';var cv3=document.getElementById('dm-chart');if(!cv3||!cv3.getContext)return;var cx3=cv3.getContext('2d');cv3.width=cv3.offsetWidth||900;drawLineChart(cx3,wNums,wBase,wAtt,MNS[mon]+' '+yr+' — Attendance vs Baseline');var tb2=document.getElementById('dm-tbody');tb2.innerHTML='';rows.forEach(function(r){var tr=document.createElement('tr');if(r.wknd){tr.style.cssText='background:#f5f5f5;color:#bbb';tr.innerHTML='<td style="font-size:11px">'+r.d+'/'+String(mon+1).padStart(2,'0')+'/'+yr+'</td><td>'+r.day+'</td><td colspan="7" style="text-align:center;font-style:italic;font-size:11px">Weekend</td>';}else{var col=r.pct>20?'#c62828':r.pct>10?'#e65100':'#2e7d32';tr.innerHTML='<td style="font-size:11px">'+r.d+'/'+String(mon+1).padStart(2,'0')+'/'+yr+'</td><td style="font-weight:600">'+r.day+'</td><td style="text-align:center">'+r.base+'</td><td style="text-align:center;font-weight:700;color:#2e7d32">'+r.att+'</td><td style="text-align:center;color:#1565c0">'+r.al+'</td><td style="text-align:center;color:#c62828">'+r.sl+'</td><td style="text-align:center;color:#880e4f">'+r.x+'</td><td style="text-align:center;color:#e65100">'+r.ph+'</td><td style="text-align:center"><span class="badge" style="background:'+(r.pct>20?'#ffebee':r.pct>10?'#fff3e0':'#e8f5e9')+';color:'+col+'">'+r.pct+'%</span></td>';}tb2.appendChild(tr);});}
 var editCfg={};

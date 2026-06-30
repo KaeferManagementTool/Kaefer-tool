@@ -2268,9 +2268,11 @@ function populatePVMonths(){
   months = months.slice().sort();
   PV_MONTHS = months.slice();
   var optHtml = months.map(function(k){
-    var p = k.split('-'), mn = parseInt(p[1],10)-1;
-    return '<option value="'+k+'">'+MNS3[mn].toUpperCase()+' '+p[0]+'</option>';
-  }).join('');
+    var p = String(k||'').split('-');
+    var mn = parseInt(p[1], 10) - 1;
+    if(!p[0] || isNaN(mn) || mn < 0 || mn > 11 || !MNS3[mn]) return '';
+    return '<option value="'+k+'">'+MNS3[mn]+' '+p[0]+'</option>';
+  }).filter(function(s){return !!s;}).join('');
   ['pv-m1','pv-m2','pv-m3','pv-fm','pv-tm'].forEach(function(id){
     var el = document.getElementById(id);
     if(!el) return;

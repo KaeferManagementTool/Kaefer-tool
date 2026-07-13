@@ -5693,16 +5693,24 @@ function applySubmissionToPPE(id){
   var s = findSubmission(id); if(!s){alert('Not found');return;}
   if(s.type!=='ppe'){alert('Not a PPE submission.');return;}
   var reg = glj('kaefer_ppe3', []);
+  // Field name is 'item' (singular) to match the rest of the PPE register.
+  // Also preserve structured fields so the register's PDF button can rebuild
+  // the KAEFER Clothing Request form the same as it does for manual entries.
   reg.unshift({
     id: Date.now(),
-    date: new Date().toISOString().split('T')[0],
-    name: s.name||'',
-    items: s.items||'',
+    date: s.date || new Date().toISOString().split('T')[0],
+    name: s.name || '',
+    item: s.items || '',
     status: 'Pending',
-    notes: s.notes||''
+    notes: s.notes || '',
+    _empNo: s.employeeNumber || '',
+    _pos: s.position || '',
+    _notes: s.notes || '',
+    _fromSubmission: id
   });
   sl('kaefer_ppe3', reg);
-  if(typeof rPPEReg==='function')rPPEReg();
+  if(typeof rPPEReg==='function') rPPEReg();
+  if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('ppe');
   alert('Added to PPE Register.');
   markStatus(id,'Added to PPE Register');
 }
@@ -5711,18 +5719,20 @@ function applySubmissionToPurch(id){
   var s = findSubmission(id); if(!s){alert('Not found');return;}
   if(s.type!=='purch'){alert('Not a purchasing submission.');return;}
   var reg = glj('kaefer_purch3', []);
+  // Field names match the rest of the Purchasing register (desc, po, cost).
   reg.unshift({
     id: Date.now(),
     date: s.date || new Date().toISOString().split('T')[0],
-    supplier: s.supplier||'',
-    description: s.description||'',
-    cost: s.cost||'',
-    po: s.poNumber||'',
+    supplier: s.supplier || '',
+    desc: s.description || '',
+    cost: s.cost || 0,
+    po: s.poNumber || '',
     status: 'Pending',
-    notes: s.notes||''
+    _fromSubmission: id
   });
   sl('kaefer_purch3', reg);
-  if(typeof rPurchReg==='function')rPurchReg();
+  if(typeof rPurchReg==='function') rPurchReg();
+  if(typeof autoSyncOne==='function' && getURL()) autoSyncOne('purch');
   alert('Added to Purchasing Register.');
   markStatus(id,'Added to Purchasing Register');
 }

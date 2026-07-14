@@ -1646,7 +1646,10 @@ function toggleExc(enc,dk){
   else exc[ak][dk]=1;
   sl(ATT_EXC,exc);
   rAtt();rDM();
-  if(getURL())flushSyncAtt();
+  // Use scheduled (debounced) sync — not flush — so rapid clicks across
+  // multiple cells get pushed together, avoiding the race where an early
+  // in-flight sync pulls server state and overwrites later clicks.
+  if(getURL())scheduleSyncAtt();
 }
 function aKey(n){return n.toLowerCase().replace(/[^a-z0-9]/g,'_');}
 function getBaseExc(n){var b=ATT_BASE.filter(function(e){return e.n===n;});return b.length?b[0].e:{};}
@@ -4272,18 +4275,40 @@ function syncAtt(){
     clearTombs('emp',empDeletes);
     if(archRestore.length)sl('kaefer_arch_restore',[]);
 
-    // Merge exclude flags from server (server is authoritative after merge)
+    // Merge exclude flags from server. Do NOT wholesale overwrite local —
+    // that would wipe out any user clicks that happened during the sync
+    // round-trip (which takes 5-10s). Union approach: trust local for what's
+    // in local, add anything from server that local doesn't have.
     var excServer=j.exc||{};
+    var currentLocalExc=glj('kaefer_att_exc',{})||{};
     var cleanExc={};
+    // Start from current local (preserves clicks during round-trip)
+    for(var lnm in currentLocalExc){
+      for(var ld in currentLocalExc[lnm]){
+        if(!currentLocalExc[lnm][ld])continue;
+        if(!cleanExc[lnm])cleanExc[lnm]={};
+        cleanExc[lnm][normDateKey(ld)]=1;
+      }
+    }
+    // Overlay server state — adds anything Boz did that we don't have yet
     for(var xnm in excServer){
       for(var xd in excServer[xnm]){
-        if(excServer[xnm][xd]){if(!cleanExc[xnm])cleanExc[xnm]={};cleanExc[xnm][normDateKey(xd)]=1;}
+        if(!excServer[xnm][xd])continue;
+        if(!cleanExc[xnm])cleanExc[xnm]={};
+        cleanExc[xnm][normDateKey(xd)]=1;
       }
     }
     sl('kaefer_att_exc',cleanExc);
     var newExcSnap={};
     for(var xnm2 in cleanExc){for(var xd2 in cleanExc[xnm2]){newExcSnap[xnm2+'::'+xd2]=1;}}
     setSnap('exc',newExcSnap);
+    // If the merged local exc differs from the pre-response snapshot (i.e. user
+    // clicked during the round-trip), schedule another sync to push the diff.
+    var needsAnotherSync=false;
+    var serverExcFlat={};
+    for(var s_nm in excServer){for(var s_d in excServer[s_nm]){if(excServer[s_nm][s_d])serverExcFlat[s_nm+'::'+normDateKey(s_d)]=1;}}
+    for(var lkey in newExcSnap){if(!serverExcFlat[lkey]){needsAnotherSync=true;break;}}
+    if(needsAnotherSync && getURL())scheduleSyncAtt();
 
     // For every pending clear we sent: if the server now has no value
     // for that cell, the clear is acknowledged.

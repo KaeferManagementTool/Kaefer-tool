@@ -2549,25 +2549,22 @@ function parseHRPaste(){
   var skippedRows = 0;
 
   lines.forEach(function(line){
-    // Detect the BREAK IN WORK divider — anywhere in the row, case-insensitive
-    if(/break\s*in\s*work/i.test(line)){
-      inBreakInWork = true;
-      return;
-    }
-    // Skip section headers like "WEEK 29 2026" — a row with just that text
-    if(/^\s*week\s+\d+\s+\d{4}\s*$/i.test(line)){
-      return;
-    }
     var cols = line.split('\t');
-    // Ignore rows that don't have enough columns to be data (need at least Hours Plan column)
-    if(cols.length < HR_COL.HOURS_PLAN + 1){
+    // A real line item always carries a Work Order number. Section headers, the
+    // BREAK IN WORK divider, and daily subtotal rows never do - use that to tell
+    // them apart from an ordinary row whose Comments happen to mention "break in
+    // work" (e.g. "Rescheduled Stopped for break in work"). Checked before the
+    // column-count guard below so a short header row can't slip past undetected.
+    var workOrder = String(cols[HR_COL.WORK_ORDER] || '').trim();
+    if(!workOrder){
+      if(/break\s*in\s*work/i.test(line)){
+        inBreakInWork = true;
+      }
       skippedRows++;
       return;
     }
-    // Ignore daily subtotal rows and any other non-item rows (e.g. "WEEK X" headers) -
-    // real line items always carry a Work Order number; subtotal/header rows never do.
-    var workOrder = String(cols[HR_COL.WORK_ORDER] || '').trim();
-    if(!workOrder){
+    // Ignore rows that don't have enough columns to be data (need at least Hours Plan column)
+    if(cols.length < HR_COL.HOURS_PLAN + 1){
       skippedRows++;
       return;
     }

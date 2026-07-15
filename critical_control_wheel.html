@@ -2483,7 +2483,7 @@ function delPVEntry(){
 //  10: Erect           |
 //  11: Dismantle       | <- sum = EXECUTED
 //  12: Mod             |
-var HR_COL = { HOURS_PLAN:7, COMMENTS:8, ERECT:10, DISMANTLE:11, MOD:12 };
+var HR_COL = { WORK_ORDER:2, HOURS_PLAN:7, COMMENTS:8, ERECT:10, DISMANTLE:11, MOD:12 };
 
 function openHRPaste(){
   closeHRPaste();
@@ -2529,7 +2529,11 @@ function closeHRPaste(){var m=document.getElementById('hr-paste-modal');if(m)m.r
 
 function _hrNum(v){
   if(v == null) return 0;
-  var s = String(v).trim().replace(/[, ]+/g,'');
+  var s = String(v).trim().replace(/\s+/g,'');
+  if(!s) return 0;
+  // A comma followed by 1-2 digits at the end is a decimal point (e.g. "7,5" -> "7.5").
+  // A comma followed by 3 digits (or embedded, e.g. "1,234") is a thousands separator - strip it.
+  s = s.replace(/,(\d{1,2})$/, '.$1').replace(/,/g,'');
   var n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
@@ -2560,6 +2564,13 @@ function parseHRPaste(){
       skippedRows++;
       return;
     }
+    // Ignore daily subtotal rows and any other non-item rows (e.g. "WEEK X" headers) -
+    // real line items always carry a Work Order number; subtotal/header rows never do.
+    var workOrder = String(cols[HR_COL.WORK_ORDER] || '').trim();
+    if(!workOrder){
+      skippedRows++;
+      return;
+    }
     var hoursPlan = _hrNum(cols[HR_COL.HOURS_PLAN]);
     var erect = _hrNum(cols[HR_COL.ERECT]);
     var dismantle = _hrNum(cols[HR_COL.DISMANTLE]);
@@ -2574,8 +2585,9 @@ function parseHRPaste(){
     }
 
     if(inBreakInWork){
-      // Break-in-work: unplanned = hours plan, actual gets the worked hours
-      unplanned += hoursPlan;
+      // Break-in-work rows have no Hours Plan figure (that's the point - they weren't
+      // planned) - the hours actually worked ARE the unplanned hours.
+      unplanned += worked;
       actual += worked;
       breakRowCount++;
     } else {

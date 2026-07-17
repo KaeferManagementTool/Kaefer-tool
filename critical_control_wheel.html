@@ -1011,6 +1011,7 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="mbd">
     <div class="mf"><label>Full Name</label><input type="text" id="ae-name" placeholder="e.g. John Smith"></div>
     <div class="mf"><label>Group</label><select id="ae-grp"><option value="OFFICE STAFF">Office Staff</option><option value="YARD STAFF">Yard Staff</option><option value="SCAFFOLDERS" selected>Scaffolders</option></select></div>
+    <div class="mf"><label>Start Date</label><input type="date" id="ae-start"></div>
   </div>
   <div class="mft"><button class="ob" onclick="closeAddEmp()">Cancel</button><button class="rb" onclick="saveAddEmp()">&#10003; Add</button></div>
 </div></div>
@@ -1639,7 +1640,13 @@ function getArch(){return glj(ATT_ARCH,[]);}
 // PLUS anyone archived (removed) during or after that month - so removing someone
 // today only affects that month going forward, not the history before it.
 function getEmpsForMonth(yr,mon){
-  var active=getEmps();
+  var active=getEmps().filter(function(e){
+    if(!e.start)return true; // no start date on file - treat as always employed
+    var d=new Date(e.start);
+    if(isNaN(d.getTime()))return true;
+    var hy=d.getFullYear(),hm=d.getMonth();
+    return (hy<yr)||(hy===yr&&hm<=mon);
+  });
   var arch=getArch();
   var activeNames={};
   active.forEach(function(e){activeNames[e.n]=true;});
@@ -2190,9 +2197,9 @@ function editLeaveFromCellFromCE(){
   editLeaveFromCell(ce_n, ce_dk);
 }
 function closeCE(){document.getElementById('ce-ml').classList.remove('on');}
-function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-ml').classList.add('on');}
+function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-start').value=new Date().toISOString().slice(0,10);document.getElementById('ae-ml').classList.add('on');}
 function closeAddEmp(){document.getElementById('ae-ml').classList.remove('on');}
-function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value;if(!name){alert('Enter a name.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp});sl(ATT_EMP,emps);closeAddEmp();rAtt();if(getURL())scheduleSyncAtt();}
+function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value,start=document.getElementById('ae-start').value;if(!name){alert('Enter a name.');return;}if(!start){alert('Enter a start date.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp,start:start});sl(ATT_EMP,emps);closeAddEmp();rAtt();if(getURL())scheduleSyncAtt();}
 function editEmp(oldName){
   var newName = prompt('Edit employee name:', oldName);
   if(newName===null) return; // cancelled
@@ -2222,9 +2229,28 @@ function editEmp(oldName){
   rAtt();
 }
 function editEmpByEl(btn){editEmp(decodeURIComponent(btn.getAttribute('data-name')));}
-function removeEmp(n){if(!confirm('Move '+n+' to No Longer Employed?'))return;var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'})});sl(ATT_ARCH,arch);}addTomb('arch',n);rAtt();rFormer();if(getURL())flushSyncAtt();}
+function removeEmp(n){
+  var today=new Date().toISOString().slice(0,10);
+  var val=prompt('Move '+n+' to No Longer Employed.\n\nDate they actually left (YYYY-MM-DD) - they\'ll still show correctly in every month up to and including this one:',today);
+  if(val===null)return;
+  var nd=new Date(val+'T00:00:00');
+  if(isNaN(nd.getTime())){alert('Could not understand that date - '+n+' was not removed.');return;}
+  var dateStr=nd.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
+  var emps=getEmps();var emp=emps.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};sl(ATT_EMP,emps.filter(function(e){return e.n!==n;}));var arch=getArch();if(!arch.some(function(e){return e.n===n;})){arch.push({n:emp.n,g:emp.g,date:dateStr});sl(ATT_ARCH,arch);}addTomb('arch',n);rAtt();rFormer();if(getURL())flushSyncAtt();
+}
 function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}clearTombs('arch',[n]);var pr=glj('kaefer_arch_restore',[]);if(pr.indexOf(n)<0){pr.push(n);sl('kaefer_arch_restore',pr);}rAtt();rFormer();if(getURL())flushSyncAtt();}
-function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+'</td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
+function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+' <button class="ob" style="font-size:10px;padding:1px 5px" onclick="editArchDateByEl(this)" data-name="'+encodeURIComponent(en.n)+'" title="Correct the date they actually left">&#9998;</button></td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
+function editArchDate(n){
+  var arch=getArch();var emp=arch.filter(function(e){return e.n===n;})[0];if(!emp)return;
+  var d=new Date(emp.date);var defaultVal=isNaN(d.getTime())?'':d.toISOString().slice(0,10);
+  var val=prompt('Correct the date '+n+' actually left (YYYY-MM-DD):',defaultVal);
+  if(val===null)return;
+  var nd=new Date(val+'T00:00:00');
+  if(isNaN(nd.getTime())){alert('Could not understand that date - not changed.');return;}
+  emp.date=nd.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
+  sl(ATT_ARCH,arch);rAtt();rFormer();if(getURL())flushSyncAtt();
+}
+function editArchDateByEl(btn){editArchDate(decodeURIComponent(btn.getAttribute('data-name')));}
 function restoreEmpByEl(btn){restoreEmp(decodeURIComponent(btn.getAttribute('data-name')));}
 function rAtt(){
   var mon=+document.getElementById('at-mon').value,yr=+document.getElementById('at-yr').value;

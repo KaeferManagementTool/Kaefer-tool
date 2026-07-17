@@ -2261,7 +2261,7 @@ function editArchDate(n){
   var nd=new Date(val+'T00:00:00');
   if(isNaN(nd.getTime())){alert('Could not understand that date - not changed.');return;}
   emp.date=nd.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
-  sl(ATT_ARCH,arch);rAtt();rFormer();if(getURL())flushSyncAtt();
+  sl(ATT_ARCH,arch);addPendingArchDate(n,emp.date);rAtt();rFormer();if(getURL())flushSyncAtt();
 }
 function editArchDateByEl(btn){editArchDate(decodeURIComponent(btn.getAttribute('data-name')));}
 function restoreEmpByEl(btn){restoreEmp(decodeURIComponent(btn.getAttribute('data-name')));}
@@ -4325,6 +4325,30 @@ function reapplyPendingClears(){
   if(changed)sl('kaefer_att_ov',ov);
 }
 
+// Pending archive-date corrections — survive racing background pulls.
+// Same problem as pending clears above: if a background sync started
+// before you corrected someone's departure date, its response can land
+// after your edit and overwrite it with the stale date. This re-applies
+// your correction on top of every load until the server itself reflects it.
+var PEND_ARCH_DATE_KEY='kaefer_arch_pending_dates';
+function getPendingArchDates(){return glj(PEND_ARCH_DATE_KEY,{})||{};}
+function setPendingArchDates(p){sl(PEND_ARCH_DATE_KEY,p);}
+function addPendingArchDate(name,dateStr){var p=getPendingArchDates();p[name]={date:dateStr,ts:Date.now()};setPendingArchDates(p);}
+function clearPendingArchDate(name){var p=getPendingArchDates();if(p[name]){delete p[name];setPendingArchDates(p);}}
+function reapplyPendingArchDates(){
+  var p=getPendingArchDates();if(!Object.keys(p).length)return;
+  var TWO_MIN=2*60*1000,now=Date.now(),changed=false;
+  var arch=getArch();
+  for(var name in p){
+    if(now-p[name].ts>TWO_MIN){clearPendingArchDate(name);continue;}
+    var emp=arch.filter(function(e){return e.n===name;})[0];
+    if(!emp)continue; // restored or no longer archived - nothing to reapply
+    if(emp.date===p[name].date){clearPendingArchDate(name);continue;} // server now agrees
+    emp.date=p[name].date;changed=true;
+  }
+  if(changed)sl(ATT_ARCH,arch);
+}
+
 // Date normalisation — server may return Date strings in mixed forms.
 // We want ISO YYYY-MM-DD as the canonical date_key everywhere.
 function normDateKey(dk){
@@ -4522,7 +4546,7 @@ function syncAtt(){
     var ov=normaliseOvDates(j.ov||{});
     sl('kaefer_att_ov',ov);
     if(j.emps)sl('kaefer_att_emps',j.emps);
-    if(j.arch&&j.arch.length)sl('kaefer_att_arch',j.arch);
+    if(j.arch&&j.arch.length){sl('kaefer_att_arch',j.arch);reapplyPendingArchDates();}
 
     // Rebuild snapshot from merged server state
     var newSnap={};

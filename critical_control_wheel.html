@@ -7653,6 +7653,10 @@ scfPrintPDF = function(){
       +   '<div class="sl2">Dismantled Tonnage</div>'
       +   '<div class="sv" id="scf-stat-dismantled" style="color:#607d8b">0.000 t</div>'
       +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-dismantled-items">0</span> scaffolds</div>'
+      +   '<div style="margin-top:6px;border-top:1px solid #eceff1;padding-top:6px">'
+      +     '<select id="scf-dismantled-week-sel" onchange="scfShowDismantledWeekTotal()" style="font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid #cfd8dc;max-width:100%"></select>'
+      +     '<div id="scf-dismantled-week-total" style="font-size:12px;font-weight:600;color:#607d8b;margin-top:3px">0.000 t</div>'
+      +   '</div>'
       + '</div>';
     // Insert after the intro card but before the sub-tabs
     introCard.parentNode.insertBefore(statsDiv, introCard.nextSibling);
@@ -7675,6 +7679,56 @@ function scfUpdateStats(){
     if(statEl) statEl.textContent = totalT.toFixed(3) + ' t';
     if(itemsEl) itemsEl.textContent = totalItems;
   });
+  scfUpdateDismantledWeekly();
+}
+
+// Monday-start-of-week key (YYYY-MM-DD) for grouping dismantled tonnage by week.
+function scfWeekKey(d){
+  var dt = new Date(d);
+  var day = dt.getDay(); // 0=Sun..6=Sat
+  var diff = (day === 0 ? -6 : 1 - day); // shift back to Monday
+  dt.setDate(dt.getDate() + diff);
+  dt.setHours(0,0,0,0);
+  return dt.toISOString().slice(0,10);
+}
+function scfWeekLabel(wk){
+  var ws = new Date(wk+'T00:00:00');
+  var we = new Date(ws); we.setDate(we.getDate()+6);
+  var opts = {day:'2-digit', month:'short'};
+  return ws.toLocaleDateString('en-AU', opts) + ' - ' + we.toLocaleDateString('en-AU', opts);
+}
+function scfDismantledWeekTotals(){
+  var totals = {};
+  (SCF_CACHE.dismantled || []).forEach(function(s){
+    if(!s.dismantledAt) return;
+    var wk = scfWeekKey(s.dismantledAt);
+    if(!totals[wk]) totals[wk] = {kg:0, items:0};
+    totals[wk].kg += (s.totalWeightKg || 0);
+    totals[wk].items += 1;
+  });
+  return totals;
+}
+function scfUpdateDismantledWeekly(){
+  var sel = document.getElementById('scf-dismantled-week-sel');
+  if(!sel) return;
+  var totals = scfDismantledWeekTotals();
+  var weeks = Object.keys(totals).sort().reverse(); // most recent first
+  var curWk = scfWeekKey(new Date());
+  if(weeks.indexOf(curWk) < 0){ weeks.unshift(curWk); }
+  var prevVal = sel.value;
+  sel.innerHTML = weeks.map(function(wk){
+    return '<option value="'+wk+'">'+scfWeekLabel(wk)+'</option>';
+  }).join('');
+  sel.value = (weeks.indexOf(prevVal) >= 0) ? prevVal : curWk;
+  scfShowDismantledWeekTotal();
+}
+function scfShowDismantledWeekTotal(){
+  var sel = document.getElementById('scf-dismantled-week-sel');
+  var out = document.getElementById('scf-dismantled-week-total');
+  if(!sel || !out) return;
+  var totals = scfDismantledWeekTotals();
+  var t = totals[sel.value] || {kg:0, items:0};
+  out.textContent = (t.kg/1000).toFixed(3) + ' t (' + t.items + ' scaffolds)';
 }
 
 // Hook into scfUpdateBadges (called after every load) to also update stats

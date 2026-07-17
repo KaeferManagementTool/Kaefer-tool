@@ -7653,10 +7653,6 @@ scfPrintPDF = function(){
       +   '<div class="sl2">Dismantled Tonnage</div>'
       +   '<div class="sv" id="scf-stat-dismantled" style="color:#607d8b">0.000 t</div>'
       +   '<div style="font-size:10px;color:#888;margin-top:2px"><span id="scf-stat-dismantled-items">0</span> scaffolds</div>'
-      +   '<div style="margin-top:6px;border-top:1px solid #eceff1;padding-top:6px">'
-      +     '<select id="scf-dismantled-week-sel" onchange="scfShowDismantledWeekTotal()" style="font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid #cfd8dc;max-width:100%"></select>'
-      +     '<div id="scf-dismantled-week-total" style="font-size:12px;font-weight:600;color:#607d8b;margin-top:3px">0.000 t</div>'
-      +   '</div>'
       + '</div>';
     // Insert after the intro card but before the sub-tabs
     introCard.parentNode.insertBefore(statsDiv, introCard.nextSibling);
@@ -9188,6 +9184,15 @@ scfUpdateBadges = function(){
       itemsId: 'scf-stat-failed-items',
       filterKey: 'failed'
     });
+    html += bubble({
+      label: 'DISMANTLED',
+      color: '#607d8b',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-dismantled',
+      itemsId: 'scf-stat-dismantled-items',
+      filterKey: 'dismantled'
+    });
     SCF_AREAS.forEach(function(area){
       var color = SCF_AREA_COLORS[area] || '#607d8b';
       var key = scfAreaKey(area);
@@ -9204,9 +9209,31 @@ scfUpdateBadges = function(){
     container.innerHTML = html;
     if(typeof scfUpdateStats === 'function') scfUpdateStats();
     scfUpdateBubbleHighlight();
+    injectDismantledWeeklyPanel();
   }
   setTimeout(rebuildBubblesS13, 200);
 })();
+
+// ------------------------------------------------------------
+// Weekly dismantled tonnage panel - a sibling of the bubble row
+// (not inside it), so it survives the bubble row being fully
+// regenerated on every refresh.
+// ------------------------------------------------------------
+function injectDismantledWeeklyPanel(){
+  if(document.getElementById('scf-dismantled-weekly')) return;
+  var cards = document.getElementById('scf-stat-cards');
+  if(!cards || !cards.parentNode) return;
+  var panel = document.createElement('div');
+  panel.id = 'scf-dismantled-weekly';
+  panel.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;'
+    + 'margin:-4px 0 14px;font-size:12px;color:#455a64';
+  panel.innerHTML = '<span style="font-weight:700">Weekly Dismantled:</span>'
+    + '<select id="scf-dismantled-week-sel" onchange="scfShowDismantledWeekTotal()" '
+    + 'style="font-size:12px;padding:3px 6px;border-radius:4px;border:1px solid #cfd8dc"></select>'
+    + '<span id="scf-dismantled-week-total" style="font-weight:700;color:#607d8b">0.000 t</span>';
+  cards.parentNode.insertBefore(panel, cards.nextSibling);
+  scfUpdateDismantledWeekly();
+}
 
 // ------------------------------------------------------------
 // PART B4: extend scfUpdateStats - also compute FAILED total
@@ -9254,7 +9281,7 @@ function scfBubbleClick(filterKey){
 
   // Switch to Active tab (or Failed for the FAILED bubble) when a filter is applied
   if(SCF_BUBBLE_FILTER !== null){
-    var targetTab = (SCF_BUBBLE_FILTER === 'failed') ? 'failed' : 'active';
+    var targetTab = (SCF_BUBBLE_FILTER === 'failed') ? 'failed' : (SCF_BUBBLE_FILTER === 'dismantled') ? 'dismantled' : 'active';
     if(SCF_CURRENT_TAB !== targetTab){
       SCF_CURRENT_TAB = targetTab;
       document.querySelectorAll('#t15 .reg-tb').forEach(function(b){ b.classList.remove('on'); });
@@ -9330,6 +9357,7 @@ function scfRefreshFilterBanner(){
   var label = '';
   if(SCF_BUBBLE_FILTER === 'longterm')  label = 'LONG-TERM scaffolds only';
   else if(SCF_BUBBLE_FILTER === 'failed') label = 'FAILED scaffolds only';
+  else if(SCF_BUBBLE_FILTER === 'dismantled') label = 'DISMANTLED scaffolds only';
   else if(SCF_BUBBLE_FILTER.indexOf('area:') === 0) label = SCF_BUBBLE_FILTER.substr(5) + ' area only';
   if(!label) return;
 

@@ -9266,6 +9266,15 @@ scfUpdateStats = function(){
   var itemsEl = document.getElementById('scf-stat-failed-items');
   if(el) el.textContent = (failedKg/1000).toFixed(3) + ' t';
   if(itemsEl) itemsEl.textContent = failedItems;
+
+  var dismantledList = SCF_CACHE['dismantled'] || [];
+  var dismantledKg = 0;
+  dismantledList.forEach(function(s){ dismantledKg += (s.totalWeightKg || 0); });
+  var dEl = document.getElementById('scf-stat-dismantled');
+  var dItemsEl = document.getElementById('scf-stat-dismantled-items');
+  if(dEl) dEl.textContent = (dismantledKg/1000).toFixed(3) + ' t';
+  if(dItemsEl) dItemsEl.textContent = dismantledList.length;
+
   scfUpdateDismantledWeekly();
 };
 

@@ -7688,6 +7688,7 @@ function scfWeekKey(d){
   return dt.toISOString().slice(0,10);
 }
 function scfWeekLabel(wk){
+  if(wk === 'unknown') return 'Unrecorded Date';
   var ws = new Date(wk+'T00:00:00');
   var we = new Date(ws); we.setDate(we.getDate()+6);
   var opts = {day:'2-digit', month:'short'};
@@ -7696,8 +7697,7 @@ function scfWeekLabel(wk){
 function scfDismantledWeekTotals(){
   var totals = {};
   (SCF_CACHE.dismantled || []).forEach(function(s){
-    if(!s.dismantledAt) return;
-    var wk = scfWeekKey(s.dismantledAt);
+    var wk = s.dismantledAt ? scfWeekKey(s.dismantledAt) : 'unknown';
     if(!totals[wk]) totals[wk] = {kg:0, items:0};
     totals[wk].kg += (s.totalWeightKg || 0);
     totals[wk].items += 1;
@@ -7708,9 +7708,11 @@ function scfUpdateDismantledWeekly(){
   var sel = document.getElementById('scf-dismantled-week-sel');
   if(!sel) return;
   var totals = scfDismantledWeekTotals();
-  var weeks = Object.keys(totals).sort().reverse(); // most recent first
+  var hasUnknown = 'unknown' in totals;
+  var weeks = Object.keys(totals).filter(function(k){return k !== 'unknown';}).sort().reverse(); // most recent first
   var curWk = scfWeekKey(new Date());
   if(weeks.indexOf(curWk) < 0){ weeks.unshift(curWk); }
+  if(hasUnknown) weeks.push('unknown'); // scaffolds dismantled before this feature existed - no week to place them in
   var prevVal = sel.value;
   sel.innerHTML = weeks.map(function(wk){
     return '<option value="'+wk+'">'+scfWeekLabel(wk)+'</option>';
@@ -9264,6 +9266,7 @@ scfUpdateStats = function(){
   var itemsEl = document.getElementById('scf-stat-failed-items');
   if(el) el.textContent = (failedKg/1000).toFixed(3) + ' t';
   if(itemsEl) itemsEl.textContent = failedItems;
+  scfUpdateDismantledWeekly();
 };
 
 // ------------------------------------------------------------

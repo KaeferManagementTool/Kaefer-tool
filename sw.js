@@ -1,5 +1,5 @@
 // KAEFER Safety Tool - Service Worker
-const CACHE = 'kaefer-safety-v3';
+const CACHE = 'kaefer-safety-v4';
 const OFFLINE_FILES = ['./critical_control_wheel.html', './manifest.json'];
 
 self.addEventListener('install', function(e) {

@@ -1065,6 +1065,21 @@ if(localStorage.getItem('kaefer_setup_done')){
     <div class="mft" id="scf-detail-actions"></div>
   </div>
 </div>
+
+<!-- MARK AS DISMANTLED -->
+<div class="ml" id="scf-dismantle-ml">
+  <div class="mb" style="width:380px">
+    <div class="mhd" style="background:#607d8b"><h3>Mark as Dismantled</h3><button class="mc" onclick="scfCloseDismantleModal()">&#215;</button></div>
+    <div class="mbd">
+      <div class="mf"><label>Date it was actually dismantled</label><input type="date" id="scf-dis-date" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+      <div class="mf"><label>Dismantled by</label><select id="scf-dis-team" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit">
+        <option value="">Maintenance Team</option>
+        <option value="dismantle_team">Dismantle Team</option>
+      </select></div>
+    </div>
+    <div class="mft"><button class="ob" onclick="scfCloseDismantleModal()">Cancel</button><button class="rb" style="background:#607d8b" onclick="scfSaveDismantle()">&#10003; Confirm</button></div>
+  </div>
+</div>
 <div class="ml" id="scf-edit-ml">
   <div class="mb" style="width:680px;max-width:96vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
     <div class="mhd" style="background:#1565c0">
@@ -1078,6 +1093,11 @@ if(localStorage.getItem('kaefer_setup_done')){
         <div class="mf"><label>Erected By *</label><input type="text" id="scf-e-erector" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
         <div class="mf"><label>Date Erected *</label><input type="date" id="scf-e-date" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
         <div class="mf" style="grid-column:span 2"><label>Notes</label><input type="text" id="scf-e-notes" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf" id="scf-e-dismantled-row" style="display:none"><label>Dismantled Date</label><input type="date" id="scf-e-dismantled-date" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit"></div>
+        <div class="mf" id="scf-e-dismantled-by-row" style="display:none"><label>Dismantled By</label><select id="scf-e-dismantled-by" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:13px;font-family:inherit">
+          <option value="">Maintenance Team</option>
+          <option value="dismantle_team">Dismantle Team</option>
+        </select></div>
         <div class="mf" style="grid-column:span 2;background:#fff3e0;border:1px solid #ffcc80;border-radius:5px;padding:8px 10px">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:#bf360c;margin-bottom:6px">
             <input type="checkbox" id="scf-e-failed" onchange="document.getElementById('scf-e-failed-reason-row').style.display=this.checked?'':'none'" style="width:16px;height:16px;cursor:pointer">
@@ -6600,24 +6620,56 @@ function scfConfirmAction(action){
   var msgs = {
     approve:   'Approve '+scaffold.tag+' and move to active register?',
     reject:    'Permanently delete this pending submission for '+scaffold.tag+'?',
-    dismantle: 'Mark '+scaffold.tag+' as dismantled?'
+    restore:   'Restore '+scaffold.tag+' back to the active register?'
   };
+  if(action === 'dismantle'){
+    scfOpenDismantleModal();
+    return;
+  }
   if(!confirm(msgs[action])) return;
+  scfSendScaffoldAction(action, {});
+}
+
+function scfOpenDismantleModal(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  document.getElementById('scf-dis-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('scf-dis-team').value = '';
+  document.getElementById('scf-dismantle-ml').classList.add('on');
+}
+function scfCloseDismantleModal(){
+  document.getElementById('scf-dismantle-ml').classList.remove('on');
+}
+function scfSaveDismantle(){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var val = document.getElementById('scf-dis-date').value;
+  var team = document.getElementById('scf-dis-team').value;
+  if(!val){ alert('Enter the date it was dismantled.'); return; }
+  var nd = new Date(val+'T00:00:00');
+  if(isNaN(nd.getTime())){ alert('Could not understand that date.'); return; }
+  scfCloseDismantleModal();
+  scfSendScaffoldAction('dismantle', { dismantledAt: nd.toISOString(), dismantledBy: team });
+}
+
+function scfSendScaffoldAction(action, extra){
+  if(!SCF_OPEN_SCAFFOLD) return;
+  var scaffold = SCF_OPEN_SCAFFOLD.scaffold;
   var u = SCF_WORKER_URL;
   if(!u){ alert('Not connected.'); return; }
   setSS('bz', 'Working...');
-  var payload = JSON.stringify({
+  var payloadObj = {
     action: 'scaffold_action',
     subAction: action,
     id: scaffold.id,
     fromTab: SCF_OPEN_SCAFFOLD.tab
-  });
+  };
+  Object.keys(extra || {}).forEach(function(k){ payloadObj[k] = extra[k]; });
+  var payload = JSON.stringify(payloadObj);
   fetch(u, { method: 'POST', redirect: 'follow', headers: {'Content-Type':'text/plain'}, body: payload })
     .then(function(r){ return r.json(); })
     .then(function(j){
       if(!j.ok) throw new Error(j.error || 'Failed');
       scfCloseDetail();
-      var msg = action === 'approve' ? 'Approved' : action === 'reject' ? 'Rejected' : 'Marked dismantled';
+      var msg = action === 'approve' ? 'Approved' : action === 'reject' ? 'Rejected' : action === 'restore' ? 'Restored to Active' : 'Marked dismantled';
       setSS('ok', msg);
       scfLoad();
     })
@@ -6712,6 +6764,7 @@ scfOpenDetail = function(id){
     html += '<button class="rb" style="background:#c62828" onclick="scfConfirmAction(\'dismantle\')">Mark as dismantled</button>';
   } else if(tab === 'dismantled'){
     html += '<button class="ob" style="color:#1565c0;border-color:#1565c0" onclick="scfOpenEdit()">&#9998; Edit</button>';
+    html += '<button class="rb" style="background:#2e7d32" onclick="scfConfirmAction(\'restore\')">&#8617; Restore to Active</button>';
     html += '<button class="ob" style="color:#c62828;border-color:#c62828" onclick="scfConfirmDelete()">&#128465; Delete</button>';
   }
   actions.innerHTML = html;
@@ -6738,6 +6791,34 @@ function scfOpenEdit(){
   }
   document.getElementById('scf-e-date').value = dateVal;
   document.getElementById('scf-e-notes').value = s.notes || '';
+
+  // Dismantled Date - only relevant/shown when editing an already-dismantled scaffold
+  var dismRow = document.getElementById('scf-e-dismantled-row');
+  var dismInput = document.getElementById('scf-e-dismantled-date');
+  var dismByRow = document.getElementById('scf-e-dismantled-by-row');
+  var dismByInput = document.getElementById('scf-e-dismantled-by');
+  if(dismRow && dismInput){
+    if(SCF_OPEN_SCAFFOLD.tab === 'dismantled'){
+      dismRow.style.display = '';
+      var dVal = '';
+      if(s.dismantledAt){
+        var dd = new Date(s.dismantledAt);
+        if(!isNaN(dd)) dVal = dd.getFullYear()+'-'+String(dd.getMonth()+1).padStart(2,'0')+'-'+String(dd.getDate()).padStart(2,'0');
+      }
+      dismInput.value = dVal;
+      if(dismByRow && dismByInput){
+        dismByRow.style.display = '';
+        dismByInput.value = s.dismantledBy || '';
+      }
+    } else {
+      dismRow.style.display = 'none';
+      dismInput.value = '';
+      if(dismByRow && dismByInput){
+        dismByRow.style.display = 'none';
+        dismByInput.value = '';
+      }
+    }
+  }
 
   // Failed state
   var failedCb = document.getElementById('scf-e-failed');
@@ -6917,26 +6998,41 @@ function scfSaveEdit(){
   var markFailed = !!document.getElementById('scf-e-failed').checked;
   var failedReason = (document.getElementById('scf-e-failed-reason').value || '').trim();
 
+  // Dismantled Date correction - only present/relevant when editing from the Dismantled tab
+  var dismantledAtField, dismantledByField;
+  if(SCF_OPEN_SCAFFOLD.tab === 'dismantled'){
+    var dismDateVal = document.getElementById('scf-e-dismantled-date').value;
+    if(!dismDateVal){ alert('Dismantled Date is required.'); return; }
+    var dNd = new Date(dismDateVal+'T00:00:00');
+    if(isNaN(dNd.getTime())){ alert('Could not understand the Dismantled Date.'); return; }
+    dismantledAtField = dNd.toISOString();
+    dismantledByField = document.getElementById('scf-e-dismantled-by').value;
+  }
+
   var btn = document.getElementById('scf-e-save-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   setSS('bz', 'Saving changes...');
+
+  var fieldsObj = {
+    tag: tag,
+    location: loc,
+    erectedBy: erector,
+    dateErected: date,
+    notes: notes,
+    quantities: SCF_EDIT_QTYS,
+    totalItems: totalItems,
+    totalWeightKg: parseFloat(totalKg.toFixed(2)),
+    failed: markFailed,
+    failedReason: markFailed ? failedReason : ''
+  };
+  if(dismantledAtField) fieldsObj.dismantledAt = dismantledAtField;
+  if(dismantledByField !== undefined) fieldsObj.dismantledBy = dismantledByField;
 
   var payload = JSON.stringify({
     action: 'scaffold_edit',
     id: SCF_OPEN_SCAFFOLD.scaffold.id,
     fromTab: SCF_OPEN_SCAFFOLD.tab,
-    fields: {
-      tag: tag,
-      location: loc,
-      erectedBy: erector,
-      dateErected: date,
-      notes: notes,
-      quantities: SCF_EDIT_QTYS,
-      totalItems: totalItems,
-      totalWeightKg: parseFloat(totalKg.toFixed(2)),
-      failed: markFailed,
-      failedReason: markFailed ? failedReason : ''
-    }
+    fields: fieldsObj
   });
 
   fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload })
@@ -9195,6 +9291,15 @@ scfUpdateBadges = function(){
       itemsId: 'scf-stat-dismantled-items',
       filterKey: 'dismantled'
     });
+    html += bubble({
+      label: 'DISMANTLE TEAM',
+      color: '#8e24aa',
+      size: '170px',
+      valueSize: '26px',
+      valueId: 'scf-stat-dismteam',
+      itemsId: 'scf-stat-dismteam-items',
+      filterKey: 'dismantle_team'
+    });
     SCF_AREAS.forEach(function(area){
       var color = SCF_AREA_COLORS[area] || '#607d8b';
       var key = scfAreaKey(area);
@@ -9275,6 +9380,14 @@ scfUpdateStats = function(){
   if(dEl) dEl.textContent = (dismantledKg/1000).toFixed(3) + ' t';
   if(dItemsEl) dItemsEl.textContent = dismantledList.length;
 
+  var dismTeamList = dismantledList.filter(function(s){ return s.dismantledBy === 'dismantle_team'; });
+  var dismTeamKg = 0;
+  dismTeamList.forEach(function(s){ dismTeamKg += (s.totalWeightKg || 0); });
+  var dtEl = document.getElementById('scf-stat-dismteam');
+  var dtItemsEl = document.getElementById('scf-stat-dismteam-items');
+  if(dtEl) dtEl.textContent = (dismTeamKg/1000).toFixed(3) + ' t';
+  if(dtItemsEl) dtItemsEl.textContent = dismTeamList.length;
+
   scfUpdateDismantledWeekly();
 };
 
@@ -9293,7 +9406,7 @@ function scfBubbleClick(filterKey){
 
   // Switch to Active tab (or Failed for the FAILED bubble) when a filter is applied
   if(SCF_BUBBLE_FILTER !== null){
-    var targetTab = (SCF_BUBBLE_FILTER === 'failed') ? 'failed' : (SCF_BUBBLE_FILTER === 'dismantled') ? 'dismantled' : 'active';
+    var targetTab = (SCF_BUBBLE_FILTER === 'failed') ? 'failed' : (SCF_BUBBLE_FILTER === 'dismantled' || SCF_BUBBLE_FILTER === 'dismantle_team') ? 'dismantled' : 'active';
     if(SCF_CURRENT_TAB !== targetTab){
       SCF_CURRENT_TAB = targetTab;
       document.querySelectorAll('#t15 .reg-tb').forEach(function(b){ b.classList.remove('on'); });
@@ -9345,6 +9458,7 @@ scfRender = function(){
   var filteredList = originalList.filter(function(s){
     if(bf === 'longterm') return !!s.longTerm;
     if(bf === 'failed')   return !!s.failed;
+    if(bf === 'dismantle_team') return s.dismantledBy === 'dismantle_team';
     if(bf.indexOf('area:') === 0){
       var wantArea = bf.substr(5);
       return s.area === wantArea;
@@ -9370,6 +9484,7 @@ function scfRefreshFilterBanner(){
   if(SCF_BUBBLE_FILTER === 'longterm')  label = 'LONG-TERM scaffolds only';
   else if(SCF_BUBBLE_FILTER === 'failed') label = 'FAILED scaffolds only';
   else if(SCF_BUBBLE_FILTER === 'dismantled') label = 'DISMANTLED scaffolds only';
+  else if(SCF_BUBBLE_FILTER === 'dismantle_team') label = 'DISMANTLE TEAM scaffolds only';
   else if(SCF_BUBBLE_FILTER.indexOf('area:') === 0) label = SCF_BUBBLE_FILTER.substr(5) + ' area only';
   if(!label) return;
 
@@ -9527,6 +9642,7 @@ scfRender = function(){
   var filtered = items.filter(function(s){
     if(bf === 'longterm' && !s.longTerm) return false;
     if(bf === 'failed' && !s.failed) return false;
+    if(bf === 'dismantle_team' && s.dismantledBy !== 'dismantle_team') return false;
     if(bf && bf.indexOf('area:') === 0 && s.area !== bf.substr(5)) return false;
     if(areaPrefix && (s.location || '').toLowerCase().indexOf(areaPrefix) !== 0) return false;
     if(!search) return true;

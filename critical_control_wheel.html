@@ -1080,21 +1080,6 @@ if(localStorage.getItem('kaefer_setup_done')){
     <div class="mft"><button class="ob" onclick="scfCloseDismantleModal()">Cancel</button><button class="rb" style="background:#607d8b" onclick="scfSaveDismantle()">&#10003; Confirm</button></div>
   </div>
 </div>
-
-<!-- MARK LONG-TERM (PASS/FAIL) -->
-<div class="ml" id="scf-lt-ml">
-  <div class="mb" style="width:380px">
-    <div class="mhd" style="background:#f57f17"><h3>Long-Term Inspection Result</h3><button class="mc" onclick="scfCloseLongTermModal()">&#215;</button></div>
-    <div class="mbd">
-      <p style="font-size:13px;color:#555;margin:0 0 14px">This will unfail the scaffold and mark it as Long-Term. Did it pass or fail its long-term inspection?</p>
-      <div style="display:flex;gap:10px">
-        <button class="rb" style="flex:1;background:#2e7d32" onclick="scfSaveLongTermResult('pass')">&#10003; Pass</button>
-        <button class="rb" style="flex:1;background:#c62828" onclick="scfSaveLongTermResult('fail')">&#10007; Fail</button>
-      </div>
-    </div>
-    <div class="mft"><button class="ob" onclick="scfCloseLongTermModal()">Cancel</button></div>
-  </div>
-</div>
 <div class="ml" id="scf-edit-ml">
   <div class="mb" style="width:680px;max-width:96vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
     <div class="mhd" style="background:#1565c0">
@@ -8963,6 +8948,17 @@ scfUpdateStats = function(){
       + '<span style="font-weight:600;color:#5d4037">Long-term scaffold</span>'
       + '</label>';
     stageWrapper.parentNode.insertBefore(ltWrapper, stageWrapper.nextSibling);
+    document.getElementById('scf-e-longterm').addEventListener('change', function(){
+      var row = document.getElementById('scf-e-ltresult-row');
+      var sel = document.getElementById('scf-e-ltresult');
+      if(!row || !sel) return;
+      if(this.checked){
+        row.style.display = '';
+      } else {
+        row.style.display = 'none';
+        sel.value = '';
+      }
+    });
 
     // When area changes, gray out / un-gray out the stage select
     function refreshStageEnable(){
@@ -9624,7 +9620,16 @@ scfOpenDetail = function(id){
       btnUnfailLT.className = 'rb';
       btnUnfailLT.style.cssText = 'background:#e65100;font-size:12px;padding:5px 12px';
       btnUnfailLT.innerHTML = '&#10003; Unfail \u2192 Long-Term';
-      btnUnfailLT.onclick = function(){ scfOpenLongTermModal(s.id); };
+      btnUnfailLT.title = 'Opens Edit with Failed unchecked and Long-term checked, ready for you to pick Pass/Fail';
+      btnUnfailLT.onclick = function(){
+        scfOpenEdit();
+        setTimeout(function(){
+          var failedCb = document.getElementById('scf-e-failed');
+          var ltCb = document.getElementById('scf-e-longterm');
+          if(failedCb && failedCb.checked){ failedCb.checked = false; failedCb.dispatchEvent(new Event('change')); }
+          if(ltCb && !ltCb.checked){ ltCb.checked = true; ltCb.dispatchEvent(new Event('change')); }
+        }, 30);
+      };
       actionsBar.appendChild(btnUnfailLT);
     }
 
@@ -9693,40 +9698,6 @@ function scfUnfailScaffold(id, toLongTerm){
     .catch(function(err){
       setSS('er','Unfail failed: '+err.message);
       alert('Unfail failed: '+err.message);
-    });
-}
-
-var SCF_LT_TARGET_ID = null;
-function scfOpenLongTermModal(id){
-  SCF_LT_TARGET_ID = id;
-  document.getElementById('scf-lt-ml').classList.add('on');
-}
-function scfCloseLongTermModal(){
-  SCF_LT_TARGET_ID = null;
-  document.getElementById('scf-lt-ml').classList.remove('on');
-}
-function scfSaveLongTermResult(result){
-  if(!SCF_LT_TARGET_ID) return;
-  var id = SCF_LT_TARGET_ID;
-  scfCloseLongTermModal();
-  setSS('bz','Saving...');
-  fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
-    body: JSON.stringify({
-      action:'scaffold_edit',
-      id: id,
-      fromTab: 'active',
-      fields: { failed: false, failedReason: '', longTerm: true, ltResult: result }
-    }) })
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      if(!j.ok) throw new Error(j.error || 'Save failed');
-      setSS('ok', 'Marked Long-Term (' + (result === 'pass' ? 'Pass' : 'Fail') + ')');
-      scfCloseDetail();
-      scfLoad();
-    })
-    .catch(function(err){
-      setSS('er','Save failed: '+err.message);
-      alert('Save failed: '+err.message);
     });
 }
 

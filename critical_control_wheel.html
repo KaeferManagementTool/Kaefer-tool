@@ -9523,7 +9523,7 @@ scfOpenDetail = function(id){
   if(!actionsBar) return;
 
   // Remove any failed-related buttons from prior opens
-  ['scf-act-fail','scf-act-unfail','scf-act-dismantle-failed'].forEach(function(id){
+  ['scf-act-fail','scf-act-unfail','scf-act-unfail-lt','scf-act-dismantle-failed'].forEach(function(id){
     var b = document.getElementById(id); if(b && b.parentNode) b.parentNode.removeChild(b);
   });
 
@@ -9562,6 +9562,16 @@ scfOpenDetail = function(id){
     btnUnfail.innerHTML = '&#10003; Unfail (back to Active)';
     btnUnfail.onclick = function(){ scfUnfailScaffold(s.id); };
     actionsBar.appendChild(btnUnfail);
+
+    if(!s.longTerm){
+      var btnUnfailLT = document.createElement('button');
+      btnUnfailLT.id = 'scf-act-unfail-lt';
+      btnUnfailLT.className = 'rb';
+      btnUnfailLT.style.cssText = 'background:#e65100;font-size:12px;padding:5px 12px';
+      btnUnfailLT.innerHTML = '&#10003; Unfail \u2192 Long-Term';
+      btnUnfailLT.onclick = function(){ scfUnfailScaffold(s.id, true); };
+      actionsBar.appendChild(btnUnfailLT);
+    }
 
     // Also need Mark Dismantled if we're viewing in the Failed tab
     // (Active tab already has Mark Dismantled)
@@ -9602,21 +9612,26 @@ function scfFailScaffold(id){
     });
 }
 
-// Remove the failed flag
-function scfUnfailScaffold(id){
-  if(!confirm('Mark this scaffold as PASSING again (move back to Active)?')) return;
+// Remove the failed flag. Pass toLongTerm=true to also confirm it as a long-term scaffold in the same action.
+function scfUnfailScaffold(id, toLongTerm){
+  var msg = toLongTerm
+    ? 'Mark this scaffold as PASSING again and confirm it as Long-Term?'
+    : 'Mark this scaffold as PASSING again (move back to Active)?';
+  if(!confirm(msg)) return;
   setSS('bz','Unfailing...');
+  var fields = { failed: false, failedReason: '' };
+  if(toLongTerm) fields.longTerm = true;
   fetch(SCF_WORKER_URL, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
     body: JSON.stringify({
       action:'scaffold_edit',
       id: id,
       fromTab: 'active',
-      fields: { failed: false, failedReason: '' }
+      fields: fields
     }) })
     .then(function(r){ return r.json(); })
     .then(function(j){
       if(!j.ok) throw new Error(j.error || 'Unfail failed');
-      setSS('ok','Unfailed');
+      setSS('ok', toLongTerm ? 'Unfailed and marked Long-Term' : 'Unfailed');
       scfCloseDetail();
       scfLoad();
     })

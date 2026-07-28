@@ -9079,17 +9079,45 @@ scfRender = function(){
       stageChip.textContent = 'S' + s.stage;
       firstChild.appendChild(stageChip);
     }
-    // Long-term chip
-    if(s.longTerm && !card.querySelector('.scf-lt-chip')){
+    // Long-term chip - shows Pass/Fail status, or flags scaffolds still needing one set
+    var existingLtChip = card.querySelector('.scf-lt-chip');
+    if(existingLtChip) existingLtChip.remove(); // rebuild each render so status stays current
+    if(s.longTerm){
       var ltChip = document.createElement('span');
       ltChip.className = 'scf-lt-chip';
-      ltChip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
-        + 'background:#f57f17;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px';
-      ltChip.textContent = 'LONG-TERM';
+      if(s.ltResult === 'pass'){
+        ltChip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+          + 'background:#2e7d32;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px';
+        ltChip.textContent = 'LONG-TERM \u2713 PASS';
+      } else if(s.ltResult === 'fail'){
+        ltChip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+          + 'background:#c62828;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px';
+        ltChip.textContent = 'LONG-TERM \u2717 FAIL';
+      } else {
+        ltChip.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+          + 'background:#e65100;padding:2px 7px;border-radius:10px;margin-top:3px;margin-left:4px;cursor:pointer;'
+          + 'animation:scfPulse 1.6s ease-in-out infinite';
+        ltChip.textContent = 'LONG-TERM \u2014 SET RESULT';
+        ltChip.title = 'Click to set Pass/Fail for this long-term scaffold';
+        (function(scaffoldId){
+          ltChip.onclick = function(e){
+            e.stopPropagation();
+            scfOpenDetail(scaffoldId);
+            setTimeout(function(){ scfOpenEdit(); }, 150);
+          };
+        })(s.id);
+      }
       firstChild.appendChild(ltChip);
     }
   });
 };
+
+if(!document.getElementById('scf-pulse-style')){
+  var scfPulseStyle = document.createElement('style');
+  scfPulseStyle.id = 'scf-pulse-style';
+  scfPulseStyle.textContent = '@keyframes scfPulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }';
+  document.head.appendChild(scfPulseStyle);
+}
 
 // ============================================================
 // PART 8: Show stage + long-term in detail view
@@ -9270,12 +9298,15 @@ scfUpdateBadges = function(){
       var splitHtml = '';
       if(opts.split){
         var splitLabels = opts.splitLabels || ['S1', 'S2'];
-        splitHtml = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.92);line-height:1.2;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,0.15);pointer-events:none">'
-          + splitLabels[0] + ' <span id="' + opts.valueId + '-s1">0.0 t</span>'
-          + ' (<span id="' + opts.itemsId + '-s1">0</span>)'
+        var sfk = opts.splitFilterKeys; // optional [key1, key2] to make each half independently clickable
+        var s1Attrs = sfk ? ' style="cursor:pointer;pointer-events:auto" onclick="event.stopPropagation();scfBubbleClick(\'' + sfk[0] + '\')"' : '';
+        var s2Attrs = sfk ? ' style="cursor:pointer;pointer-events:auto" onclick="event.stopPropagation();scfBubbleClick(\'' + sfk[1] + '\')"' : '';
+        splitHtml = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.92);line-height:1.2;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,0.15);' + (sfk ? '' : 'pointer-events:none') + '">'
+          + '<span' + s1Attrs + '>' + splitLabels[0] + ' <span id="' + opts.valueId + '-s1">0.0 t</span>'
+          + ' (<span id="' + opts.itemsId + '-s1">0</span>)</span>'
           + ' &middot; '
-          + splitLabels[1] + ' <span id="' + opts.valueId + '-s2">0.0 t</span>'
-          + ' (<span id="' + opts.itemsId + '-s2">0</span>)'
+          + '<span' + s2Attrs + '>' + splitLabels[1] + ' <span id="' + opts.valueId + '-s2">0.0 t</span>'
+          + ' (<span id="' + opts.itemsId + '-s2">0</span>)</span>'
           + '</div>';
       }
       var bubbleId = 'scf-bubble-' + (opts.filterKey || 'unknown').replace(/[^a-zA-Z0-9]+/g,'-');
@@ -9323,7 +9354,8 @@ scfUpdateBadges = function(){
       itemsId: 'scf-stat-longterm-items',
       filterKey: 'longterm',
       split: true,
-      splitLabels: ['PASS', 'FAIL']
+      splitLabels: ['PASS', 'FAIL'],
+      splitFilterKeys: ['longterm_pass', 'longterm_fail']
     });
     html += bubble({
       label: 'FAILED',
@@ -9511,6 +9543,8 @@ scfRender = function(){
     if(bf === 'longterm') return !!s.longTerm;
     if(bf === 'failed')   return !!s.failed;
     if(bf === 'dismantle_team') return s.dismantledBy === 'dismantle_team';
+    if(bf === 'longterm_pass') return !!s.longTerm && s.ltResult === 'pass';
+    if(bf === 'longterm_fail') return !!s.longTerm && s.ltResult === 'fail';
     if(bf.indexOf('area:') === 0){
       var wantArea = bf.substr(5);
       return s.area === wantArea;
@@ -9537,6 +9571,8 @@ function scfRefreshFilterBanner(){
   else if(SCF_BUBBLE_FILTER === 'failed') label = 'FAILED scaffolds only';
   else if(SCF_BUBBLE_FILTER === 'dismantled') label = 'DISMANTLED scaffolds only';
   else if(SCF_BUBBLE_FILTER === 'dismantle_team') label = 'DISMANTLE TEAM scaffolds only';
+  else if(SCF_BUBBLE_FILTER === 'longterm_pass') label = 'LONG-TERM scaffolds - PASSED only';
+  else if(SCF_BUBBLE_FILTER === 'longterm_fail') label = 'LONG-TERM scaffolds - FAILED only';
   else if(SCF_BUBBLE_FILTER.indexOf('area:') === 0) label = SCF_BUBBLE_FILTER.substr(5) + ' area only';
   if(!label) return;
 
@@ -9719,6 +9755,8 @@ scfRender = function(){
     if(bf === 'longterm' && !s.longTerm) return false;
     if(bf === 'failed' && !s.failed) return false;
     if(bf === 'dismantle_team' && s.dismantledBy !== 'dismantle_team') return false;
+    if(bf === 'longterm_pass' && !(s.longTerm && s.ltResult === 'pass')) return false;
+    if(bf === 'longterm_fail' && !(s.longTerm && s.ltResult === 'fail')) return false;
     if(bf && bf.indexOf('area:') === 0 && s.area !== bf.substr(5)) return false;
     if(areaPrefix && (s.location || '').toLowerCase().indexOf(areaPrefix) !== 0) return false;
     if(!search) return true;

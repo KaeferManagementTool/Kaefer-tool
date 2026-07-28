@@ -7028,7 +7028,8 @@ function scfSaveEdit(){
   }
 
   var ltResultField;
-  if(SCF_OPEN_SCAFFOLD.scaffold.longTerm){
+  var ltCheckboxNow = document.getElementById('scf-e-longterm');
+  if(ltCheckboxNow && ltCheckboxNow.checked){
     ltResultField = document.getElementById('scf-e-ltresult').value;
   }
 
@@ -9237,7 +9238,7 @@ var SCF_BUBBLE_FILTER = null;
 // ------------------------------------------------------------
 function scfRecomputeFailedCache(){
   var active = SCF_CACHE['active'] || [];
-  SCF_CACHE['failed'] = active.filter(function(s){ return !!s.failed; });
+  SCF_CACHE['failed'] = active.filter(function(s){ return !!s.failed && !s.longTerm; });
 }
 
 // After any data load, recompute the failed cache and update its badge.
@@ -9412,7 +9413,7 @@ scfUpdateStats = function(){
 
   var failedKg = 0, failedItems = 0;
   active.forEach(function(s){
-    if(s.failed){
+    if(s.failed && !s.longTerm){
       failedKg += s.totalWeightKg || 0;
       failedItems += 1;
     }

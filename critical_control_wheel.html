@@ -5915,6 +5915,16 @@ function findEmployeeMatches(submittedName){
       var score = nameScore(submittedName, e.n);
       matches.push({key:e.n, label:e.n + (e.g ? ' ('+e.g+')' : ''), score:score});
     });
+    // Also search archived (No Longer Employed) staff - a submission can be for a period
+    // when someone was still employed, even if they've since left.
+    var arch;
+    try { arch = (typeof getArch === 'function') ? getArch() : []; }
+    catch(e2) { arch = glj('kaefer_att_arch', []) || []; }
+    (arch || []).forEach(function(e){
+      if(!e || !e.n) return;
+      var score = nameScore(submittedName, e.n);
+      matches.push({key:e.n, label:e.n + (e.g ? ' ('+e.g+')' : '') + ' \u2014 No Longer Employed', score:score});
+    });
   }
   matches.sort(function(a,b){return b.score - a.score;});
   return matches;

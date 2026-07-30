@@ -844,7 +844,7 @@ if(localStorage.getItem('kaefer_setup_done')){
         <div id="sf-form-leave" style="background:#f8f8f8;border:1px solid var(--bd);border-radius:6px;padding:12px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
             <div class="mf"><label>Employee</label><select id="sf-leave-name" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="">— Select —</option></select></div>
-            <div class="mf"><label>Leave Type</label><select id="sf-leave-type" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="AL">Annual Leave</option><option value="SL">Sick Leave</option><option value="BL">Bereavement</option><option value="X">Without Pay</option><option value="LATE">In Lieu</option><option value="PH">Public Holiday</option></select></div>
+            <div class="mf"><label>Leave Type</label><select id="sf-leave-type" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="AL">Annual Leave</option><option value="SL">Sick Leave</option><option value="BL">Bereavement</option><option value="AL">Without Pay</option><option value="LATE">In Lieu</option><option value="PH">Public Holiday</option></select></div>
             <div class="mf"><label>First Day</label><input type="date" id="sf-leave-from" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit" oninput="sfLeaveCalcDays()"></div>
             <div class="mf"><label>Last Day</label><input type="date" id="sf-leave-to" style="width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit" oninput="sfLeaveCalcDays()"></div>
           </div>
@@ -4008,7 +4008,7 @@ function showSFUploadPreview(info){
     +' <span style="font-size:10px;color:#607d8b;font-weight:400">AI confidence: '+info.confidence+'</span></div>';
 
   if(info.formType==='leave'){
-    var leaveMap={Annual:'AL',Sick:'SL',Bereavement:'BL',WithoutPay:'X',InLieu:'LATE',Other:'AL'};
+    var leaveMap={Annual:'AL',Sick:'SL',Bereavement:'BL',WithoutPay:'AL',InLieu:'LATE',Other:'AL'};
     var leaveCode=leaveMap[d.leaveType]||'AL';
     var days=[],cur=new Date(d.firstDay),end=new Date(d.lastDay);
     while(cur<=end){var w=cur.getDay();if(w!==0&&w!==6)days.push(cur.toISOString().split('T')[0]);cur.setDate(cur.getDate()+1);}
@@ -6006,7 +6006,7 @@ function applySubmissionToAttendance(id){
   
   function doApply(matchKey){
     if(!matchKey){return;}
-    var leaveCodeMap = {'Annual Leave':'AL','Sick Leave':'SL','Bereavement Leave':'BL','Without Pay':'X','Long Service Leave':'LS','In Lieu':'LATE'};
+    var leaveCodeMap = {'Annual Leave':'AL','Sick Leave':'SL','Bereavement Leave':'BL','Without Pay':'AL','Long Service Leave':'LS','In Lieu':'LATE'};
     var leaveCode = leaveCodeMap[s.leaveType] || 'AL';
     var ov = glj('kaefer_att_ov', {});
     // CRITICAL: Attendance tab stores under aKey(name), so we must too

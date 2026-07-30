@@ -1021,6 +1021,15 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="mft"><button class="ob" onclick="closeAddEmp()">Cancel</button><button class="rb" onclick="saveAddEmp()">&#10003; Add</button></div>
 </div></div>
 
+<!-- EDIT EMPLOYEE -->
+<div class="ml" id="edit-emp-ml"><div class="mb" style="width:350px"><div class="mhd" style="background:#1565c0"><h3>Edit Employee</h3><button class="mc" onclick="closeEditEmpModal()">&#215;</button></div>
+  <div class="mbd">
+    <div class="mf"><label>Full Name</label><input type="text" id="ee-name" placeholder="e.g. John Smith"></div>
+    <div class="mf"><label>Group</label><select id="ee-grp"><option value="OFFICE STAFF">Office Staff</option><option value="YARD STAFF">Yard Staff</option><option value="SCAFFOLDERS">Scaffolders</option></select></div>
+  </div>
+  <div class="mft"><button class="ob" onclick="closeEditEmpModal()">Cancel</button><button class="rb" onclick="saveEditEmp()">&#10003; Save</button></div>
+</div></div>
+
 <!-- SETTINGS / SUPERVISOR SIGNATURES -->
 <div class="ml" id="settings-ml"><div class="mb" style="width:560px;max-width:95vw"><div class="mhd" style="background:#1a2a4a"><h3>Settings</h3><button class="mc" onclick="closeSettings()">&#215;</button></div>
   <div class="mbd">
@@ -2230,33 +2239,49 @@ function closeCE(){document.getElementById('ce-ml').classList.remove('on');}
 function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-start').value=new Date().toISOString().slice(0,10);document.getElementById('ae-ml').classList.add('on');}
 function closeAddEmp(){document.getElementById('ae-ml').classList.remove('on');}
 function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value,start=document.getElementById('ae-start').value;if(!name){alert('Enter a name.');return;}if(!start){alert('Enter a start date.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp,start:start});sl(ATT_EMP,emps);closeAddEmp();rAtt();if(getURL())scheduleSyncAtt();}
+var EDIT_EMP_TARGET = null;
 function editEmp(oldName){
-  var newName = prompt('Edit employee name:', oldName);
-  if(newName===null) return; // cancelled
-  newName = newName.trim();
-  if(!newName){alert('Name cannot be empty.');return;}
-  if(newName === oldName) return; // no change
   var emps = getEmps();
-  // Check if new name already exists (case-insensitive, excluding this employee)
+  var emp = emps.filter(function(e){return e.n===oldName;})[0];
+  if(!emp) return;
+  EDIT_EMP_TARGET = oldName;
+  document.getElementById('ee-name').value = oldName;
+  document.getElementById('ee-grp').value = emp.g || 'SCAFFOLDERS';
+  document.getElementById('edit-emp-ml').classList.add('on');
+}
+function closeEditEmpModal(){
+  EDIT_EMP_TARGET = null;
+  document.getElementById('edit-emp-ml').classList.remove('on');
+}
+function saveEditEmp(){
+  if(!EDIT_EMP_TARGET) return;
+  var oldName = EDIT_EMP_TARGET;
+  var newName = document.getElementById('ee-name').value.trim();
+  var newGroup = document.getElementById('ee-grp').value;
+  if(!newName){ alert('Name cannot be empty.'); return; }
+  var emps = getEmps();
   if(emps.some(function(e){return e.n!==oldName && e.n.toLowerCase()===newName.toLowerCase();})){
-    alert('An employee with that name already exists.');return;
+    alert('An employee with that name already exists.'); return;
   }
-  // Update the name
-  emps.forEach(function(e){if(e.n===oldName) e.n = newName;});
+  emps.forEach(function(e){ if(e.n===oldName){ e.n = newName; e.g = newGroup; } });
   sl(ATT_EMP, emps);
-  // Also migrate any attendance overrides under the old name to the new name
+  // Migrate any attendance overrides under the old name to the new name if it changed
   // (Attendance uses aKey() — normalized lowercase + underscores)
-  try{
-    var ov = glj('kaefer_att_ov', {});
-    var oldKey = (typeof aKey === 'function') ? aKey(oldName) : oldName;
-    var newKey = (typeof aKey === 'function') ? aKey(newName) : newName;
-    if(ov[oldKey] && oldKey !== newKey){
-      ov[newKey] = ov[oldKey];
-      delete ov[oldKey];
-      sl('kaefer_att_ov', ov);
-    }
-  }catch(e){}
+  if(newName !== oldName){
+    try{
+      var ov = glj('kaefer_att_ov', {});
+      var oldKey = (typeof aKey === 'function') ? aKey(oldName) : oldName;
+      var newKey = (typeof aKey === 'function') ? aKey(newName) : newName;
+      if(ov[oldKey] && oldKey !== newKey){
+        ov[newKey] = ov[oldKey];
+        delete ov[oldKey];
+        sl('kaefer_att_ov', ov);
+      }
+    }catch(e){}
+  }
+  closeEditEmpModal();
   rAtt();
+  if(getURL())scheduleSyncAtt();
 }
 function editEmpByEl(btn){editEmp(decodeURIComponent(btn.getAttribute('data-name')));}
 function removeEmp(n){
@@ -2325,7 +2350,7 @@ if(!wk){
 }
 cells.push('<td style="'+tdStyle+'">'+tdInner+'</td>');});
       cells.push('<td style="text-align:center;font-weight:700;font-size:10px;color:#2e7d32;background:#f1f8f1;border-left:2px solid #e0e0e0">'+p+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#c62828;background:#fff5f5">'+sl+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#1565c0;background:#f0f7ff">'+al+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#880e4f;background:#fdf0f5">'+x+'</td>');
-      cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0;white-space:nowrap"><button onclick="editEmpByEl(this)" data-name="'+enc+'" title="Edit name" style="background:none;border:none;color:#1565c0;cursor:pointer;font-size:13px;padding:0 3px;line-height:1">&#9998;</button> <button onclick="removeEmpByEl(this)" data-name="'+enc+'" title="Remove" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
+      cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0;white-space:nowrap"><button onclick="editEmpByEl(this)" data-name="'+enc+'" title="Edit name/group" style="background:none;border:none;color:#1565c0;cursor:pointer;font-size:13px;padding:0 3px;line-height:1">&#9998;</button> <button onclick="removeEmpByEl(this)" data-name="'+enc+'" title="Remove" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
       H.push('<tr>'+cells.join('')+'</tr>');
     });
   });

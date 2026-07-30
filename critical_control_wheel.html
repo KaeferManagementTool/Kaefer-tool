@@ -9922,6 +9922,59 @@ scfPrintPDF = function(){
     });
   };
 })();
+
+// ============================================================
+// Remember the last active tab (and sub-tab) across refreshes
+// ============================================================
+(function(){
+  var LS_KEY = 'kaefer_last_tab';
+
+  function saveTab(desc){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(desc)); }catch(e){}
+  }
+
+  var _origSTFinal = window.sT;
+  window.sT = function(id, btn){
+    _origSTFinal.apply(this, arguments);
+    saveTab({type:'simple', id: id});
+  };
+
+  var _origSTInspFinal = window.sTInsp;
+  window.sTInsp = function(btn, which){
+    _origSTInspFinal.apply(this, arguments);
+    saveTab({type:'sub', which: which});
+  };
+
+  var _origSTRepFinal = window.sTRep;
+  window.sTRep = function(btn, which){
+    _origSTRepFinal.apply(this, arguments);
+    saveTab({type:'sub', which: which});
+  };
+
+  function restoreTab(){
+    var raw;
+    try{ raw = localStorage.getItem(LS_KEY); }catch(e){ return; }
+    if(!raw) return;
+    var desc;
+    try{ desc = JSON.parse(raw); }catch(e){ return; }
+    if(!desc || !desc.type) return;
+
+    if(desc.type === 'simple' && desc.id){
+      var btn = document.querySelector('.tabs .tb[onclick*="' + desc.id + '"]');
+      if(btn) btn.click();
+    } else if(desc.type === 'sub' && desc.which){
+      var subBtn = document.querySelector('[data-sub="' + desc.which + '"]');
+      if(subBtn) subBtn.click();
+    }
+  }
+
+  // Run after the page's own default-tab setup has happened
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(restoreTab, 60); });
+  } else {
+    setTimeout(restoreTab, 60);
+  }
+})();
 </script>  
 
   

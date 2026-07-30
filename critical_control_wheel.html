@@ -909,6 +909,11 @@ if(localStorage.getItem('kaefer_setup_done')){
     <button class="scb" id="sub-fl-purch" onclick="setSubFilter('purch')" style="font-size:12px;padding:6px 14px">Purchasing</button>
   </div>
 
+  <div style="margin-bottom:11px" class="np">
+    <input type="text" id="sub-search" placeholder="&#128269; Search by name..." oninput="renderSubmissions()"
+      style="width:100%;max-width:320px;padding:7px 10px;border:1px solid var(--bd);border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box">
+  </div>
+
   <div id="sub-loading" style="display:none;text-align:center;padding:30px;color:#607d8b">
     <div style="width:32px;height:32px;border:3px solid #e0e0e0;border-top-color:#cc0000;border-radius:50%;animation:bl 0.8s linear infinite;margin:0 auto 10px"></div>
     Loading submissions...
@@ -5067,10 +5072,14 @@ function renderSubmissions(){
   var list = document.getElementById('sub-list');
   var emp = document.getElementById('sub-empty');
   if(!list || !emp) return;
+  var searchEl = document.getElementById('sub-search');
+  var searchTerm = searchEl ? (searchEl.value || '').trim().toLowerCase() : '';
   var data = SUB_CACHE.filter(function(s){
-    if(SUB_FILTER==='all') return true;
-    if(SUB_FILTER==='pending') return (s.status||'Pending').toLowerCase().indexOf('pending')>=0;
-    return s.type === SUB_FILTER;
+    if(SUB_FILTER==='all'){}
+    else if(SUB_FILTER==='pending'){ if((s.status||'Pending').toLowerCase().indexOf('pending')<0) return false; }
+    else { if(s.type !== SUB_FILTER) return false; }
+    if(searchTerm && (s.name||'').toLowerCase().indexOf(searchTerm) < 0) return false;
+    return true;
   });
   var pendingTotal = SUB_CACHE.filter(function(s){return (s.status||'Pending').toLowerCase().indexOf('pending')>=0;}).length;
   var pBg = document.getElementById('sub-pending-bg'); if(pBg)pBg.textContent = pendingTotal;
@@ -5085,8 +5094,8 @@ function renderSubmissions(){
 
   if(!data.length){
     emp.style.display='';
-    if(SUB_FILTER!=='all'){
-      emp.innerHTML='<div style="font-size:40px;margin-bottom:10px">&#128231;</div><p style="font-weight:700;color:#37474f;margin-bottom:6px">No submissions match this filter</p><p style="font-size:12px;color:#607d8b">Try a different filter or click All.</p>';
+    if(SUB_FILTER!=='all' || searchTerm){
+      emp.innerHTML='<div style="font-size:40px;margin-bottom:10px">&#128231;</div><p style="font-weight:700;color:#37474f;margin-bottom:6px">No submissions match this filter</p><p style="font-size:12px;color:#607d8b">Try a different filter, clear the search, or click All.</p>';
     } else {
       emp.innerHTML='<div style="font-size:40px;margin-bottom:10px">&#128231;</div><p style="font-weight:700;color:#37474f;margin-bottom:6px">No submissions yet</p><p style="font-size:12px;color:#607d8b">When staff submit forms via QR code, they\'ll appear here.</p>';
     }

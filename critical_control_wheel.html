@@ -625,6 +625,7 @@ if(localStorage.getItem('kaefer_setup_done')){
           <span style="background:#c6efce;color:#006100;padding:2px 8px;border-radius:3px;border:1px solid #6fa77b;font-weight:600">Current</span>
         </span>
         <button class="ob" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="exportTraining()">&#8595; Export CSV</button>
+        <button class="ob" style="font-size:11px;padding:4px 10px;background:#fff;border:1.5px solid #cc0000;color:#cc0000;font-weight:700" onclick="trSetReminderEmail()" title="Set email address for daily expiry reminders">&#128231; Reminders</button>
       </div>
       <div style="padding:6px 13px 3px;font-size:11px;color:#607d8b;background:#fafafa;border-bottom:1px solid #f0f0f0">
         &#9432; Click any date cell to edit (format: <b>DD/MM/YYYY</b>). Use &#9650;&#9660; to reorder people. Scroll sideways &#8594; to see all categories.
@@ -3745,6 +3746,108 @@ function openTrEdit(ri,ci){
   setTrVal(ri,ci,res.val);rTraining();
 }
 function exportTraining(){var arch=getTrArch();var lines=[['Section','Team'].concat(TR_LABELS).join(',')];TR_BASE.forEach(function(row,ri){var section=arch.indexOf(ri)>-1?'No Longer Employed':'Active';var t=trTeam(ri);var team=t==='mgmt'?'Management':(t==='yard'?'Yard Staff':'Worker');var vals=[section,team].concat(TR_LABELS.map(function(l,ci){var v=getTrVal(ri,ci);if(TR_TYPES[ci]==='date'&&v){var au=trToAus(v);return'"'+au.replace(/"/g,'""')+'"';}return'"'+(v||'').replace(/"/g,'""')+'"';}));lines.push(vals.join(','));});var blob=new Blob([lines.join('\n')],{type:'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='training_register.csv';a.click();}
+
+// ==================== REMINDER EMAIL ====================
+var REMINDER_EMAIL_KEY='kaefer_reminder_email';
+var REMINDER_LAST_KEY='kaefer_reminder_last_sent';
+
+function trComputeExpiring(){
+  var now=new Date();now.setHours(0,0,0,0);
+  var in90=new Date(now.getTime()+90*86400000);
+  var expired=[],dueSoon=[];
+  var arch=getTrArch();
+  TR_BASE.forEach(function(row,ri){
+    if(arch.indexOf(ri)>-1)return;
+    var name=getTrVal(ri,1)||'';var role=getTrVal(ri,2)||'';
+    TR_LABELS.forEach(function(lbl,ci){
+      if(TR_TYPES[ci]!=='date')return;
+      var v=getTrVal(ri,ci);if(!v)return;
+      try{
+        var d=new Date(v);if(isNaN(d.getTime()))return;
+        if(d<now){var daysAgo=Math.round((now-d)/86400000);expired.push({name:name,role:role,cert:lbl,date:v,days:daysAgo});}
+        else if(d<=in90){var daysLeft=Math.round((d-now)/86400000);dueSoon.push({name:name,role:role,cert:lbl,date:v,days:daysLeft});}
+      }catch(e){}
+    });
+  });
+  expired.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  dueSoon.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  return{expired:expired,dueSoon:dueSoon};
+}
+function trBuildReminderHtml(exp){
+  var today=new Date();var td=today.getDate()+'/'+(today.getMonth()+1)+'/'+today.getFullYear();
+  var html='<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:800px">';
+  html+='<div style="background:#cc0000;color:#fff;padding:14px 18px"><h2 style="margin:0;font-size:18px">KAEFER Training Register</h2><div style="font-size:12px;margin-top:4px;opacity:.9">Reminder generated '+td+'</div></div>';
+  html+='<div style="padding:16px 18px">';
+  html+='<p style="margin:0 0 14px">The following training and certifications need attention.</p>';
+  function tbl(rows,cols,bg,txt,headerLabel){
+    var h='<h3 style="color:'+txt+';margin:18px 0 8px;font-size:14px">'+headerLabel+' ('+rows.length+')</h3>';
+    h+='<table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>';
+    ['Name','Role','Certification','Date','Status'].forEach(function(c){h+='<th style="background:'+bg+';padding:7px 9px;text-align:left;border:1px solid #999;color:'+txt+';font-weight:700">'+c+'</th>';});
+    h+='</tr></thead><tbody>';
+    rows.forEach(function(e){
+      var p=e.date.split('-');var disp=p[2]+'/'+p[1]+'/'+p[0];
+      var status=e.days!==undefined?(cols==='expired'?e.days+' days ago':'in '+e.days+' days'):'';
+      h+='<tr>';
+      h+='<td style="padding:6px 9px;border:1px solid #ccc;font-weight:600">'+e.name+'</td>';
+      h+='<td style="padding:6px 9px;border:1px solid #ccc">'+e.role+'</td>';
+      h+='<td style="padding:6px 9px;border:1px solid #ccc">'+e.cert+'</td>';
+      h+='<td style="padding:6px 9px;border:1px solid #ccc">'+disp+'</td>';
+      h+='<td style="padding:6px 9px;border:1px solid #ccc">'+status+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+    return h;
+  }
+  if(exp.expired.length)html+=tbl(exp.expired,'expired','#ffc7ce','#9c0006','&#9888; EXPIRED');
+  if(exp.dueSoon.length)html+=tbl(exp.dueSoon,'due','#ffeb9c','#9c5700','&#128992; DUE WITHIN 90 DAYS');
+  if(!exp.expired.length&&!exp.dueSoon.length)html+='<p style="color:#006100;padding:12px;background:#c6efce;border-radius:4px">&#10003; All certifications are current. Nothing to action.</p>';
+  html+='<p style="margin-top:24px;padding-top:14px;border-top:1px solid #ddd;font-size:11px;color:#666">This reminder is sent automatically once per day when you open the KAEFER Safety Tool. To change or turn off, use the "Reminders" button in the Training tab.</p>';
+  html+='</div></div>';
+  return html;
+}
+function trGetReminderEmail(){return localStorage.getItem(REMINDER_EMAIL_KEY)||'';}
+function trSetReminderEmail(){
+  var cur=trGetReminderEmail();
+  var v=prompt('Enter your email address for training expiry reminders.\n\nYou will receive at most one email per day (only when something needs attention).\nLeave blank to turn off reminders.',cur);
+  if(v===null)return;
+  v=v.trim();
+  if(v&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){alert('That doesn\u2019t look like a valid email address.');return;}
+  if(v){localStorage.setItem(REMINDER_EMAIL_KEY,v);localStorage.removeItem(REMINDER_LAST_KEY);alert('Reminders will be sent to '+v+'.\n\nA test email will send when you refresh the page.');}
+  else{localStorage.removeItem(REMINDER_EMAIL_KEY);alert('Reminders turned off.');}
+  rTraining();
+}
+function trCheckReminder(){
+  try{
+    var email=trGetReminderEmail();if(!email)return;
+    var today=new Date().toISOString().slice(0,10);
+    var lastSent=localStorage.getItem(REMINDER_LAST_KEY);
+    if(lastSent===today)return; // Already sent today
+    var exp=trComputeExpiring();
+    if(!exp.expired.length&&!exp.dueSoon.length){
+      // Mark as checked so we don't keep computing all day
+      localStorage.setItem(REMINDER_LAST_KEY,today);
+      return;
+    }
+    var subject='KAEFER Training: ';
+    var parts=[];
+    if(exp.expired.length)parts.push(exp.expired.length+' expired');
+    if(exp.dueSoon.length)parts.push(exp.dueSoon.length+' due <90d');
+    subject+=parts.join(', ');
+    var body=trBuildReminderHtml(exp);
+    fetch(SCF_WORKER_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'send_reminder_email',to:email,subject:subject,htmlBody:body})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok){
+        localStorage.setItem(REMINDER_LAST_KEY,today);
+        console.log('KAEFER reminder email sent to',email);
+      } else {
+        console.warn('KAEFER reminder failed:',j);
+      }
+    })
+    .catch(function(e){console.warn('KAEFER reminder network error:',e);});
+  } catch(e){console.warn('trCheckReminder error:',e);}
+}
 var BTH_KEY='kaefer_bth3';
 function addBth(){var n=document.getElementById('bth-n').value.trim();if(!n){alert('Enter name.');return;}var log=glj(BTH_KEY,[]);log.push({id:Date.now(),date:document.getElementById('bth-d').value,time:document.getElementById('bth-t').value,name:n,result:document.getElementById('bth-r').value,outcome:document.getElementById('bth-o').value,conductedBy:document.getElementById('bth-c').value.trim()});sl(BTH_KEY,log);['bth-n','bth-r','bth-c'].forEach(function(id){document.getElementById(id).value='';});rBth();}
 function editBth(id){var log=glj(BTH_KEY,[]),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit Breathalyser Record',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'time',label:'Time',type:'time',val:en.time},{key:'name',label:'Name',type:'text',val:en.name},{key:'result',label:'BAC Result',type:'text',val:en.result},{key:'outcome',label:'Outcome',type:'select',val:en.outcome,options:['Pass','Fail','Refused']},{key:'conductedBy',label:'Conducted By',type:'text',val:en.conductedBy}],onSave:function(v){var log2=glj(BTH_KEY,[]);log2.forEach(function(e){if(e.id===id)Object.assign(e,v);});sl(BTH_KEY,log2);rBth();}});}
@@ -6681,6 +6784,8 @@ function autoLoadSubmissions(){
 autoLoadSubmissions();
 
 uML();dW();rRR();rAtt();rFormer();rPV();rDM();rPPEReg();rPurchReg();rVehReg();rToolReg();rHgtReg();rTraining();rBth();
+// Check for expiring training and send a daily reminder email if configured
+setTimeout(function(){try{trCheckReminder();}catch(e){console.warn(e);}},3000);
 ldLoc();dW();
 var su=localStorage.getItem(UK);
 if(su){setSS('bz','Auto-connecting...');setTimeout(function(){ldSh();},500);}else{setSS('er','Not connected – click Setup Sync');}

@@ -623,7 +623,7 @@ if(localStorage.getItem('kaefer_setup_done')){
         <button class="ob" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="exportTraining()">&#8595; Export CSV</button>
       </div>
       <div style="padding:6px 13px 3px;font-size:11px;color:#607d8b;background:#fafafa;border-bottom:1px solid #f0f0f0">
-        &#9432; Click any date cell to edit. Scroll sideways &#8594; to see all categories. Name column stays visible while scrolling.
+        &#9432; Click any date cell to edit (format: <b>DD/MM/YYYY</b>). Scroll sideways &#8594; to see all categories. Name column stays visible while scrolling.
       </div>
       <div style="overflow-x:auto;max-height:70vh;overflow-y:auto"><table id="train-tbl" style="font-size:11px;border-collapse:separate;border-spacing:0">
         <thead>
@@ -3477,7 +3477,7 @@ var TR_GROUPS=[["Person", 3], ["Basics", 6], ["Wharf", 5], ["RMA", 2], ["Cogen",
 var TR_KEY='kaefer_train_ov';
 var TR_ARCH_KEY='kaefer_train_arch';
 var TR_VER_KEY='kaefer_train_ver';
-var TR_CURRENT_VER='2026-05-training-refresh-v4';
+var TR_CURRENT_VER='2026-05-training-refresh-v5';
 // One-time cleanup: if the baseline data has just been refreshed, any override
 // keyed by an old row index no longer maps to the same person. Clear them.
 (function(){try{if(localStorage.getItem(TR_VER_KEY)!==TR_CURRENT_VER){localStorage.removeItem(TR_KEY);localStorage.removeItem(TR_ARCH_KEY);localStorage.setItem(TR_VER_KEY,TR_CURRENT_VER);}}catch(e){}})();
@@ -3487,8 +3487,20 @@ function getTrArch(){var a=localStorage.getItem(TR_ARCH_KEY);if(a===null){var d=
 function isTrArch(ri){return getTrArch().indexOf(ri)>-1;}
 function archiveTrainee(ri){var name=getTrVal(ri,1)||'this person';if(!confirm('Move '+name+' to the No Longer Employed table?\n\nThey will not appear in the main training register or in expiry alerts.'))return;var a=getTrArch();if(a.indexOf(ri)<0){a.push(ri);sl(TR_ARCH_KEY,a);}rTraining();}
 function restoreTrainee(ri){var name=getTrVal(ri,1)||'this person';if(!confirm('Restore '+name+' to the active training register?'))return;var a=getTrArch();var i=a.indexOf(ri);if(i>-1){a.splice(i,1);sl(TR_ARCH_KEY,a);}rTraining();}
-function trExpCls(v){if(!v)return'';try{var d=new Date(v),diff=Math.round((d-new Date())/86400000);if(diff<0)return'br';if(diff<90)return'bam';return'bg';}catch(e){return'';}}
-function trFmt(v){if(!v)return'–';try{var p=v.split('-');return p[2]+'/'+p[1]+'/'+p[0].slice(2);}catch(e){return v;}}
+function trExpCls(v){if(!v)return'';try{var d=new Date(v);if(isNaN(d.getTime()))return'';var diff=Math.round((d-new Date())/86400000);if(diff<0)return'br';if(diff<90)return'bam';return'bg';}catch(e){return'';}}
+function trFmt(v){if(!v)return'–';try{var p=v.split('-');if(p.length===3&&p[0].length===4)return p[2]+'/'+p[1]+'/'+p[0];return v;}catch(e){return v;}}
+// Show stored YYYY-MM-DD (or messy legacy value) as DD/MM/YYYY for the prompt.
+function trToAus(v){if(!v)return'';var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v);if(m)return m[3]+'/'+m[2]+'/'+m[1];return v;}
+// Parse whatever the user typed. Accept DD/MM/YYYY (preferred), and DD-MM-YYYY, and YYYY-MM-DD as fallbacks.
+function trFromAus(v){
+  v=(v||'').trim();
+  if(!v)return{ok:true,val:''};
+  var m=/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/.exec(v);
+  if(m){var d=+m[1],mo=+m[2],y=+m[3];if(d>=1&&d<=31&&mo>=1&&mo<=12&&y>=1900&&y<=2999){return{ok:true,val:y+'-'+('0'+mo).slice(-2)+'-'+('0'+d).slice(-2)};}return{ok:false};}
+  var m2=/^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);
+  if(m2){var y2=+m2[1],mo2=+m2[2],d2=+m2[3];if(d2>=1&&d2<=31&&mo2>=1&&mo2<=12&&y2>=1900&&y2<=2999){return{ok:true,val:y2+'-'+('0'+mo2).slice(-2)+'-'+('0'+d2).slice(-2)};}return{ok:false};}
+  return{ok:false};
+}
 // Alternating red/black banner strips per group category. Keeps things clean and on-brand.
 var TR_GROUP_COLORS={
   'Person':        {tint:'#fff', banner:'#1a1a1a', text:'#fff'},
@@ -3598,8 +3610,18 @@ function rTraining(){
     if(em&&atbl){if(archCount===0){em.style.display='';em.textContent=f?'No archived people match "'+f+'".':'No archived people.';atbl.style.display='none';}else{em.style.display='none';atbl.style.display='';}}
   }
 }
-function openTrEdit(ri,ci){var cur=getTrVal(ri,ci);var name=getTrVal(ri,1);var lbl=TR_LABELS[ci];var val=prompt(name+'\n'+lbl+'\nEnter date (YYYY-MM-DD) or clear:',cur||'');if(val===null)return;val=val.trim();if(val&&!/^\d{4}-\d{2}-\d{2}$/.test(val)){alert('Use format YYYY-MM-DD');return;}setTrVal(ri,ci,val);rTraining();}
-function exportTraining(){var arch=getTrArch();var lines=[['Section'].concat(TR_LABELS).join(',')];TR_BASE.forEach(function(row,ri){var section=arch.indexOf(ri)>-1?'No Longer Employed':'Active';var vals=[section].concat(TR_LABELS.map(function(l,ci){var v=getTrVal(ri,ci);return'"'+(v||'').replace(/"/g,'""')+'"';}));lines.push(vals.join(','));});var blob=new Blob([lines.join('\n')],{type:'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='training_register.csv';a.click();}
+function openTrEdit(ri,ci){
+  var cur=getTrVal(ri,ci);
+  var name=getTrVal(ri,1);
+  var lbl=TR_LABELS[ci];
+  var promptTitle=name+'\n'+lbl+'\n\nEnter date as DD/MM/YYYY (e.g. 15/06/2027)\nLeave blank to clear.';
+  var val=prompt(promptTitle,trToAus(cur));
+  if(val===null)return;
+  var res=trFromAus(val);
+  if(!res.ok){alert('Please enter the date as DD/MM/YYYY\nExample: 15/06/2027');return;}
+  setTrVal(ri,ci,res.val);rTraining();
+}
+function exportTraining(){var arch=getTrArch();var lines=[['Section'].concat(TR_LABELS).join(',')];TR_BASE.forEach(function(row,ri){var section=arch.indexOf(ri)>-1?'No Longer Employed':'Active';var vals=[section].concat(TR_LABELS.map(function(l,ci){var v=getTrVal(ri,ci);if(TR_TYPES[ci]==='date'&&v){var au=trToAus(v);return'"'+au.replace(/"/g,'""')+'"';}return'"'+(v||'').replace(/"/g,'""')+'"';}));lines.push(vals.join(','));});var blob=new Blob([lines.join('\n')],{type:'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='training_register.csv';a.click();}
 var BTH_KEY='kaefer_bth3';
 function addBth(){var n=document.getElementById('bth-n').value.trim();if(!n){alert('Enter name.');return;}var log=glj(BTH_KEY,[]);log.push({id:Date.now(),date:document.getElementById('bth-d').value,time:document.getElementById('bth-t').value,name:n,result:document.getElementById('bth-r').value,outcome:document.getElementById('bth-o').value,conductedBy:document.getElementById('bth-c').value.trim()});sl(BTH_KEY,log);['bth-n','bth-r','bth-c'].forEach(function(id){document.getElementById(id).value='';});rBth();}
 function editBth(id){var log=glj(BTH_KEY,[]),en=log.filter(function(e){return e.id===id;})[0];if(!en)return;openEdit({title:'Edit Breathalyser Record',fields:[{key:'date',label:'Date',type:'date',val:en.date},{key:'time',label:'Time',type:'time',val:en.time},{key:'name',label:'Name',type:'text',val:en.name},{key:'result',label:'BAC Result',type:'text',val:en.result},{key:'outcome',label:'Outcome',type:'select',val:en.outcome,options:['Pass','Fail','Refused']},{key:'conductedBy',label:'Conducted By',type:'text',val:en.conductedBy}],onSave:function(v){var log2=glj(BTH_KEY,[]);log2.forEach(function(e){if(e.id===id)Object.assign(e,v);});sl(BTH_KEY,log2);rBth();}});}

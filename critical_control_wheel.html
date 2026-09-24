@@ -623,7 +623,7 @@ if(localStorage.getItem('kaefer_setup_done')){
         <button class="ob" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="exportTraining()">&#8595; Export CSV</button>
       </div>
       <div style="padding:6px 13px 3px;font-size:11px;color:#607d8b;background:#fafafa;border-bottom:1px solid #f0f0f0">
-        &#9432; Click any date cell to edit (format: <b>DD/MM/YYYY</b>). Scroll sideways &#8594; to see all categories. Name column stays visible while scrolling.
+        &#9432; Click any date cell to edit (format: <b>DD/MM/YYYY</b>). Use &#9650;&#9660; to reorder people. Scroll sideways &#8594; to see all categories.
       </div>
       <div style="overflow-x:auto;max-height:70vh;overflow-y:auto"><table id="train-tbl" style="font-size:11px;border-collapse:separate;border-spacing:0">
         <thead>
@@ -636,7 +636,7 @@ if(localStorage.getItem('kaefer_setup_done')){
     <div class="card" style="border-top-left-radius:0">
       <div class="ch ch-sl" style="justify-content:space-between"><span>&#128683; No Longer Employed &mdash; Training Archive</span><span class="cbg" id="train-arch-bg">0</span></div>
       <div style="padding:6px 13px;font-size:11px;color:#607d8b;background:#fafafa;border-bottom:1px solid #f0f0f0">
-        &#9432; People here don't show in the main table or in expiry alerts. Click <b>Restore</b> to move them back.
+        &#9432; People here don't show in the main table or in expiry alerts. Click <b>Restore</b> to move them back. Use &#9650;&#9660; to reorder.
       </div>
       <div id="train-arch-empty" class="le" style="display:none">No archived people.</div>
       <div style="overflow-x:auto;max-height:60vh;overflow-y:auto"><table id="train-arch-tbl" style="font-size:11px;border-collapse:separate;border-spacing:0">
@@ -3476,17 +3476,31 @@ var TR_TYPES=["text", "text", "text", "date", "date", "date", "date", "date", "d
 var TR_GROUPS=[["Person", 3], ["Basics", 6], ["Wharf", 5], ["RMA", 2], ["Cogen", 1], ["Scaffold", 6], ["Heights", 2], ["Confined Space", 2], ["Forklift", 2], ["EWP", 2], ["Rigging", 2], ["Dogging", 2], ["Driving", 1], ["Permits", 2], ["Crane", 2]];
 var TR_KEY='kaefer_train_ov';
 var TR_ARCH_KEY='kaefer_train_arch';
+var TR_ORDER_KEY='kaefer_train_order';
 var TR_VER_KEY='kaefer_train_ver';
-var TR_CURRENT_VER='2026-05-training-refresh-v5';
+var TR_CURRENT_VER='2026-05-training-refresh-v6';
 // One-time cleanup: if the baseline data has just been refreshed, any override
-// keyed by an old row index no longer maps to the same person. Clear them.
-(function(){try{if(localStorage.getItem(TR_VER_KEY)!==TR_CURRENT_VER){localStorage.removeItem(TR_KEY);localStorage.removeItem(TR_ARCH_KEY);localStorage.setItem(TR_VER_KEY,TR_CURRENT_VER);}}catch(e){}})();
+// (or ordering) keyed by an old row index no longer maps to the same person. Clear them.
+(function(){try{if(localStorage.getItem(TR_VER_KEY)!==TR_CURRENT_VER){localStorage.removeItem(TR_KEY);localStorage.removeItem(TR_ARCH_KEY);localStorage.removeItem(TR_ORDER_KEY);localStorage.setItem(TR_VER_KEY,TR_CURRENT_VER);}}catch(e){}})();
 function getTrVal(ri,ci){var ov=glj(TR_KEY,{});return(ov[ri]&&ov[ri][ci]!==undefined)?ov[ri][ci]:TR_BASE[ri][ci];}
 function setTrVal(ri,ci,v){var ov=glj(TR_KEY,{});if(!ov[ri])ov[ri]={};ov[ri][ci]=v;sl(TR_KEY,ov);}
 function getTrArch(){var a=localStorage.getItem(TR_ARCH_KEY);if(a===null){var d=(typeof TR_TERM_DEFAULT!=='undefined')?TR_TERM_DEFAULT.slice():[];sl(TR_ARCH_KEY,d);return d;}try{return JSON.parse(a);}catch(e){return[];}}
+function getTrOrder(){var s=localStorage.getItem(TR_ORDER_KEY);if(s){try{var a=JSON.parse(s);if(a.length===TR_BASE.length)return a;}catch(e){}}var d=[];for(var i=0;i<TR_BASE.length;i++)d.push(i);return d;}
+function setTrOrder(a){sl(TR_ORDER_KEY,a);}
 function isTrArch(ri){return getTrArch().indexOf(ri)>-1;}
 function archiveTrainee(ri){var name=getTrVal(ri,1)||'this person';if(!confirm('Move '+name+' to the No Longer Employed table?\n\nThey will not appear in the main training register or in expiry alerts.'))return;var a=getTrArch();if(a.indexOf(ri)<0){a.push(ri);sl(TR_ARCH_KEY,a);}rTraining();}
 function restoreTrainee(ri){var name=getTrVal(ri,1)||'this person';if(!confirm('Restore '+name+' to the active training register?'))return;var a=getTrArch();var i=a.indexOf(ri);if(i>-1){a.splice(i,1);sl(TR_ARCH_KEY,a);}rTraining();}
+// Move a person up or down within their own table (main or archive). Skips people from the other table.
+function moveTrainee(ri,dir){
+  var order=getTrOrder(),arch=getTrArch(),isArch=arch.indexOf(ri)>-1;
+  var pos=order.indexOf(ri);if(pos<0)return;
+  var target=-1;
+  if(dir<0){for(var i=pos-1;i>=0;i--){if((arch.indexOf(order[i])>-1)===isArch){target=i;break;}}}
+  else{for(var i=pos+1;i<order.length;i++){if((arch.indexOf(order[i])>-1)===isArch){target=i;break;}}}
+  if(target<0)return;
+  var tmp=order[pos];order[pos]=order[target];order[target]=tmp;
+  setTrOrder(order);rTraining();
+}
 function trExpCls(v){if(!v)return'';try{var d=new Date(v);if(isNaN(d.getTime()))return'';var diff=Math.round((d-new Date())/86400000);if(diff<0)return'br';if(diff<90)return'bam';return'bg';}catch(e){return'';}}
 function trFmt(v){if(!v)return'–';try{var p=v.split('-');if(p.length===3&&p[0].length===4)return p[2]+'/'+p[1]+'/'+p[0];return v;}catch(e){return v;}}
 // Show stored YYYY-MM-DD (or messy legacy value) as DD/MM/YYYY for the prompt.
@@ -3522,42 +3536,49 @@ var TR_GROUP_COLORS={
 function trGroupTint(ci){return '#fff';}
 function trHdrHtml(){
   // Two-row header: group banner + column labels. Actions + Name are frozen columns.
-  var GRID='1px solid #c8c8c8';
-  var r1='<th rowspan="2" style="padding:8px 10px;white-space:nowrap;background:#fafafa;border-bottom:2px solid var(--r);border-right:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--r);font-weight:700;position:sticky;left:0;z-index:5">Actions</th>';
+  var GRID='2px solid #666';
+  var STICKY_LEFT='150px';
+  var r1='<th rowspan="2" style="padding:8px 10px;white-space:nowrap;background:#fafafa;border-bottom:2px solid var(--r);border-right:'+GRID+';border-top:'+GRID+';border-left:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--r);font-weight:700;position:sticky;left:0;z-index:5">Actions</th>';
   var r2='';
   var idx=0;
   TR_GROUPS.forEach(function(g){
     var name=g[0],span=g[1];
     var col=TR_GROUP_COLORS[name]||{banner:'#1a1a1a',text:'#fff'};
     if(name==='Person'){
-      r1+='<th colspan="'+span+'" style="padding:7px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:left;position:sticky;left:110px;z-index:4;border-right:2px solid #fff;border-bottom:'+GRID+'">'+name+'</th>';
+      r1+='<th colspan="'+span+'" style="padding:7px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:left;position:sticky;left:'+STICKY_LEFT+';z-index:4;border-right:2px solid #fff;border-bottom:'+GRID+';border-top:'+GRID+'">'+name+'</th>';
     } else {
-      r1+='<th colspan="'+span+'" style="padding:7px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:center;border-right:2px solid #fff;border-bottom:'+GRID+'">'+name+'</th>';
+      r1+='<th colspan="'+span+'" style="padding:7px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:center;border-right:2px solid #fff;border-bottom:'+GRID+';border-top:'+GRID+'">'+name+'</th>';
     }
     for(var i=0;i<span;i++){
       var ci=idx+i;
       var lbl=TR_LABELS[ci];
       var isName=(ci===1);
-      var stickyCss=isName?';position:sticky;left:110px;z-index:3;background:#fafafa;border-right:2px solid #1a1a1a':'';
-      r2+='<th style="padding:6px 8px;white-space:nowrap;background:#fafafa;border-bottom:2px solid var(--r);border-right:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#1a1a1a;font-weight:700'+stickyCss+'">'+lbl+'</th>';
+      var stickyCss=isName?';position:sticky;left:'+STICKY_LEFT+';z-index:3;background:#fafafa;border-right:3px solid #1a1a1a':'';
+      r2+='<th style="padding:6px 8px;white-space:nowrap;background:#fafafa;border-bottom:'+GRID+';border-right:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#1a1a1a;font-weight:700'+stickyCss+'">'+lbl+'</th>';
     }
     idx+=span;
   });
   return {row1:r1,row2:r2};
 }
 function trRowHtml(ri,archived,zebra){
-  var GRID='1px solid #d8d8d8';
+  var GRID='2px solid #666';
+  var STICKY_LEFT='150px';
   var html='';
-  var rowBg=zebra?'#fafafa':'#fff';
-  var actBtn=archived
-    ?'<button onclick="restoreTrainee('+ri+')" style="background:#1a1a1a;color:#fff;border:0;padding:4px 9px;font-size:10px;border-radius:3px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit">&#8630; Restore</button>'
-    :'<button onclick="archiveTrainee('+ri+')" style="background:#f5f5f5;color:#1a1a1a;border:1px solid #c8c8c8;padding:4px 9px;font-size:10px;border-radius:3px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">Archive</button>';
-  html+='<td style="padding:6px 10px;white-space:nowrap;background:'+rowBg+';position:sticky;left:0;z-index:2;border-right:'+GRID+';border-bottom:'+GRID+'">'+actBtn+'</td>';
+  var rowBg=zebra?'#f0f0f0':'#fff';
+  var arrowBtn='background:#fff;color:#1a1a1a;border:1.5px solid #666;padding:0;width:22px;height:20px;font-size:11px;line-height:1;border-radius:3px;font-weight:700;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center';
+  var mainBtn=archived
+    ?'<button onclick="restoreTrainee('+ri+')" style="background:#1a1a1a;color:#fff;border:0;padding:4px 8px;font-size:10px;border-radius:3px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit">&#8630; Restore</button>'
+    :'<button onclick="archiveTrainee('+ri+')" style="background:#f5f5f5;color:#1a1a1a;border:1.5px solid #666;padding:4px 8px;font-size:10px;border-radius:3px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">Archive</button>';
+  var arrows='<div style="display:inline-flex;flex-direction:column;gap:1px;margin-right:4px;vertical-align:middle">'
+    +'<button title="Move up" onclick="moveTrainee('+ri+',-1)" style="'+arrowBtn+';height:14px;font-size:9px">&#9650;</button>'
+    +'<button title="Move down" onclick="moveTrainee('+ri+',1)" style="'+arrowBtn+';height:14px;font-size:9px">&#9660;</button>'
+    +'</div>';
+  html+='<td style="padding:6px 8px;white-space:nowrap;background:'+rowBg+';position:sticky;left:0;z-index:2;border-right:'+GRID+';border-bottom:'+GRID+';border-left:'+GRID+'"><div style="display:flex;align-items:center;gap:2px">'+arrows+mainBtn+'</div></td>';
   TR_LABELS.forEach(function(lbl,ci){
     var v=getTrVal(ri,ci);var typ=TR_TYPES[ci];
     var isName=(ci===1);
     if(isName){
-      html+='<td style="padding:6px 10px;white-space:nowrap;font-weight:700;color:#1a1a1a;background:'+rowBg+';position:sticky;left:110px;z-index:1;border-right:2px solid #1a1a1a;border-bottom:'+GRID+';font-size:12px">'+(v||'<span style="color:#ddd">–</span>')+'</td>';
+      html+='<td style="padding:6px 10px;white-space:nowrap;font-weight:700;color:#1a1a1a;background:'+rowBg+';position:sticky;left:'+STICKY_LEFT+';z-index:1;border-right:3px solid #1a1a1a;border-bottom:'+GRID+';font-size:12px">'+(v||'<span style="color:#ddd">–</span>')+'</td>';
       return;
     }
     if(typ==='date'){
@@ -3573,17 +3594,18 @@ function trRowHtml(ri,archived,zebra){
 function rTraining(){
   var f=(document.getElementById('train-filter')||{}).value||'';f=f.toLowerCase();
   var arch=getTrArch();
+  var order=getTrOrder();
   // Headers (two rows)
   var thead=trHdrHtml();
   var hdr=document.getElementById('train-hdr');
   if(hdr){hdr.innerHTML=thead.row1; var hdr2=document.getElementById('train-hdr2'); if(hdr2)hdr2.innerHTML=thead.row2;}
   var ahdr=document.getElementById('train-arch-hdr');
   if(ahdr){ahdr.innerHTML=thead.row1; var ahdr2=document.getElementById('train-arch-hdr2'); if(ahdr2)ahdr2.innerHTML=thead.row2;}
-  // Main body
+  // Main body — iterate in custom order
   var tb=document.getElementById('train-body');if(!tb)return;tb.innerHTML='';
   var mainCount=0,archCount=0;
   var zebraIdx=0;
-  TR_BASE.forEach(function(row,ri){
+  order.forEach(function(ri){
     var name=getTrVal(ri,1)||'';var matches=!f||name.toLowerCase().indexOf(f)>-1;
     if(arch.indexOf(ri)>-1){if(matches)archCount++;return;}
     if(!matches)return;
@@ -3594,10 +3616,10 @@ function rTraining(){
     zebraIdx++;
   });
   document.getElementById('train-bg').textContent=mainCount;
-  // Archived body
+  // Archived body — also iterate in custom order
   var atb=document.getElementById('train-arch-body');if(atb){atb.innerHTML='';
     var zi=0;
-    TR_BASE.forEach(function(row,ri){
+    order.forEach(function(ri){
       var name=getTrVal(ri,1)||'';var matches=!f||name.toLowerCase().indexOf(f)>-1;
       if(arch.indexOf(ri)<0)return;if(!matches)return;
       var tr=document.createElement('tr');

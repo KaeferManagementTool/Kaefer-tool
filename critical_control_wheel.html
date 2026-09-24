@@ -619,7 +619,11 @@ if(localStorage.getItem('kaefer_setup_done')){
       <div class="filter-bar" style="padding:9px 13px 8px;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #f0f0f0">
         <label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mu);white-space:nowrap">Search:</label>
         <input type="text" id="train-filter" placeholder="Filter by name..." oninput="rTraining()" style="padding:5px 9px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:220px">
-        <span style="font-size:11px;color:#607d8b;display:flex;gap:5px;align-items:center;flex-wrap:wrap"><span class="badge br">Expired</span><span class="badge bam">Due &lt;90d</span><span class="badge bg">Current</span></span>
+        <span style="font-size:11px;color:#607d8b;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span style="background:#ffc7ce;color:#9c0006;padding:2px 8px;border-radius:3px;border:1px solid #d97e88;font-weight:600">Expired</span>
+          <span style="background:#ffeb9c;color:#9c5700;padding:2px 8px;border-radius:3px;border:1px solid #d4a747;font-weight:600">Due &lt;90d</span>
+          <span style="background:#c6efce;color:#006100;padding:2px 8px;border-radius:3px;border:1px solid #6fa77b;font-weight:600">Current</span>
+        </span>
         <button class="ob" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="exportTraining()">&#8595; Export CSV</button>
       </div>
       <div style="padding:6px 13px 3px;font-size:11px;color:#607d8b;background:#fafafa;border-bottom:1px solid #f0f0f0">
@@ -3534,27 +3538,59 @@ var TR_GROUP_COLORS={
   'Crane':         {tint:'#fff', banner:'#1a1a1a', text:'#fff'}
 };
 function trGroupTint(ci){return '#fff';}
+// Excel-inspired palette: pale yellow group banners, filled cell backgrounds for status.
+var TR_GROUP_COLORS={
+  'Person':        {tint:'#fff', banner:'#1a1a1a', text:'#fff'},
+  'Basics':        {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Wharf':         {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'RMA':           {tint:'#fff', banner:'#f4b183', text:'#1a1a1a'},
+  'Cogen':         {tint:'#fff', banner:'#f4b183', text:'#1a1a1a'},
+  'Scaffold':      {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Heights':       {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Confined Space':{tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Forklift':      {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'EWP':           {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Rigging':       {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Dogging':       {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Driving':       {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'},
+  'Permits':       {tint:'#fff', banner:'#f4b183', text:'#1a1a1a'},
+  'Crane':         {tint:'#fff', banner:'#fff2cc', text:'#1a1a1a'}
+};
+// Excel conditional-formatting colour palette (background, text) per date status.
+function trDateColors(v){
+  if(!v)return{bg:'',text:'#c0c0c0'};
+  try{
+    var d=new Date(v);if(isNaN(d.getTime()))return{bg:'#ffe0b2',text:'#5d4037'};
+    var diff=Math.round((d-new Date())/86400000);
+    if(diff<0)return{bg:'#ffc7ce',text:'#9c0006'};       // Expired: pink bg, dark red text
+    if(diff<90)return{bg:'#ffeb9c',text:'#9c5700'};      // Due <90d: amber bg, dark amber text
+    return{bg:'#c6efce',text:'#006100'};                  // Current: mint bg, dark green text
+  }catch(e){return{bg:'',text:'#c0c0c0'};}
+}
+function trGroupTint(ci){return '#fff';}
 function trHdrHtml(){
   // Two-row header: group banner + column labels. Actions + Name are frozen columns.
   var GRID='2px solid #666';
   var STICKY_LEFT='150px';
-  var r1='<th rowspan="2" style="padding:8px 10px;white-space:nowrap;background:#fafafa;border-bottom:2px solid var(--r);border-right:'+GRID+';border-top:'+GRID+';border-left:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--r);font-weight:700;position:sticky;left:0;z-index:5">Actions</th>';
+  var r1='<th rowspan="2" style="padding:8px 10px;white-space:nowrap;background:#1a1a1a;color:#fff;border-bottom:'+GRID+';border-right:'+GRID+';border-top:'+GRID+';border-left:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.4px;font-weight:700;position:sticky;left:0;z-index:5">Actions</th>';
   var r2='';
   var idx=0;
   TR_GROUPS.forEach(function(g){
     var name=g[0],span=g[1];
-    var col=TR_GROUP_COLORS[name]||{banner:'#1a1a1a',text:'#fff'};
+    var col=TR_GROUP_COLORS[name]||{banner:'#fff2cc',text:'#1a1a1a'};
     if(name==='Person'){
-      r1+='<th colspan="'+span+'" style="padding:7px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:left;position:sticky;left:'+STICKY_LEFT+';z-index:4;border-right:2px solid #fff;border-bottom:'+GRID+';border-top:'+GRID+'">'+name+'</th>';
+      r1+='<th colspan="'+span+'" style="padding:8px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:left;position:sticky;left:'+STICKY_LEFT+';z-index:4;border-right:'+GRID+';border-bottom:'+GRID+';border-top:'+GRID+'">'+name+'</th>';
     } else {
-      r1+='<th colspan="'+span+'" style="padding:7px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:center;border-right:2px solid #fff;border-bottom:'+GRID+';border-top:'+GRID+'">'+name+'</th>';
+      r1+='<th colspan="'+span+'" style="padding:8px 10px;background:'+col.banner+';color:'+col.text+';font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:center;border-right:'+GRID+';border-bottom:'+GRID+';border-top:'+GRID+'">'+name+'</th>';
     }
     for(var i=0;i<span;i++){
       var ci=idx+i;
       var lbl=TR_LABELS[ci];
       var isName=(ci===1);
-      var stickyCss=isName?';position:sticky;left:'+STICKY_LEFT+';z-index:3;background:#fafafa;border-right:3px solid #1a1a1a':'';
-      r2+='<th style="padding:6px 8px;white-space:nowrap;background:#fafafa;border-bottom:'+GRID+';border-right:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#1a1a1a;font-weight:700'+stickyCss+'">'+lbl+'</th>';
+      var stickyCss=isName?';position:sticky;left:'+STICKY_LEFT+';z-index:3;background:#1a1a1a;color:#fff;border-right:3px solid #1a1a1a':'';
+      var baseBg=isName?'#1a1a1a':'#f2f2f2';
+      var baseColor=isName?'#fff':'#1a1a1a';
+      r2+='<th style="padding:6px 8px;white-space:nowrap;background:'+baseBg+';color:'+baseColor+';border-bottom:'+GRID+';border-right:'+GRID+';font-size:10px;text-transform:uppercase;letter-spacing:.3px;font-weight:700'+stickyCss+'">'+lbl+'</th>';
     }
     idx+=span;
   });
@@ -3564,29 +3600,34 @@ function trRowHtml(ri,archived,zebra){
   var GRID='2px solid #666';
   var STICKY_LEFT='150px';
   var html='';
-  var rowBg=zebra?'#f0f0f0':'#fff';
-  var arrowBtn='background:#fff;color:#1a1a1a;border:1.5px solid #666;padding:0;width:22px;height:20px;font-size:11px;line-height:1;border-radius:3px;font-weight:700;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center';
+  var rowBg='#fff';   // No more manual zebra — cell status colours provide the variation.
+  var arrowBtn='background:#fff;color:#1a1a1a;border:1.5px solid #666;padding:0;width:22px;height:14px;font-size:9px;line-height:1;border-radius:3px;font-weight:700;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center';
   var mainBtn=archived
     ?'<button onclick="restoreTrainee('+ri+')" style="background:#1a1a1a;color:#fff;border:0;padding:4px 8px;font-size:10px;border-radius:3px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit">&#8630; Restore</button>'
     :'<button onclick="archiveTrainee('+ri+')" style="background:#f5f5f5;color:#1a1a1a;border:1.5px solid #666;padding:4px 8px;font-size:10px;border-radius:3px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">Archive</button>';
   var arrows='<div style="display:inline-flex;flex-direction:column;gap:1px;margin-right:4px;vertical-align:middle">'
-    +'<button title="Move up" onclick="moveTrainee('+ri+',-1)" style="'+arrowBtn+';height:14px;font-size:9px">&#9650;</button>'
-    +'<button title="Move down" onclick="moveTrainee('+ri+',1)" style="'+arrowBtn+';height:14px;font-size:9px">&#9660;</button>'
+    +'<button title="Move up" onclick="moveTrainee('+ri+',-1)" style="'+arrowBtn+'">&#9650;</button>'
+    +'<button title="Move down" onclick="moveTrainee('+ri+',1)" style="'+arrowBtn+'">&#9660;</button>'
     +'</div>';
-  html+='<td style="padding:6px 8px;white-space:nowrap;background:'+rowBg+';position:sticky;left:0;z-index:2;border-right:'+GRID+';border-bottom:'+GRID+';border-left:'+GRID+'"><div style="display:flex;align-items:center;gap:2px">'+arrows+mainBtn+'</div></td>';
+  html+='<td style="padding:6px 8px;white-space:nowrap;background:#e8e8e8;position:sticky;left:0;z-index:2;border-right:'+GRID+';border-bottom:'+GRID+';border-left:'+GRID+'"><div style="display:flex;align-items:center;gap:2px">'+arrows+mainBtn+'</div></td>';
   TR_LABELS.forEach(function(lbl,ci){
     var v=getTrVal(ri,ci);var typ=TR_TYPES[ci];
     var isName=(ci===1);
     if(isName){
-      html+='<td style="padding:6px 10px;white-space:nowrap;font-weight:700;color:#1a1a1a;background:'+rowBg+';position:sticky;left:'+STICKY_LEFT+';z-index:1;border-right:3px solid #1a1a1a;border-bottom:'+GRID+';font-size:12px">'+(v||'<span style="color:#ddd">–</span>')+'</td>';
+      html+='<td style="padding:7px 10px;white-space:nowrap;font-weight:700;color:#fff;background:#1a1a1a;position:sticky;left:'+STICKY_LEFT+';z-index:1;border-right:3px solid #1a1a1a;border-bottom:'+GRID+';font-size:12px">'+(v||'<span style="color:#666">–</span>')+'</td>';
       return;
     }
     if(typ==='date'){
-      var cls=trExpCls(v);var disp=v?trFmt(v):'–';
-      html+='<td onclick="openTrEdit('+ri+','+ci+')" style="cursor:pointer;padding:6px 8px;white-space:nowrap;background:'+rowBg+';text-align:center;font-size:11px;border-right:'+GRID+';border-bottom:'+GRID+'" onmouseover="this.style.background=\'#fff9c4\'" onmouseout="this.style.background=\''+rowBg+'\'">'+(cls?'<span class="badge '+cls+'">'+disp+'</span>':'<span style="color:#c0c0c0">'+disp+'</span>')+'</td>';
+      var col=trDateColors(v);
+      var disp=v?trFmt(v):'';
+      var cellBg=col.bg||'#fafafa';
+      html+='<td onclick="openTrEdit('+ri+','+ci+')" style="cursor:pointer;padding:7px 8px;white-space:nowrap;background:'+cellBg+';color:'+col.text+';text-align:center;font-size:11px;font-weight:600;border-right:'+GRID+';border-bottom:'+GRID+'" onmouseover="this.style.outline=\'2px solid #1976d2\';this.style.outlineOffset=\'-2px\'" onmouseout="this.style.outline=\'none\'">'+(disp||'&nbsp;')+'</td>';
     } else {
-      var scls=ci===0&&v&&v.toLowerCase()==='active'?'bg':ci===0&&v?'bgr':'';
-      html+='<td style="padding:6px 10px;white-space:nowrap;background:'+rowBg+';font-size:11px;color:#1a1a1a;border-right:'+GRID+';border-bottom:'+GRID+'">'+(scls?'<span class="badge '+scls+'">'+v+'</span>':(v||'<span style="color:#ddd">–</span>'))+'</td>';
+      // Status column
+      var isActive=v&&v.toLowerCase()==='active';
+      var stBg=isActive?'#c6efce':(v?'#ffc7ce':'#fafafa');
+      var stFg=isActive?'#006100':(v?'#9c0006':'#c0c0c0');
+      html+='<td style="padding:7px 10px;white-space:nowrap;background:'+stBg+';font-size:11px;color:'+stFg+';font-weight:600;border-right:'+GRID+';border-bottom:'+GRID+';text-align:center">'+(v||'–')+'</td>';
     }
   });
   return html;

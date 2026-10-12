@@ -2348,33 +2348,26 @@ function massArchiveAll(){
   // Keep office staff untouched
   var toArchive=emps.filter(function(e){return e.g!=='OFFICE STAFF';});
   var toKeep=emps.filter(function(e){return e.g==='OFFICE STAFF';});
-  // Also find anyone already archived whose date is blank or unparseable
-  // (because blank dates make them still show in every month — the bug we're fixing).
-  var fixCount=0;
-  arch.forEach(function(a){
-    if(a.g==='OFFICE STAFF')return; // don't touch office staff archives
-    var d=new Date(a.date);
-    if(!a.date||isNaN(d.getTime())){fixCount++;}
-  });
-  if(!toArchive.length&&!fixCount){alert('Nothing to archive or fix.');return;}
-  if(!confirm('MASS ARCHIVE\n\nMove '+toArchive.length+' active (Yard Staff + Scaffolders) to No Longer Employed.\nAlso fix '+fixCount+' existing archive records with blank/bad dates.\n\nDeparture date: '+dateStr+'.\n'+toKeep.length+' Office Staff stay untouched.\n\nResult: everyone hidden from March 2026 onwards. Still visible in Feb 2026 and earlier.\n\nProceed?'))return;
-  // 1. Move active people to archive (new entries OR update existing stale date)
+  // Also count already-archived non-office whose date is NOT already 28 Feb 2026
+  var toRestamp=arch.filter(function(a){return a.g!=='OFFICE STAFF'&&a.date!==dateStr;});
+  if(!toArchive.length&&!toRestamp.length){alert('Everyone is already archived with date 28 Feb 2026. Nothing to do.');return;}
+  if(!confirm('MASS ARCHIVE / RESET\n\n'+toArchive.length+' active Yard Staff + Scaffolders → archive.\n'+toRestamp.length+' already-archived people → date reset to 28 Feb 2026.\n'+toKeep.length+' Office Staff untouched.\n\nAfterwards EVERY non-office person will be hidden from March 2026 onwards.\n\nRestore the ones you want via the Former Employees list.\n\nProceed?'))return;
+  // 1. Move active people to archive (new entries OR update existing)
   toArchive.forEach(function(e){
     var existing=arch.filter(function(a){return a.n===e.n;})[0];
     if(existing){existing.date=dateStr;existing.g=e.g;}
     else{arch.push({n:e.n,g:e.g,date:dateStr});}
   });
-  // 2. Stamp any already-archived non-office person with a bad date
+  // 2. Force-stamp EVERY non-office archive record to 28 Feb 2026 (overwrites June, Sept etc)
   arch.forEach(function(a){
     if(a.g==='OFFICE STAFF')return;
-    var d=new Date(a.date);
-    if(!a.date||isNaN(d.getTime()))a.date=dateStr;
+    a.date=dateStr;
   });
   sl(ATT_ARCH,arch);
   sl(ATT_EMP,toKeep);
   toArchive.forEach(function(e){addTomb('arch',e.n);});
   rAtt();rFormer();if(getURL())flushSyncAtt();
-  alert('Done. '+toArchive.length+' moved to archive, '+fixCount+' blank dates fixed.\n\nAll Yard Staff + Scaffolders now dated 28 Feb 2026.\n\nGo to Former Employees and Restore the ones you want for March onwards.');
+  alert('Done. All non-office people now dated 28 Feb 2026.\n\nGo to Former Employees and Restore the ones you want for March onwards.');
 }
 function editArchDate(n){
   var arch=getArch();var emp=arch.filter(function(e){return e.n===n;})[0];if(!emp)return;

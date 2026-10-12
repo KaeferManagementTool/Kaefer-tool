@@ -1769,6 +1769,23 @@ function getStartDateFor(n){
 }
 function isPreStart(n,dk){var sd=getStartDateFor(n);if(!sd)return false;var d=new Date(dk+'T00:00:00');return d<sd;}
 function isStartDay(n,dk){var sd=getStartDateFor(n);if(!sd)return false;var d=new Date(dk+'T00:00:00');return d.getTime()===sd.getTime();}
+// ==================== ATTENDANCE ROW ORDERING ====================
+var ATT_ORDER='kaefer_att_order'; // {grpName: [name1, name2, ...]}
+function getAttOrder(){try{return JSON.parse(localStorage.getItem(ATT_ORDER)||'{}');}catch(e){return{};}}
+function sortByAttOrder(list,grp){var o=getAttOrder()[grp]||[];var idx={};o.forEach(function(n,i){idx[n]=i;});return list.slice().sort(function(a,b){var ai=idx[a.n],bi=idx[b.n];if(ai===undefined&&bi===undefined)return 0;if(ai===undefined)return 1;if(bi===undefined)return -1;return ai-bi;});}
+function moveAttRow(encName,grp,dir){
+  var name=decodeURIComponent(encName);
+  var order=getAttOrder();
+  var mon=+document.getElementById('at-mon').value,yr=+document.getElementById('at-yr').value;
+  var inGroup=sortByAttOrder(getEmpsForMonth(yr,mon).filter(function(e){return e.g===grp;}),grp);
+  var names=inGroup.map(function(e){return e.n;});
+  var idx=names.indexOf(name);if(idx<0)return;
+  var target=idx+dir;if(target<0||target>=names.length)return;
+  var tmp=names[idx];names[idx]=names[target];names[target]=tmp;
+  order[grp]=names;
+  localStorage.setItem(ATT_ORDER,JSON.stringify(order));
+  rAtt();
+}
 function setStatus(n,dk,v){
   var ov=getOv(),ak=aKey(n),clearing=(v===''||v==null);
   if(clearing){
@@ -2418,7 +2435,7 @@ function rAtt(){
   days.forEach(function(dy){var wk=dy.w===0||dy.w===6;H.push('<th style="padding:2px 2px;text-align:center;min-width:25px;background:'+(wk?'#e0e0e0':'#1a2a4a')+';color:'+(wk?'#888':'#fff')+';font-size:9px"><div>'+DN[dy.w]+'</div><div style="font-size:10px;font-weight:900">'+dy.d+'</div></th>');});
   H.push('<th style="background:#2e7d32;color:#fff;padding:2px 5px;text-align:center;font-size:9px">P</th><th style="background:#c62828;color:#fff;padding:2px 5px;text-align:center;font-size:9px">SL</th><th style="background:#1565c0;color:#fff;padding:2px 5px;text-align:center;font-size:9px">AL</th><th style="background:#880e4f;color:#fff;padding:2px 5px;text-align:center;font-size:9px">X</th><th style="background:#1a1a1a;color:#fff;padding:2px 5px;text-align:center;font-size:9px" class="np">&#10006;</th></tr></thead><tbody>');
   ['OFFICE STAFF','YARD STAFF','SCAFFOLDERS'].forEach(function(grp){
-    var ge=emps.filter(function(e){return e.g===grp;});if(!ge.length)return;
+    var ge=sortByAttOrder(emps.filter(function(e){return e.g===grp;}),grp);if(!ge.length)return;
     H.push('<tr><td colspan="'+(days.length+6)+'" style="background:#37474f;color:#fff;padding:4px 9px;font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase">'+grp+'</td></tr>');
     ge.forEach(function(emp){
       var p=0,sl=0,al=0,x=0,cells=[];
@@ -2442,7 +2459,7 @@ if(skip){
 }
 cells.push('<td style="'+tdStyle+'">'+tdInner+'</td>');});
       cells.push('<td style="text-align:center;font-weight:700;font-size:10px;color:#2e7d32;background:#f1f8f1;border-left:2px solid #e0e0e0">'+p+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#c62828;background:#fff5f5">'+sl+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#1565c0;background:#f0f7ff">'+al+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#880e4f;background:#fdf0f5">'+x+'</td>');
-      cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0;white-space:nowrap"><button onclick="editEmpByEl(this)" data-name="'+enc+'" title="Edit name/group" style="background:none;border:none;color:#1565c0;cursor:pointer;font-size:13px;padding:0 3px;line-height:1">&#9998;</button> <button onclick="removeEmpByEl(this)" data-name="'+enc+'" title="Remove" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
+      cells.push('<td class="np" style="text-align:center;background:#fafafa;border-left:1px solid #f0f0f0;white-space:nowrap;padding:0 2px"><span style="display:inline-flex;flex-direction:column;vertical-align:middle;margin-right:2px"><button onclick="moveAttRow(\''+enc+'\',\''+grp+'\',-1)" title="Move up" style="background:#fff;border:1px solid #ccc;color:#555;cursor:pointer;font-size:7px;padding:0;line-height:1;width:14px;height:11px">&#9650;</button><button onclick="moveAttRow(\''+enc+'\',\''+grp+'\',1)" title="Move down" style="background:#fff;border:1px solid #ccc;color:#555;cursor:pointer;font-size:7px;padding:0;line-height:1;width:14px;height:11px;margin-top:1px">&#9660;</button></span><button onclick="editEmpByEl(this)" data-name="'+enc+'" title="Edit name/group" style="background:none;border:none;color:#1565c0;cursor:pointer;font-size:13px;padding:0 3px;line-height:1">&#9998;</button><button onclick="removeEmpByEl(this)" data-name="'+enc+'" title="Remove" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 3px;line-height:1">&#215;</button></td>');
       H.push('<tr>'+cells.join('')+'</tr>');
     });
   });

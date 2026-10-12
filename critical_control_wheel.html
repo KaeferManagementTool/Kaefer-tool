@@ -1747,6 +1747,18 @@ function toggleExc(enc,dk){
 function aKey(n){return n.toLowerCase().replace(/[^a-z0-9]/g,'_');}
 function getBaseExc(n){var b=ATT_BASE.filter(function(e){return e.n===n;});return b.length?b[0].e:{};}
 function getStatus(n,dk){var ov=getOv(),ak=aKey(n);if(ov[ak]&&ov[ak][dk]!==undefined)return ov[ak][dk];return getBaseExc(n)[dk]||'';}
+// Return the archive (termination) Date for a person, or null if still active. Date is normalized to midnight.
+var _ARCH_DATE_CACHE=null;var _ARCH_DATE_CACHE_RAW='';
+function getArchDateFor(n){
+  var arch=getArch();
+  // Simple caching so we don't reparse N times per render
+  var raw=JSON.stringify(arch);
+  if(raw!==_ARCH_DATE_CACHE_RAW){_ARCH_DATE_CACHE={};_ARCH_DATE_CACHE_RAW=raw;arch.forEach(function(e){var d=new Date(e.date);if(!isNaN(d.getTime())){d.setHours(0,0,0,0);_ARCH_DATE_CACHE[e.n]=d;}});}
+  return _ARCH_DATE_CACHE[n]||null;
+}
+// Is this person terminated as of the given date-key?
+function isTermPast(n,dk){var ad=getArchDateFor(n);if(!ad)return false;var d=new Date(dk+'T00:00:00');return d>ad;}
+function isTermDay(n,dk){var ad=getArchDateFor(n);if(!ad)return false;var d=new Date(dk+'T00:00:00');return d.getTime()===ad.getTime();}
 function setStatus(n,dk,v){
   var ov=getOv(),ak=aKey(n),clearing=(v===''||v==null);
   if(clearing){
@@ -2390,7 +2402,7 @@ function rAtt(){
   var DN=['Su','Mo','Tu','We','Th','Fr','Sa'],days=[];
   for(var d=1;d<=dim;d++){var dt=new Date(yr,mon,d),dk2=yr+'-'+String(mon+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');days.push({d:d,w:dt.getDay(),dk:dk2});}
   var tP=0,tSL=0,tAL=0,tX=0;
-  emps.forEach(function(e){days.forEach(function(dy){if(dy.w===0||dy.w===6)return;var v=getStatus(e.n,dy.dk);if(!v)tP++;else if(v==='SL')tSL++;else if(v==='AL')tAL++;else if(v==='X')tX++;});});
+  emps.forEach(function(e){days.forEach(function(dy){if(dy.w===0||dy.w===6)return;if(isTermPast(e.n,dy.dk))return;var v=getStatus(e.n,dy.dk);if(!v)tP++;else if(v==='SL')tSL++;else if(v==='AL')tAL++;else if(v==='X')tX++;});});
   document.getElementById('at-stats').innerHTML='<div class="sc" style="border-top:4px solid #2e7d32"><div class="sl2">Present Days</div><div class="sv" style="color:#2e7d32">'+tP+'</div></div><div class="sc r2"><div class="sl2">Sick Leave</div><div class="sv" style="color:#c62828">'+tSL+'</div></div><div class="sc" style="border-top:4px solid #1565c0"><div class="sl2">Annual Leave</div><div class="sv" style="color:#1565c0">'+tAL+'</div></div><div class="sc r3"><div class="sl2">Absent</div><div class="sv" style="color:#880e4f">'+tX+'</div></div>';
   var H=['<table style="border-collapse:collapse;min-width:100%;font-size:11px"><thead><tr><th style="position:sticky;left:0;background:#1a1a1a;color:#fff;padding:5px 9px;text-align:left;white-space:nowrap;min-width:155px;z-index:2;font-size:11px">Name</th>'];
   days.forEach(function(dy){var wk=dy.w===0||dy.w===6;H.push('<th style="padding:2px 2px;text-align:center;min-width:25px;background:'+(wk?'#e0e0e0':'#1a2a4a')+';color:'+(wk?'#888':'#fff')+';font-size:9px"><div>'+DN[dy.w]+'</div><div style="font-size:10px;font-weight:900">'+dy.d+'</div></th>');});
@@ -2402,12 +2414,19 @@ function rAtt(){
       var p=0,sl=0,al=0,x=0,cells=[];
       var enc=encodeURIComponent(emp.n);
       cells.push('<td style="position:sticky;left:0;background:#fff;padding:3px 9px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0f0f0;border-right:2px solid #e0e0e0;z-index:1;font-size:12px">'+emp.n+'</td>');
-      days.forEach(function(dy){var wk=dy.w===0||dy.w===6,v=getStatus(emp.n,dy.dk);if(!wk){if(!v)p++;else if(v==='SL')sl++;else if(v==='AL')al++;else if(v==='X')x++;}var excd=!wk&&isExc(emp.n,dy.dk);
-var tdStyle=aCS(v,wk)+';text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700;'+(excd?'opacity:0.4;':'');
-var tdInner='';
-if(!wk){
-  tdInner='<button class="exc-btn'+(excd?' on':'')+'" data-enc="'+enc+'" data-dk="'+dy.dk+'" onclick="toggleExc(this.dataset.enc,this.dataset.dk);event.stopPropagation()" title="Exclude from manning">&#10005;</button>'
-    +'<span data-enc="'+enc+'" data-dk="'+dy.dk+'" onclick="openCE(decodeURIComponent(this.dataset.enc),this.dataset.dk)" style="cursor:pointer">'+(v||'&#10003;')+'</span>';
+      days.forEach(function(dy){var wk=dy.w===0||dy.w===6;var termPast=isTermPast(emp.n,dy.dk),termDay=isTermDay(emp.n,dy.dk);var v=termPast?'':getStatus(emp.n,dy.dk);if(!wk&&!termPast){if(!v)p++;else if(v==='SL')sl++;else if(v==='AL')al++;else if(v==='X')x++;}var excd=!wk&&isExc(emp.n,dy.dk);
+var tdStyle;var tdInner='';
+if(termPast){
+  // Post-termination: gray, no interaction, no count
+  tdStyle='background:#eceff1;color:#b0bec5;text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700';
+  if(!wk)tdInner='<span style="color:#b0bec5">&#8212;</span>';
+} else {
+  tdStyle=aCS(v,wk)+';text-align:center;padding:1px;border-bottom:1px solid rgba(0,0,0,.06);font-size:9px;font-weight:700;'+(excd?'opacity:0.4;':'');
+  if(termDay)tdStyle+=';outline:2px solid #cc0000;outline-offset:-2px;background:#fff3e0';
+  if(!wk){
+    tdInner='<button class="exc-btn'+(excd?' on':'')+'" data-enc="'+enc+'" data-dk="'+dy.dk+'" onclick="toggleExc(this.dataset.enc,this.dataset.dk);event.stopPropagation()" title="Exclude from manning">&#10005;</button>'
+      +'<span data-enc="'+enc+'" data-dk="'+dy.dk+'" onclick="openCE(decodeURIComponent(this.dataset.enc),this.dataset.dk)" style="cursor:pointer" title="'+(termDay?'Last day — '+emp.n+' terminated':'')+'">'+(v||'&#10003;')+'</span>';
+  }
 }
 cells.push('<td style="'+tdStyle+'">'+tdInner+'</td>');});
       cells.push('<td style="text-align:center;font-weight:700;font-size:10px;color:#2e7d32;background:#f1f8f1;border-left:2px solid #e0e0e0">'+p+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#c62828;background:#fff5f5">'+sl+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#1565c0;background:#f0f7ff">'+al+'</td><td style="text-align:center;font-weight:700;font-size:10px;color:#880e4f;background:#fdf0f5">'+x+'</td>');
@@ -2883,9 +2902,9 @@ function rDM(){
     wdays++;
     var base=dmEffectiveBase(yr,mon,d);
     var scaffPresent=0,scaffAL=0,scaffSL=0,scaffAbs=0;
-    scaffolders.forEach(function(e){if(isExc(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL')scaffAL++;else if(v==='SL')scaffSL++;else if(v==='X')scaffAbs++;else if(v==='PH'){}else scaffPresent++;});
+    scaffolders.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL')scaffAL++;else if(v==='SL')scaffSL++;else if(v==='X')scaffAbs++;else if(v==='PH'){}else scaffPresent++;});
     var yardPresent=0;
-    yardStaff.forEach(function(e){if(isExc(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yardPresent++;});
+    yardStaff.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yardPresent++;});
     var counted,yardPulled,shortfall;
     if(scaffPresent>=base){counted=base;yardPulled=0;shortfall=0;}
     else{var need=base-scaffPresent;yardPulled=Math.min(need,yardPresent);counted=scaffPresent+yardPulled;shortfall=base-counted;}
@@ -2917,8 +2936,8 @@ function dmReviewLastWeekShortfalls(){
     var scaffolders=getEmpsForMonth(yr,mon).filter(function(e){return e.g==='SCAFFOLDERS';});
     var yardStaff=getEmpsForMonth(yr,mon).filter(function(e){return e.g==='YARD STAFF';});
     var scaff=0,yard=0;
-    scaffolders.forEach(function(e){if(isExc(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;scaff++;});
-    yardStaff.forEach(function(e){if(isExc(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yard++;});
+    scaffolders.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;scaff++;});
+    yardStaff.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yard++;});
     var counted,yardPulled,shortfall;
     if(scaff>=base){counted=base;yardPulled=0;shortfall=0;}else{yardPulled=Math.min(base-scaff,yard);counted=scaff+yardPulled;shortfall=base-counted;}
     if(shortfall>0)findings.push({dk:dk,day:day,month:mon,year:yr,base:base,scaff:scaff,yardPulled:yardPulled,yardAvail:yard,counted:counted,shortfall:shortfall});

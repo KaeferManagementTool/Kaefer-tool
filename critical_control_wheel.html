@@ -6917,8 +6917,9 @@ function doSyncAttendance(u){
   return new Promise(function(resolve, reject){
     var ov = glj('kaefer_att_ov',{});
     // Only send emps/arch if locally modified — otherwise plain refresh overrides partner's changes.
-    var emps = isEmpsDirty() ? glj('kaefer_emps',[]) : null;
-    var arch = isArchDirty() ? glj('kaefer_arch',[]) : null;
+    // Use the correct localStorage keys (kaefer_att_emps / kaefer_att_arch), matching the rest of the app.
+    var emps = isEmpsDirty() ? glj('kaefer_att_emps',null) : null;
+    var arch = isArchDirty() ? glj('kaefer_att_arch',[]) : null;
     var payload = JSON.stringify({action:'save_att',data:{ov:ov,emps:emps,arch:arch}});
     fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
       .then(function(r){return r.text();})
@@ -6931,9 +6932,10 @@ function doSyncAttendance(u){
       .then(function(j){
         if(!j.ok)throw new Error(j.error||'load failed');
         if(j.ov)sl('kaefer_att_ov',j.ov);
-        if(j.emps)sl('kaefer_emps',j.emps);
-        if(j.arch)sl('kaefer_arch',j.arch);
+        if(j.emps)sl('kaefer_att_emps',j.emps);
+        if(j.arch)sl('kaefer_att_arch',j.arch);
         clearDirtyFlags();
+        _START_DATE_CACHE_RAW='';_ARCH_DATE_CACHE_RAW='';
         if(typeof rAtt==='function')rAtt();
         resolve();
       })

@@ -1770,6 +1770,16 @@ function getStartDateFor(n){
 }
 function isPreStart(n,dk){var sd=getStartDateFor(n);if(!sd)return false;var d=new Date(dk+'T00:00:00');return d<sd;}
 function isStartDay(n,dk){var sd=getStartDateFor(n);if(!sd)return false;var d=new Date(dk+'T00:00:00');return d.getTime()===sd.getTime();}
+// ==================== EMPS/ARCH DIRTY FLAGS (multi-supervisor sync) ====================
+// Only push the employees list / archive list to the server when WE've modified them.
+// Otherwise a refresh on Boz's computer would overwrite our changes on next sync.
+var ATT_EMPS_DIRTY='kaefer_att_emps_dirty';
+var ATT_ARCH_DIRTY='kaefer_att_arch_dirty';
+function markEmpsDirty(){try{localStorage.setItem(ATT_EMPS_DIRTY,'1');}catch(e){}}
+function markArchDirty(){try{localStorage.setItem(ATT_ARCH_DIRTY,'1');}catch(e){}}
+function isEmpsDirty(){return localStorage.getItem(ATT_EMPS_DIRTY)==='1';}
+function isArchDirty(){return localStorage.getItem(ATT_ARCH_DIRTY)==='1';}
+function clearDirtyFlags(){try{localStorage.removeItem(ATT_EMPS_DIRTY);localStorage.removeItem(ATT_ARCH_DIRTY);}catch(e){}}
 // ==================== ATTENDANCE ROW ORDERING ====================
 var ATT_ORDER='kaefer_att_order'; // {grpName: [name1, name2, ...]}
 function getAttOrder(){try{return JSON.parse(localStorage.getItem(ATT_ORDER)||'{}');}catch(e){return{};}}
@@ -2308,7 +2318,7 @@ function editLeaveFromCellFromCE(){
 function closeCE(){document.getElementById('ce-ml').classList.remove('on');}
 function openAddEmp(){document.getElementById('ae-name').value='';document.getElementById('ae-start').value=new Date().toISOString().slice(0,10);document.getElementById('ae-ml').classList.add('on');}
 function closeAddEmp(){document.getElementById('ae-ml').classList.remove('on');}
-function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value,start=document.getElementById('ae-start').value;if(!name){alert('Enter a name.');return;}if(!start){alert('Enter a start date.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp,start:start});sl(ATT_EMP,emps);closeAddEmp();rAtt();if(getURL())scheduleSyncAtt();}
+function saveAddEmp(){var name=document.getElementById('ae-name').value.trim(),grp=document.getElementById('ae-grp').value,start=document.getElementById('ae-start').value;if(!name){alert('Enter a name.');return;}if(!start){alert('Enter a start date.');return;}var emps=getEmps();if(emps.some(function(e){return e.n.toLowerCase()===name.toLowerCase();})){alert('Already exists.');return;}emps.push({n:name,g:grp,start:start});sl(ATT_EMP,emps);markEmpsDirty();closeAddEmp();rAtt();if(getURL())scheduleSyncAtt();}
 var EDIT_EMP_TARGET = null;
 function editEmp(oldName){
   var emps = getEmps();
@@ -2337,7 +2347,7 @@ function saveEditEmp(){
   }
   emps.forEach(function(e){ if(e.n===oldName){ e.n = newName; e.g = newGroup; if(newStart)e.start=newStart; else delete e.start; } });
   _START_DATE_CACHE_RAW=''; // bust cache so new start date shows immediately
-  sl(ATT_EMP, emps);
+  sl(ATT_EMP, emps);markEmpsDirty();
   // Migrate any attendance overrides under the old name to the new name if it changed
   // (Attendance uses aKey() — normalized lowercase + underscores)
   if(newName !== oldName){
@@ -2375,8 +2385,8 @@ function removeEmp(n){
   if(isNaN(nd.getTime())){alert('Could not understand that date - '+n+' was not removed.');return;}
   var dateStr=nd.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
   var emp=activeList.filter(function(e){return e.n===n;})[0]||{n:n,g:'Unknown'};
-  sl(ATT_EMP,activeList.filter(function(e){return e.n!==n;}));
-  if(!existing){arch.push({n:emp.n,g:emp.g,date:dateStr});sl(ATT_ARCH,arch);}
+  sl(ATT_EMP,activeList.filter(function(e){return e.n!==n;}));markEmpsDirty();
+  if(!existing){arch.push({n:emp.n,g:emp.g,date:dateStr});sl(ATT_ARCH,arch);}markArchDirty();
   addTomb('arch',n);rAtt();rFormer();if(getURL())flushSyncAtt();
 }
 function restoreEmp(n){
@@ -2388,12 +2398,12 @@ function restoreEmp(n){
   if(start===null)return;
   start=start.trim();
   if(start&&!/^\d{4}-\d{2}-\d{2}$/.test(start)){alert('Not a valid date — restore cancelled.');return;}
-  sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));
+  sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));markArchDirty();
   var emps=getEmps();
   var rec={n:emp.n,g:emp.g};
   if(start)rec.start=start;
   emps.push(rec);
-  sl(ATT_EMP,emps);
+  sl(ATT_EMP,emps);markEmpsDirty();
   _START_DATE_CACHE_RAW='';
   clearTombs('arch',[n]);
   var pr=glj('kaefer_arch_restore',[]);if(pr.indexOf(n)<0){pr.push(n);sl('kaefer_arch_restore',pr);}
@@ -2427,9 +2437,10 @@ function massArchiveAll(){
   });
   sl(ATT_ARCH,arch);
   sl(ATT_EMP,toKeep);
+  markEmpsDirty();markArchDirty();
   toArchive.forEach(function(e){addTomb('arch',e.n);});
   rAtt();rFormer();if(getURL())flushSyncAtt();
-  alert('Done. All non-office people now dated 28 Feb 2026.\n\nGo to Former Employees and Restore the ones you want for March onwards.');
+  alert('Done. All non-office people now dated 28 Feb 2026.\n\nGo to Former Employees and Restore the ones you want for March onwards.\n\nNext time Boz opens his tool and clicks Sync All, your changes will transfer across.');
 }
 function editArchDate(n){
   var arch=getArch();var emp=arch.filter(function(e){return e.n===n;})[0];if(!emp)return;
@@ -2439,7 +2450,7 @@ function editArchDate(n){
   var nd=new Date(val+'T00:00:00');
   if(isNaN(nd.getTime())){alert('Could not understand that date - not changed.');return;}
   emp.date=nd.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
-  sl(ATT_ARCH,arch);addPendingArchDate(n,emp.date);rAtt();rFormer();if(getURL())flushSyncAtt();
+  sl(ATT_ARCH,arch);markArchDirty();addPendingArchDate(n,emp.date);rAtt();rFormer();if(getURL())flushSyncAtt();
 }
 function editArchDateByEl(btn){editArchDate(decodeURIComponent(btn.getAttribute('data-name')));}
 function restoreEmpByEl(btn){restoreEmp(decodeURIComponent(btn.getAttribute('data-name')));}
@@ -5169,10 +5180,15 @@ function syncAtt(){
 
   var pendingBeforeSync=getPendingClears();
 
+  // CRITICAL: only send emps/arch if WE made local changes. Otherwise a plain refresh
+  // (which also triggers a sync) would push our stale copy to the server and overwrite
+  // changes made by the other supervisor.
+  var sendEmps=isEmpsDirty()?localEmps:null;
+  var sendArch=isArchDirty()?localArch:null;
   var payload=JSON.stringify({
     action:'save_att',
     who:whoSync(),
-    data:{upserts:upserts,deletes:deletes,emps:localEmps,arch:localArch,empDeletes:empDeletes,archTombs:archTombs,archRestore:archRestore,excUpserts:excUpserts,excDeletes:excDeletes}
+    data:{upserts:upserts,deletes:deletes,emps:sendEmps,arch:sendArch,empDeletes:empDeletes,archTombs:archTombs,archRestore:archRestore,excUpserts:excUpserts,excDeletes:excDeletes}
   });
 
   return postJsonRetry(u,payload)
@@ -5184,6 +5200,8 @@ function syncAtt(){
     sl('kaefer_att_ov',ov);
     if(j.emps)sl('kaefer_att_emps',j.emps);
     if(j.arch&&j.arch.length){sl('kaefer_att_arch',j.arch);reapplyPendingArchDates();}
+    // Our push succeeded (if we had one). Clear dirty flags so plain refreshes don't re-push.
+    clearDirtyFlags();
 
     // Rebuild snapshot from merged server state
     var newSnap={};
@@ -6898,8 +6916,9 @@ function pullMergePush(u, action, key, render){
 function doSyncAttendance(u){
   return new Promise(function(resolve, reject){
     var ov = glj('kaefer_att_ov',{});
-    var emps = glj('kaefer_emps',[]);
-    var arch = glj('kaefer_arch',[]);
+    // Only send emps/arch if locally modified — otherwise plain refresh overrides partner's changes.
+    var emps = isEmpsDirty() ? glj('kaefer_emps',[]) : null;
+    var arch = isArchDirty() ? glj('kaefer_arch',[]) : null;
     var payload = JSON.stringify({action:'save_att',data:{ov:ov,emps:emps,arch:arch}});
     fetch(u,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},body:payload})
       .then(function(r){return r.text();})
@@ -6914,6 +6933,7 @@ function doSyncAttendance(u){
         if(j.ov)sl('kaefer_att_ov',j.ov);
         if(j.emps)sl('kaefer_emps',j.emps);
         if(j.arch)sl('kaefer_arch',j.arch);
+        clearDirtyFlags();
         if(typeof rAtt==='function')rAtt();
         resolve();
       })

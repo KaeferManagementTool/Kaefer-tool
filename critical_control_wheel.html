@@ -1056,6 +1056,7 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="mbd">
     <div class="mf"><label>Full Name</label><input type="text" id="ee-name" placeholder="e.g. John Smith"></div>
     <div class="mf"><label>Group</label><select id="ee-grp"><option value="OFFICE STAFF">Office Staff</option><option value="YARD STAFF">Yard Staff</option><option value="SCAFFOLDERS">Scaffolders</option></select></div>
+    <div class="mf"><label>Start Date <span style="font-weight:400;color:#888;font-size:11px">(days before this will show as grey)</span></label><input type="date" id="ee-start"></div>
   </div>
   <div class="mft"><button class="ob" onclick="closeEditEmpModal()">Cancel</button><button class="rb" onclick="saveEditEmp()">&#10003; Save</button></div>
 </div></div>
@@ -2316,6 +2317,7 @@ function editEmp(oldName){
   EDIT_EMP_TARGET = oldName;
   document.getElementById('ee-name').value = oldName;
   document.getElementById('ee-grp').value = emp.g || 'SCAFFOLDERS';
+  document.getElementById('ee-start').value = emp.start || '';
   document.getElementById('edit-emp-ml').classList.add('on');
 }
 function closeEditEmpModal(){
@@ -2327,12 +2329,14 @@ function saveEditEmp(){
   var oldName = EDIT_EMP_TARGET;
   var newName = document.getElementById('ee-name').value.trim();
   var newGroup = document.getElementById('ee-grp').value;
+  var newStart = document.getElementById('ee-start').value;
   if(!newName){ alert('Name cannot be empty.'); return; }
   var emps = getEmps();
   if(emps.some(function(e){return e.n!==oldName && e.n.toLowerCase()===newName.toLowerCase();})){
     alert('An employee with that name already exists.'); return;
   }
-  emps.forEach(function(e){ if(e.n===oldName){ e.n = newName; e.g = newGroup; } });
+  emps.forEach(function(e){ if(e.n===oldName){ e.n = newName; e.g = newGroup; if(newStart)e.start=newStart; else delete e.start; } });
+  _START_DATE_CACHE_RAW=''; // bust cache so new start date shows immediately
   sl(ATT_EMP, emps);
   // Migrate any attendance overrides under the old name to the new name if it changed
   // (Attendance uses aKey() — normalized lowercase + underscores)
@@ -2375,7 +2379,26 @@ function removeEmp(n){
   if(!existing){arch.push({n:emp.n,g:emp.g,date:dateStr});sl(ATT_ARCH,arch);}
   addTomb('arch',n);rAtt();rFormer();if(getURL())flushSyncAtt();
 }
-function restoreEmp(n){if(!confirm('Restore '+n+'?'))return;var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));if(emp){var emps=getEmps();emps.push({n:emp.n,g:emp.g});sl(ATT_EMP,emps);}clearTombs('arch',[n]);var pr=glj('kaefer_arch_restore',[]);if(pr.indexOf(n)<0){pr.push(n);sl('kaefer_arch_restore',pr);}rAtt();rFormer();if(getURL())flushSyncAtt();}
+function restoreEmp(n){
+  var arch=getArch(),emp=arch.filter(function(e){return e.n===n;})[0];
+  if(!emp){alert('Not found in archive.');return;}
+  var today=new Date().toISOString().slice(0,10);
+  var startDefault='2026-03-01';
+  var start=prompt('Restore '+n+'.\n\nSet their start date (YYYY-MM-DD). Days before this will show as grey.\n\nLeave blank to always-active (no grey).',startDefault);
+  if(start===null)return;
+  start=start.trim();
+  if(start&&!/^\d{4}-\d{2}-\d{2}$/.test(start)){alert('Not a valid date — restore cancelled.');return;}
+  sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));
+  var emps=getEmps();
+  var rec={n:emp.n,g:emp.g};
+  if(start)rec.start=start;
+  emps.push(rec);
+  sl(ATT_EMP,emps);
+  _START_DATE_CACHE_RAW='';
+  clearTombs('arch',[n]);
+  var pr=glj('kaefer_arch_restore',[]);if(pr.indexOf(n)<0){pr.push(n);sl('kaefer_arch_restore',pr);}
+  rAtt();rFormer();if(getURL())flushSyncAtt();
+}
 function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+' <button class="ob" style="font-size:10px;padding:1px 5px" onclick="editArchDateByEl(this)" data-name="'+encodeURIComponent(en.n)+'" title="Correct the date they actually left">&#9998;</button></td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
 // ==================== MASS ARCHIVE ====================
 // One-click "archive everyone with a given departure date" — so you can rebuild

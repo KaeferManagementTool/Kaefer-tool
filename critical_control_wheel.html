@@ -11181,6 +11181,8 @@ async function att2Move(id, dir) {
     var pp = ATT2.persons.filter(function(x){return x.id===xid;})[0];
     if (pp) pp.order = (i+1)*10;
   });
+  // Re-sort the array itself so render iterates in the new order
+  ATT2.persons.sort(function(a,b){return (a.order||0)-(b.order||0);});
   att2Render();
   try {
     await att2Call('att2_person_order', { ids: newOrder });

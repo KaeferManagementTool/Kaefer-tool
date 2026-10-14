@@ -463,8 +463,11 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="card" style="margin-bottom:11px">
     <div class="ch ch-r"><span>&#128101; Direct Manning Register</span></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;padding:10px 13px" class="np">
-      <div class="tf"><label>Month</label><select id="dm-mon" onchange="rDM()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select></div>
-      <div class="tf"><label>Year</label><select id="dm-yr" onchange="rDM()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option></select></div>
+      <div class="tf"><label>Mode</label><select id="dm-mode" onchange="dmModeChanged()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="month">Single month</option><option value="range">Custom range</option></select></div>
+      <div id="dm-mon-wrap" class="tf"><label>Month</label><select id="dm-mon" onchange="rDM()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select></div>
+      <div id="dm-yr-wrap" class="tf"><label>Year</label><select id="dm-yr" onchange="rDM()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option></select></div>
+      <div id="dm-from-wrap" class="tf" style="display:none"><label>From</label><input type="date" id="dm-from" onchange="rDM()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"></div>
+      <div id="dm-to-wrap" class="tf" style="display:none"><label>To</label><input type="date" id="dm-to" onchange="rDM()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit"></div>
       <div class="tf"><label>Monthly baseline</label><input type="number" id="dm-base" value="15" min="1" onchange="dmSaveBaseline()" style="padding:4px 8px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:70px"></div>
       <div class="tf"><label>Weekly override</label><div style="display:flex;gap:4px;align-items:center"><select id="dm-wk" onchange="dmWkChanged()" style="padding:4px 6px;border:1px solid var(--bd);border-radius:4px;font-size:11px;font-family:inherit;width:110px"></select><input type="number" id="dm-wkbase" min="1" placeholder="—" onchange="dmSaveWkBaseline()" style="padding:4px 6px;border:1px solid var(--bd);border-radius:4px;font-size:12px;font-family:inherit;width:55px"></div></div>
       <button class="rb" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="window.print()">Print</button>
@@ -2955,32 +2958,64 @@ function dmSaveWkBaseline(){var mon=+document.getElementById('dm-mon').value,yr=
 function dmWkChanged(){var wkSel=document.getElementById('dm-wk');var wkKey=wkSel.value;var inp=document.getElementById('dm-wkbase');if(!wkKey){inp.value='';return;}var v=localStorage.getItem(DM_WKBASE_PREFIX+wkKey);inp.value=v||'';}
 function dmGetShortfallAck(){try{return JSON.parse(localStorage.getItem(DM_SHORTFALL_ACK_KEY)||'{}');}catch(e){return{};}}
 function dmSetShortfallAck(dk,v){var a=dmGetShortfallAck();if(v)a[dk]=true;else delete a[dk];localStorage.setItem(DM_SHORTFALL_ACK_KEY,JSON.stringify(a));}
-function rDM(){
-  var mon=+document.getElementById('dm-mon').value,yr=+document.getElementById('dm-yr').value;
-  var saved=dmGetMonthBase(yr,mon);
-  var baseInput=document.getElementById('dm-base');
-  if(saved!==null)baseInput.value=saved;
-  var dim=new Date(yr,mon+1,0).getDate();
-  var DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  // Populate weekly override select
-  var wkSel=document.getElementById('dm-wk');
-  if(wkSel){
-    var cur=wkSel.value;var seen={};wkSel.innerHTML='<option value="">— none —</option>';
-    for(var dd=1;dd<=dim;dd++){var dt0=new Date(yr,mon,dd);var dow=dt0.getDay();if(dow===0||dow===6)continue;var wk=dmWeekKey(yr,mon,dd);if(seen[wk])continue;seen[wk]=true;var opt=document.createElement('option');opt.value=wk;opt.textContent=wk;wkSel.appendChild(opt);}
-    if(cur&&seen[cur])wkSel.value=cur;
-    dmWkChanged();
+function dmModeChanged(){
+  var mode=(document.getElementById('dm-mode')||{}).value||'month';
+  var isRange=mode==='range';
+  document.getElementById('dm-mon-wrap').style.display=isRange?'none':'';
+  document.getElementById('dm-yr-wrap').style.display=isRange?'none':'';
+  document.getElementById('dm-from-wrap').style.display=isRange?'':'none';
+  document.getElementById('dm-to-wrap').style.display=isRange?'':'none';
+  // Seed sensible defaults when flipping to range mode
+  if(isRange){
+    var fIn=document.getElementById('dm-from'),tIn=document.getElementById('dm-to');
+    if(!fIn.value){var mon=+document.getElementById('dm-mon').value,yr=+document.getElementById('dm-yr').value;fIn.value=yr+'-'+String(mon+1).padStart(2,'0')+'-01';}
+    if(!tIn.value){var today=new Date();tIn.value=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');}
   }
-  var scaffolders=getEmpsForMonth(yr,mon).filter(function(e){return e.g==='SCAFFOLDERS';});
-  var yardStaff=getEmpsForMonth(yr,mon).filter(function(e){return e.g==='YARD STAFF';});
+  rDM();
+}
+function rDM(){
+  var mode=(document.getElementById('dm-mode')||{}).value||'month';
+  var baseInput=document.getElementById('dm-base');
+  var startDate,endDate,titlePrefix;
+  if(mode==='range'){
+    var fs=(document.getElementById('dm-from')||{}).value,ts=(document.getElementById('dm-to')||{}).value;
+    if(!fs||!ts){document.getElementById('dm-tbody').innerHTML='<tr><td colspan="10" style="padding:20px;text-align:center;color:#999">Pick a From and To date.</td></tr>';return;}
+    startDate=new Date(fs+'T00:00:00');endDate=new Date(ts+'T00:00:00');
+    if(endDate<startDate){document.getElementById('dm-tbody').innerHTML='<tr><td colspan="10" style="padding:20px;text-align:center;color:#c62828">To date is before From date.</td></tr>';return;}
+    var daysSpan=Math.round((endDate-startDate)/86400000)+1;
+    if(daysSpan>400){document.getElementById('dm-tbody').innerHTML='<tr><td colspan="10" style="padding:20px;text-align:center;color:#c62828">Range too large (max 400 days).</td></tr>';return;}
+    titlePrefix=fs+' → '+ts;
+  } else {
+    var mon=+document.getElementById('dm-mon').value,yr=+document.getElementById('dm-yr').value;
+    var saved=dmGetMonthBase(yr,mon);if(saved!==null)baseInput.value=saved;
+    var dim=new Date(yr,mon+1,0).getDate();
+    startDate=new Date(yr,mon,1);endDate=new Date(yr,mon,dim);
+    titlePrefix=MNS[mon]+' '+yr;
+    // Populate weekly override select (month mode only)
+    var wkSel=document.getElementById('dm-wk');
+    if(wkSel){
+      var cur=wkSel.value;var seen={};wkSel.innerHTML='<option value="">— none —</option>';
+      for(var dd=1;dd<=dim;dd++){var dt0=new Date(yr,mon,dd);var dow=dt0.getDay();if(dow===0||dow===6)continue;var wk=dmWeekKey(yr,mon,dd);if(seen[wk])continue;seen[wk]=true;var opt=document.createElement('option');opt.value=wk;opt.textContent=wk;wkSel.appendChild(opt);}
+      if(cur&&seen[cur])wkSel.value=cur;
+      dmWkChanged();
+    }
+  }
+  var DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var rows=[],totCounted=0,totShort=0,totAL=0,totSL=0,totAbs=0,wdays=0;
   var dLabels=[],dBase=[],dCounted=[];
   var shortfallDays=[];
-  for(var d=1;d<=dim;d++){
-    var dt=new Date(yr,mon,d),wk=dt.getDay();
-    var dk=yr+'-'+String(mon+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-    if(wk===0||wk===6){rows.push({d:d,day:DN[wk],wknd:true});continue;}
+  // Walk every day in the range
+  var cur=new Date(startDate),end=new Date(endDate);
+  while(cur<=end){
+    var y=cur.getFullYear(),mo=cur.getMonth(),d=cur.getDate(),wk=cur.getDay();
+    var dk=y+'-'+String(mo+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    var dateLabel=d+'/'+String(mo+1).padStart(2,'0')+'/'+y;
+    if(wk===0||wk===6){rows.push({dateLabel:dateLabel,day:DN[wk],wknd:true});cur.setDate(cur.getDate()+1);continue;}
     wdays++;
-    var base=dmEffectiveBase(yr,mon,d);
+    // People-for-month filter uses the specific month of this day
+    var scaffolders=getEmpsForMonth(y,mo).filter(function(e){return e.g==='SCAFFOLDERS';});
+    var yardStaff=getEmpsForMonth(y,mo).filter(function(e){return e.g==='YARD STAFF';});
+    var base=dmEffectiveBase(y,mo,d);
     var scaffPresent=0,scaffAL=0,scaffSL=0,scaffAbs=0;
     scaffolders.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk)||isPreStart(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL')scaffAL++;else if(v==='SL')scaffSL++;else if(v==='X')scaffAbs++;else if(v==='PH'){}else scaffPresent++;});
     var yardPresent=0;
@@ -2989,15 +3024,16 @@ function rDM(){
     if(scaffPresent>=base){counted=base;yardPulled=0;shortfall=0;}
     else{var need=base-scaffPresent;yardPulled=Math.min(need,yardPresent);counted=scaffPresent+yardPulled;shortfall=base-counted;}
     totCounted+=counted;totShort+=shortfall;totAL+=scaffAL;totSL+=scaffSL;totAbs+=scaffAbs;
-    rows.push({d:d,day:DN[wk],wknd:false,base:base,scaff:scaffPresent,yardPulled:yardPulled,yardAvail:yardPresent,counted:counted,shortfall:shortfall,al:scaffAL,sl:scaffSL,abs:scaffAbs,dk:dk});
-    dLabels.push(String(d));dBase.push(base);dCounted.push(counted);
+    rows.push({dateLabel:dateLabel,day:DN[wk],wknd:false,base:base,scaff:scaffPresent,yardPulled:yardPulled,yardAvail:yardPresent,counted:counted,shortfall:shortfall,al:scaffAL,sl:scaffSL,abs:scaffAbs,dk:dk});
+    dLabels.push(mode==='range'?dateLabel:String(d));dBase.push(base);dCounted.push(counted);
     if(shortfall>0)shortfallDays.push({dk:dk,day:d,base:base,scaff:scaffPresent,yardPulled:yardPulled,counted:counted,shortfall:shortfall});
+    cur.setDate(cur.getDate()+1);
   }
   var baseAvg=wdays>0?Math.round(dBase.reduce(function(a,b){return a+b;},0)/wdays):0;
   document.getElementById('dm-stats').innerHTML='<div class="sc" style="border-top:4px solid #1a2a4a"><div class="sl2">Avg Baseline</div><div class="sv">'+baseAvg+'</div></div><div class="sc" style="border-top:4px solid #2e7d32"><div class="sl2">Counted Days</div><div class="sv" style="color:#2e7d32">'+totCounted+'</div></div><div class="sc r2"><div class="sl2">Shortfall Days</div><div class="sv" style="color:'+(totShort>0?'#c62828':'#2e7d32')+'">'+totShort+'</div></div><div class="sc r3"><div class="sl2">Scaff AL+SL+X</div><div class="sv" style="color:#e65100">'+(totAL+totSL+totAbs)+'</div></div>';
-  var cv3=document.getElementById('dm-chart');if(cv3&&cv3.getContext){var cx3=cv3.getContext('2d');cv3.width=cv3.offsetWidth||900;drawLineChart(cx3,dLabels,dBase,dCounted,MNS[mon]+' '+yr+' — Counted vs Baseline');}
+  var cv3=document.getElementById('dm-chart');if(cv3&&cv3.getContext){var cx3=cv3.getContext('2d');cv3.width=cv3.offsetWidth||900;drawLineChart(cx3,dLabels,dBase,dCounted,titlePrefix+' — Counted vs Baseline');}
   var tb2=document.getElementById('dm-tbody');tb2.innerHTML='';
-  rows.forEach(function(r){var tr=document.createElement('tr');if(r.wknd){tr.style.cssText='background:#f5f5f5;color:#bbb';tr.innerHTML='<td style="font-size:11px">'+r.d+'/'+String(mon+1).padStart(2,'0')+'/'+yr+'</td><td>'+r.day+'</td><td colspan="8" style="text-align:center;font-style:italic;font-size:11px">Weekend</td>';}else{var shortCol=r.shortfall>0?'#c62828':'#2e7d32';var rowBg=r.shortfall>0?'background:#fff8e1':'';tr.style.cssText=rowBg;tr.innerHTML='<td style="font-size:11px">'+r.d+'/'+String(mon+1).padStart(2,'0')+'/'+yr+'</td><td style="font-weight:600">'+r.day+'</td><td style="text-align:center;font-weight:700">'+r.base+'</td><td style="text-align:center;color:#1565c0;font-weight:600">'+Math.min(r.scaff,r.base)+' <span style="color:#90a4ae;font-weight:400;font-size:10px">of '+r.scaff+'</span></td><td style="text-align:center;color:'+(r.yardPulled>0?'#e65100':'#bbb')+';font-weight:'+(r.yardPulled>0?'700':'400')+'">'+(r.yardPulled>0?r.yardPulled+' / '+r.yardAvail:'0 / '+r.yardAvail)+'</td><td style="text-align:center;font-weight:700;color:#2e7d32">'+r.counted+'</td><td style="text-align:center;font-weight:700;color:'+shortCol+'">'+(r.shortfall>0?'−'+r.shortfall:'0')+'</td><td style="text-align:center;color:#1565c0">'+r.al+'</td><td style="text-align:center;color:#c62828">'+r.sl+'</td><td style="text-align:center;color:#880e4f">'+r.abs+'</td>';}tb2.appendChild(tr);});
+  rows.forEach(function(r){var tr=document.createElement('tr');if(r.wknd){tr.style.cssText='background:#f5f5f5;color:#bbb';tr.innerHTML='<td style="font-size:11px">'+r.dateLabel+'</td><td>'+r.day+'</td><td colspan="8" style="text-align:center;font-style:italic;font-size:11px">Weekend</td>';}else{var shortCol=r.shortfall>0?'#c62828':'#2e7d32';var rowBg=r.shortfall>0?'background:#fff8e1':'';tr.style.cssText=rowBg;tr.innerHTML='<td style="font-size:11px">'+r.dateLabel+'</td><td style="font-weight:600">'+r.day+'</td><td style="text-align:center;font-weight:700">'+r.base+'</td><td style="text-align:center;color:#1565c0;font-weight:600">'+Math.min(r.scaff,r.base)+' <span style="color:#90a4ae;font-weight:400;font-size:10px">of '+r.scaff+'</span></td><td style="text-align:center;color:'+(r.yardPulled>0?'#e65100':'#bbb')+';font-weight:'+(r.yardPulled>0?'700':'400')+'">'+(r.yardPulled>0?r.yardPulled+' / '+r.yardAvail:'0 / '+r.yardAvail)+'</td><td style="text-align:center;font-weight:700;color:#2e7d32">'+r.counted+'</td><td style="text-align:center;font-weight:700;color:'+shortCol+'">'+(r.shortfall>0?'−'+r.shortfall:'0')+'</td><td style="text-align:center;color:#1565c0">'+r.al+'</td><td style="text-align:center;color:#c62828">'+r.sl+'</td><td style="text-align:center;color:#880e4f">'+r.abs+'</td>';}tb2.appendChild(tr);});
   window._dmLastShortfalls=shortfallDays;
 }
 // ==================== END-OF-WEEK SHORTFALL REVIEW ====================

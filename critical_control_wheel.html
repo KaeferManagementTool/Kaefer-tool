@@ -3181,6 +3181,35 @@ function dmModeChanged(){
   rDM();
 }
 function rDM(){
+  // --- Direct Manning v2: read directly from Attendance 2 (ATT2) ---
+  // If ATT2 hasn't loaded yet (user hasn't visited the v2 tab this session),
+  // load it in the background and re-render when done.
+  if (typeof ATT2 === 'undefined' || !ATT2.loaded) {
+    var tb0 = document.getElementById('dm-tbody');
+    if (tb0) tb0.innerHTML = '<tr><td colspan="10" style="padding:20px;text-align:center;color:#999">Loading from Attendance 2…</td></tr>';
+    if (typeof att2Reload === 'function') { att2Reload(true).then(function(){ rDM(); }); }
+    return;
+  }
+  // v2 helpers (closed over this call)
+  function _dmV2EmpsForMonth(year, month){
+    var ms = new Date(year, month, 1), me = new Date(year, month+1, 0);
+    return ATT2.persons.filter(function(p){
+      if (!p || !p.group) return false;
+      var s = att2EffectiveStart(p), e = att2EffectiveEnd(p);
+      if (s && s > me) return false;
+      if (e && e < ms) return false;
+      return true;
+    }).sort(function(a,b){return (a.order||0)-(b.order||0);});
+  }
+  function _dmV2Status(p, dk){ var pt = ATT2.ticks[p.id] || {}; return pt[dk] || ''; }
+  function _dmV2PreStart(p, dk){
+    var s = att2EffectiveStart(p); if(!s) return false;
+    return new Date(dk+'T00:00:00') < s;
+  }
+  function _dmV2TermPast(p, dk){
+    var e = att2EffectiveEnd(p); if(!e) return false;
+    return new Date(dk+'T00:00:00') > e;
+  }
   var mode=(document.getElementById('dm-mode')||{}).value||'month';
   var baseInput=document.getElementById('dm-base');
   var startDate,endDate,titlePrefix;
@@ -3220,14 +3249,14 @@ function rDM(){
     var dateLabel=d+'/'+String(mo+1).padStart(2,'0')+'/'+y;
     if(wk===0||wk===6){rows.push({dateLabel:dateLabel,day:DN[wk],wknd:true});cur.setDate(cur.getDate()+1);continue;}
     wdays++;
-    // People-for-month filter uses the specific month of this day
-    var scaffolders=getEmpsForMonth(y,mo).filter(function(e){return e.g==='SCAFFOLDERS';});
-    var yardStaff=getEmpsForMonth(y,mo).filter(function(e){return e.g==='YARD STAFF';});
+    // People-for-month filter uses the specific month of this day (v2 data)
+    var scaffolders=_dmV2EmpsForMonth(y,mo).filter(function(p){return p.group==='SCAFFOLDERS';});
+    var yardStaff=_dmV2EmpsForMonth(y,mo).filter(function(p){return p.group==='YARD STAFF';});
     var base=dmEffectiveBase(y,mo,d);
     var scaffPresent=0,scaffAL=0,scaffSL=0,scaffAbs=0;
-    scaffolders.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk)||isPreStart(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL')scaffAL++;else if(v==='SL')scaffSL++;else if(v==='X')scaffAbs++;else if(v==='PH'){}else scaffPresent++;});
+    scaffolders.forEach(function(p){if(_dmV2TermPast(p,dk)||_dmV2PreStart(p,dk))return;var v=_dmV2Status(p,dk);if(v==='AL')scaffAL++;else if(v==='SL')scaffSL++;else if(v==='X')scaffAbs++;else if(v==='PH'){}else scaffPresent++;});
     var yardPresent=0;
-    yardStaff.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk)||isPreStart(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yardPresent++;});
+    yardStaff.forEach(function(p){if(_dmV2TermPast(p,dk)||_dmV2PreStart(p,dk))return;var v=_dmV2Status(p,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yardPresent++;});
     var counted,yardPulled,shortfall;
     if(scaffPresent>=base){counted=base;yardPulled=0;shortfall=0;}
     else{var need=base-scaffPresent;yardPulled=Math.min(need,yardPresent);counted=scaffPresent+yardPulled;shortfall=base-counted;}
@@ -3249,6 +3278,21 @@ function rDM(){
 }
 // ==================== END-OF-WEEK SHORTFALL REVIEW ====================
 function dmReviewLastWeekShortfalls(){
+  // Needs ATT2 data — bail quietly if not loaded (this fires on page load; v2 may not be ready)
+  if (typeof ATT2 === 'undefined' || !ATT2.loaded) return;
+  function _emps(year, month){
+    var ms = new Date(year, month, 1), me = new Date(year, month+1, 0);
+    return ATT2.persons.filter(function(p){
+      if (!p || !p.group) return false;
+      var s = att2EffectiveStart(p), e = att2EffectiveEnd(p);
+      if (s && s > me) return false;
+      if (e && e < ms) return false;
+      return true;
+    });
+  }
+  function _stat(p, dk){ var pt=ATT2.ticks[p.id]||{}; return pt[dk]||''; }
+  function _pre(p, dk){ var s=att2EffectiveStart(p); return s && new Date(dk+'T00:00:00')<s; }
+  function _term(p, dk){ var e=att2EffectiveEnd(p); return e && new Date(dk+'T00:00:00')>e; }
   var today=new Date();var dow=today.getDay()||7;// Mon=1..Sun=7
   // Only run on Monday-Tuesday after a weekend has passed
   // Build list of last week's weekdays
@@ -3260,11 +3304,11 @@ function dmReviewLastWeekShortfalls(){
     var dk=yr+'-'+String(mon+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
     if(ack[dk])continue;
     var base=dmEffectiveBase(yr,mon,day);
-    var scaffolders=getEmpsForMonth(yr,mon).filter(function(e){return e.g==='SCAFFOLDERS';});
-    var yardStaff=getEmpsForMonth(yr,mon).filter(function(e){return e.g==='YARD STAFF';});
+    var scaffolders=_emps(yr,mon).filter(function(p){return p.group==='SCAFFOLDERS';});
+    var yardStaff=_emps(yr,mon).filter(function(p){return p.group==='YARD STAFF';});
     var scaff=0,yard=0;
-    scaffolders.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk)||isPreStart(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;scaff++;});
-    yardStaff.forEach(function(e){if(isExc(e.n,dk))return;if(isTermPast(e.n,dk)||isPreStart(e.n,dk))return;var v=getStatus(e.n,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yard++;});
+    scaffolders.forEach(function(p){if(_term(p,dk)||_pre(p,dk))return;var v=_stat(p,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;scaff++;});
+    yardStaff.forEach(function(p){if(_term(p,dk)||_pre(p,dk))return;var v=_stat(p,dk);if(v==='AL'||v==='SL'||v==='X'||v==='PH')return;yard++;});
     var counted,yardPulled,shortfall;
     if(scaff>=base){counted=base;yardPulled=0;shortfall=0;}else{yardPulled=Math.min(base-scaff,yard);counted=scaff+yardPulled;shortfall=base-counted;}
     if(shortfall>0)findings.push({dk:dk,day:day,month:mon,year:yr,base:base,scaff:scaff,yardPulled:yardPulled,yardAvail:yard,counted:counted,shortfall:shortfall});

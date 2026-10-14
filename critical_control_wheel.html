@@ -11021,7 +11021,7 @@ function att2Render() {
   H.push('<th style="background:#c62828;color:#fff;padding:3px 8px;text-align:center;font-size:9px;min-width:30px">SL</th>');
   H.push('<th style="background:#1565c0;color:#fff;padding:3px 8px;text-align:center;font-size:9px;min-width:30px">AL</th>');
   H.push('<th style="background:#880e4f;color:#fff;padding:3px 8px;text-align:center;font-size:9px;min-width:30px">X</th>');
-  H.push('<th class="np" style="background:#1a1a1a;color:#fff;padding:3px 8px;text-align:center;font-size:9px;min-width:52px">Edit</th></tr></thead><tbody>');
+  H.push('<th class="np" style="background:#1a1a1a;color:#fff;padding:3px 8px;text-align:center;font-size:9px;min-width:100px">Reorder / Edit</th></tr></thead><tbody>');
 
   var totalShown = 0;
   ATT2_GROUPS.forEach(function(grp){
@@ -11080,7 +11080,11 @@ function att2Render() {
       cells.push('<td style="text-align:center;font-weight:700;color:#b71c1c;background:#fff5f5;border:1px solid #ffcdd2">'+sl+'</td>');
       cells.push('<td style="text-align:center;font-weight:700;color:#0d47a1;background:#f0f7ff;border:1px solid #bbdefb">'+al+'</td>');
       cells.push('<td style="text-align:center;font-weight:700;color:#880e4f;background:#fdf0f5;border:1px solid #f8bbd0">'+x+'</td>');
-      cells.push('<td class="np" style="text-align:center;background:#fafafa;border:1px solid #e0e0e0"><button onclick="att2OpenEdit(\''+p.id+'\')" style="background:#fff;border:1px solid #999;padding:3px 8px;font-size:10px;border-radius:3px;cursor:pointer;font-weight:600">Edit</button></td>');
+      cells.push('<td class="np" style="text-align:center;background:#fafafa;border:1px solid #e0e0e0;white-space:nowrap">'+
+        '<button onclick="att2Move(\''+p.id+'\',\'up\')" style="background:#fff;border:1px solid #999;padding:2px 6px;font-size:10px;border-radius:3px;cursor:pointer;line-height:1" title="Move up within group">&#9650;</button>'+
+        ' <button onclick="att2Move(\''+p.id+'\',\'down\')" style="background:#fff;border:1px solid #999;padding:2px 6px;font-size:10px;border-radius:3px;cursor:pointer;line-height:1;margin-right:4px" title="Move down within group">&#9660;</button>'+
+        '<button onclick="att2OpenEdit(\''+p.id+'\')" style="background:#fff;border:1px solid #999;padding:3px 8px;font-size:10px;border-radius:3px;cursor:pointer;font-weight:600">Edit</button>'+
+      '</td>');
       H.push('<tr>'+cells.join('')+'</tr>');
     });
   });
@@ -11108,6 +11112,37 @@ async function att2CycleTick(pid, dk) {
     att2SetStatus('Saved — ' + new Date().toLocaleTimeString('en-AU'));
   } catch (e) {
     att2SetStatus('Save failed: ' + e.message + ' — click Sync now to retry', true);
+  }
+}
+
+async function att2Move(id, dir) {
+  var p = ATT2.persons.filter(function(x){return x.id===id;})[0];
+  if (!p) return;
+  // Build sorted list, then swap with the neighbor in the SAME GROUP only
+  var all = ATT2.persons.slice().sort(function(a,b){return (a.order||0)-(b.order||0);});
+  var sameGroup = all.filter(function(x){return x.group===p.group;});
+  var idx = sameGroup.findIndex(function(x){return x.id===id;});
+  if (idx < 0) return;
+  var newIdx = idx + (dir==='up' ? -1 : 1);
+  if (newIdx < 0 || newIdx >= sameGroup.length) return;
+  var tmp = sameGroup[idx]; sameGroup[idx] = sameGroup[newIdx]; sameGroup[newIdx] = tmp;
+  // Rebuild the full ID list with this group re-sequenced in place
+  var ptr = 0, newOrder = [];
+  all.forEach(function(x){
+    if (x.group === p.group) { newOrder.push(sameGroup[ptr].id); ptr++; }
+    else newOrder.push(x.id);
+  });
+  // Optimistic local update
+  newOrder.forEach(function(xid, i){
+    var pp = ATT2.persons.filter(function(x){return x.id===xid;})[0];
+    if (pp) pp.order = (i+1)*10;
+  });
+  att2Render();
+  try {
+    await att2Call('att2_person_order', { ids: newOrder });
+    att2SetStatus('Reordered — saved ' + new Date().toLocaleTimeString('en-AU'));
+  } catch (e) {
+    att2SetStatus('Reorder save failed: ' + e.message, true);
   }
 }
 

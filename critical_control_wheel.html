@@ -2442,10 +2442,40 @@ function restoreEmp(n){
   var pr=glj('kaefer_arch_restore',[]);if(pr.indexOf(n)<0){pr.push(n);sl('kaefer_arch_restore',pr);}
   rAtt();rFormer();if(getURL())flushSyncAtt();
 }
-function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';arch.forEach(function(en){var tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+en.n+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+' <button class="ob" style="font-size:10px;padding:1px 5px" onclick="editArchDateByEl(this)" data-name="'+encodeURIComponent(en.n)+'" title="Correct the date they actually left">&#9998;</button></td><td><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button></td>';tb.appendChild(tr);});}
+function rFormer(){var arch=getArch();document.getElementById('former-bg').textContent=arch.length;var em=document.getElementById('former-empty'),tbl=document.getElementById('former-tbl'),tb=document.getElementById('former-body');if(!arch.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';var active={};getEmps().forEach(function(e){active[e.n]=true;});arch.forEach(function(en){var tr=document.createElement('tr');var dupe=active[en.n]?' <span style="color:#c62828;font-size:10px;font-weight:700" title="Also in active list — probably safe to delete">(duplicate)</span>':'';tr.innerHTML='<td style="font-weight:600">'+en.n+dupe+'</td><td><span class="badge bgr">'+en.g+'</span></td><td style="font-size:11px;color:#607d8b">'+en.date+' <button class="ob" style="font-size:10px;padding:1px 5px" onclick="editArchDateByEl(this)" data-name="'+encodeURIComponent(en.n)+'" title="Correct the date they actually left">&#9998;</button></td><td style="white-space:nowrap"><button class="ob" style="font-size:11px;padding:2px 8px;color:#2e7d32;border-color:#2e7d32;margin-right:4px" onclick="restoreEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'">&#8617; Restore</button><button class="ob" style="font-size:11px;padding:2px 8px;color:#c62828;border-color:#c62828" onclick="deleteArchEmpByEl(this)" data-name="'+encodeURIComponent(en.n)+'" title="Permanently delete this archive entry">&#128465; Delete</button></td>';tb.appendChild(tr);});}
+function deleteArchEmp(n){
+  var arch=getArch();
+  var emp=arch.filter(function(e){return e.n===n;})[0];
+  if(!emp){alert('Not in archive.');return;}
+  if(!confirm('Permanently delete archive entry for:\n\n'+n+'\n\nThis removes them from the Former Employees list on YOUR tool AND syncs the deletion to the server.\n\nIf they are currently in the active list too, this fixes the duplicate.\n\nProceed?'))return;
+  sl(ATT_ARCH,arch.filter(function(e){return e.n!==n;}));markArchDirty();
+  addTomb('arch',n);
+  _ARCH_DATE_CACHE_RAW='';
+  rAtt();rFormer();if(getURL())flushSyncAtt();
+}
+function deleteArchEmpByEl(btn){deleteArchEmp(decodeURIComponent(btn.getAttribute('data-name')));}
 // ==================== MASS ARCHIVE ====================
 // One-click "archive everyone with a given departure date" — so you can rebuild
 // your active roster for a specific month by restoring people from Former Employees.
+// Fix duplicates — if a name exists in both active AND archive, drop the archive copy.
+// Active wins because that's the current roster.
+function fixDupedEmployees(){
+  var emps=getEmps();
+  var arch=getArch();
+  var activeNames={};
+  emps.forEach(function(e){activeNames[e.n]=true;});
+  var dupes=arch.filter(function(a){return activeNames[a.n];});
+  if(!dupes.length){alert('No duplicates found. Everyone is cleanly in one list.');return;}
+  var preview=dupes.slice(0,10).map(function(d){return '• '+d.n;}).join('\n');
+  if(dupes.length>10)preview+='\n...and '+(dupes.length-10)+' more';
+  if(!confirm('Found '+dupes.length+' people in BOTH active list and archive.\n\nActive version will be kept, archive copy removed:\n\n'+preview+'\n\nProceed?'))return;
+  var cleanedArch=arch.filter(function(a){return !activeNames[a.n];});
+  sl(ATT_ARCH,cleanedArch);markArchDirty();
+  dupes.forEach(function(d){addTomb('arch',d.n);});
+  _ARCH_DATE_CACHE_RAW='';
+  rAtt();rFormer();if(getURL())flushSyncAtt();
+  alert('Removed '+dupes.length+' duplicate archive entries. The active entries remain.\n\nSync has been triggered — hit refresh on Boz’s tool after a minute to pull the clean list.');
+}
 function massArchiveAll(){
   var dateStr='28 Feb 2026';
   var emps=getEmps();

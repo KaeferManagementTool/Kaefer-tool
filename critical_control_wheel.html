@@ -1767,10 +1767,23 @@ function getArchDateFor(n){
 // Is this person terminated as of the given date-key?
 function isTermPast(n,dk){var ad=getArchDateFor(n);if(!ad)return false;var d=new Date(dk+'T00:00:00');return d>ad;}
 function isTermDay(n,dk){var ad=getArchDateFor(n);if(!ad)return false;var d=new Date(dk+'T00:00:00');return d.getTime()===ad.getTime();}
-// Local start-date overlay — survives sync (the server's Apps Script doesn't persist start dates).
+// Local start-date overlay — survives sync and is seeded from pulled server data.
 var ATT_STARTS_KEY='kaefer_att_starts'; // {name: 'YYYY-MM-DD'}
 function getStartOverlay(){try{return JSON.parse(localStorage.getItem(ATT_STARTS_KEY)||'{}');}catch(e){return{};}}
 function setStartOverlay(name,date){var o=getStartOverlay();if(date)o[name]=date;else delete o[name];localStorage.setItem(ATT_STARTS_KEY,JSON.stringify(o));_START_DATE_CACHE_RAW='';}
+// Normalise a start-date value coming from server. Sheets autocast returns dates as
+// ISO strings like "2026-04-01T00:00:00.000Z" — strip to YYYY-MM-DD. Plain strings pass through.
+function normaliseStart(s){if(!s)return'';if(typeof s!=='string')s=String(s);if(/^\d{4}-\d{2}-\d{2}T/.test(s))return s.slice(0,10);if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;var d=new Date(s);if(!isNaN(d.getTime()))return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');return '';}
+// After a sync pull, merge any server-side start dates INTO the local overlay so they survive
+// future local overwrites and are visible to this supervisor too.
+function seedStartOverlayFromServer(emps,arch){
+  if(!emps&&!arch)return;
+  var o=getStartOverlay();var changed=false;
+  function take(list){if(!list)return;list.forEach(function(e){if(!e||!e.n)return;var s=normaliseStart(e.start);if(s){if(o[e.n]!==s){o[e.n]=s;changed=true;}e.start=s;}});}
+  take(emps);take(arch);
+  if(changed){localStorage.setItem(ATT_STARTS_KEY,JSON.stringify(o));}
+  _START_DATE_CACHE_RAW='';
+}
 // Return the start Date for an active employee (if they have one set), else null.
 var _START_DATE_CACHE=null;var _START_DATE_CACHE_RAW='';
 function getStartDateFor(n){
@@ -5320,6 +5333,8 @@ function syncAtt(){
   .then(function(j){
     var ov=normaliseOvDates(j.ov||{});
     sl('kaefer_att_ov',ov);
+    // Normalise start-date formatting + seed overlay BEFORE saving locally
+    seedStartOverlayFromServer(j.emps,j.arch);
     if(j.emps)sl('kaefer_att_emps',j.emps);
     if(j.arch&&j.arch.length){sl('kaefer_att_arch',j.arch);reapplyPendingArchDates();}
     // Our push succeeded (if we had one). Clear dirty flags so plain refreshes don't re-push.
@@ -7054,6 +7069,7 @@ function doSyncAttendance(u){
       .then(function(j){
         if(!j.ok)throw new Error(j.error||'load failed');
         if(j.ov)sl('kaefer_att_ov',j.ov);
+        seedStartOverlayFromServer(j.emps,j.arch);
         if(j.emps)sl('kaefer_att_emps',j.emps);
         if(j.arch)sl('kaefer_att_arch',j.arch);
         clearDirtyFlags();

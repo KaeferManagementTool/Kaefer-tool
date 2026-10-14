@@ -3049,7 +3049,8 @@ function rDM(){
     if(endDate<startDate){document.getElementById('dm-tbody').innerHTML='<tr><td colspan="10" style="padding:20px;text-align:center;color:#c62828">To date is before From date.</td></tr>';return;}
     var daysSpan=Math.round((endDate-startDate)/86400000)+1;
     if(daysSpan>400){document.getElementById('dm-tbody').innerHTML='<tr><td colspan="10" style="padding:20px;text-align:center;color:#c62828">Range too large (max 400 days).</td></tr>';return;}
-    titlePrefix=fs+' → '+ts;
+    function _au(s){var p=s.split('-');return p[2]+'/'+p[1]+'/'+p[0];}
+    titlePrefix=_au(fs)+' → '+_au(ts);
   } else {
     var mon=+document.getElementById('dm-mon').value,yr=+document.getElementById('dm-yr').value;
     var saved=dmGetMonthBase(yr,mon);if(saved!==null)baseInput.value=saved;

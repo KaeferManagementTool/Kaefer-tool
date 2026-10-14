@@ -10911,8 +10911,8 @@ var ATT2_STATUS_COLORS = {
 };
 
 function att2WorkerUrl() {
-  // Prefer the global constant, fall back to the setup-time stored URL
-  if (typeof SCF_WORKER_URL !== 'undefined' && SCF_WORKER_URL) return SCF_WORKER_URL;
+  // Hit Apps Script directly — SCF_WORKER_URL is the Cloudflare Worker for forms,
+  // which doesn't proxy the new att2_* actions.
   return localStorage.getItem('kaefer_url') || '';
 }
 function att2Who() { return (localStorage.getItem('kaefer_supervisor') || '').toString().slice(0,80); }

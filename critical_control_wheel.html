@@ -377,7 +377,7 @@ if(localStorage.getItem('kaefer_setup_done')){
   <div class="card" style="margin-bottom:11px">
     <div class="ch ch-g" style="justify-content:space-between"><span>Recognition Log</span><span class="cbg" id="rrbg">0</span></div>
     <div id="rre" class="le">No entries yet.</div>
-    <div style="overflow-x:auto"><table id="rrt" style="display:none"><thead><tr><th>Date</th><th>Name</th><th>Smart Choices</th><th>Description</th><th class="np"></th></tr></thead><tbody id="rrb"></tbody></table></div>
+    <div style="overflow-x:auto"><table id="rrt" style="display:none"><thead><tr><th>Date</th><th>Name</th><th>Smart Choices</th><th>Description</th><th class="np" style="text-align:center;white-space:nowrap">In Portal</th><th class="np"></th></tr></thead><tbody id="rrb"></tbody></table></div>
     <div style="display:flex;justify-content:flex-end;padding:8px 13px;border-top:1px solid var(--bd)" class="np"><button class="ob" onclick="clrRRLog()">Clear All</button></div>
   </div>
   <div class="card"><div class="ch ch-g"><span>&#128196; Smart Choices Report</span></div>
@@ -1809,7 +1809,14 @@ function rRR(){
   SCK.forEach(function(k,i){document.getElementById('rt'+(i+1)).textContent=log.filter(function(e){return(e.choices||[]).indexOf(k)>=0;}).length;});
   var em=document.getElementById('rre'),tbl=document.getElementById('rrt'),tb=document.getElementById('rrb');
   if(!log.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';
-  log.forEach(function(en){var pills=(en.choices||[]).map(function(k){return'<span class="pill '+SCP[k]+'">'+SCL[k]+'</span>';}).join('')||'<span style="color:#bbb;font-size:10px">None</span>';var tr=document.createElement('tr');tr.innerHTML='<td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:700">'+en.name+'</td><td>'+pills+'</td><td style="font-size:12px">'+en.comment+'</td><td class="np" style="white-space:nowrap"><button class="ob" style="font-size:11px;padding:2px 6px;margin-right:4px" onclick="editRR(\''+en.id+'\')">Edit</button><button class="ob" style="font-size:11px;padding:2px 6px;color:#c62828;border-color:#c62828" onclick="dRR('+en.id+')">Del</button></td>';tb.appendChild(tr);});
+  log.forEach(function(en){var pills=(en.choices||[]).map(function(k){return'<span class="pill '+SCP[k]+'">'+SCL[k]+'</span>';}).join('')||'<span style="color:#bbb;font-size:10px">None</span>';var tr=document.createElement('tr');var inPortal=!!en.submitted;if(inPortal)tr.style.cssText='background:#f1f8f1;color:#999';tr.innerHTML='<td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:700">'+en.name+'</td><td>'+pills+'</td><td style="font-size:12px">'+en.comment+'</td><td class="np" style="text-align:center"><input type="checkbox" '+(inPortal?'checked':'')+' onchange="toggleRRPortal(\''+en.id+'\',this.checked)" style="width:18px;height:18px;cursor:pointer" title="Tick once entered into KAEFER portal"></td><td class="np" style="white-space:nowrap"><button class="ob" style="font-size:11px;padding:2px 6px;margin-right:4px" onclick="editRR(\''+en.id+'\')">Edit</button><button class="ob" style="font-size:11px;padding:2px 6px;color:#c62828;border-color:#c62828" onclick="dRR('+en.id+')">Del</button></td>';tb.appendChild(tr);});
+}
+function toggleRRPortal(id,checked){
+  var log=glj('kaefer_rr',[]);
+  log=log.map(function(e){ if(String(e.id)===String(id)){ e.submitted=!!checked; } return e; });
+  sl('kaefer_rr',log);
+  rRR();
+  if(getURL())scheduleSyncRR();
 }
 var SCO=['safe','proud','environmental','healthy','efficient'];
 var SCBG={safe:'#fff9c4',proud:'#fce4ec',environmental:'#e8f5e9',healthy:'#e1f5fe',efficient:'#fff3e0'};
@@ -5417,7 +5424,7 @@ function normaliseOvDates(ov){
 
 // Entry hashes for delta diffing
 function hashLogEntry(en){return JSON.stringify([en.date,en.insp,en.site,en.area,en.team,en.yes,en.no,en.na,en.sc,en.items]);}
-function hashRREntry(en){return JSON.stringify([en.date,en.name,(en.choices||[]).slice().sort(),en.comment]);}
+function hashRREntry(en){return JSON.stringify([en.date,en.name,(en.choices||[]).slice().sort(),en.comment,!!en.submitted]);}
 
 // ── In-flight guard + debounced scheduler ───────────────────
 var _syncInFlight={},_syncTimers={};

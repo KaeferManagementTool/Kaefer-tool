@@ -11143,20 +11143,31 @@ function escapeHtml(s) {
   });
 }
 
-async function att2CycleTick(pid, dk) {
+var ATT2_PENDING = {}; // {cellKey: timeoutId} — debounces repeated clicks on same cell
+function att2CycleTick(pid, dk) {
   var current = (ATT2.ticks[pid] || {})[dk] || '';
   var idx = ATT2_STATUSES.indexOf(current);
   var next = ATT2_STATUSES[(idx + 1) % ATT2_STATUSES.length];
-  // Optimistic update
+  // Optimistic UI update immediately
   if (!ATT2.ticks[pid]) ATT2.ticks[pid] = {};
   if (next) ATT2.ticks[pid][dk] = next; else delete ATT2.ticks[pid][dk];
   att2Render();
-  try {
-    await att2Call('att2_tick', { person_id: pid, date: dk, status: next });
-    att2SetStatus('Saved — ' + new Date().toLocaleTimeString('en-AU'));
-  } catch (e) {
-    att2SetStatus('Save failed: ' + e.message + ' — click Sync now to retry', true);
-  }
+  att2SetStatus('Saving...');
+  // Debounce: wait 500ms after the LAST click, then send the final value.
+  // Prevents parallel race between SL/AL/X/PH taps while cycling.
+  var cellKey = pid + '|' + dk;
+  if (ATT2_PENDING[cellKey]) clearTimeout(ATT2_PENDING[cellKey]);
+  ATT2_PENDING[cellKey] = setTimeout(async function(){
+    delete ATT2_PENDING[cellKey];
+    var finalStatus = (ATT2.ticks[pid] || {})[dk] || '';
+    try {
+      await att2Call('att2_tick', { person_id: pid, date: dk, status: finalStatus });
+      ATT2.lastSync = Date.now(); // defer background sync for 45s so our save sticks
+      att2SetStatus('Saved — ' + new Date().toLocaleTimeString('en-AU'));
+    } catch (e) {
+      att2SetStatus('Save failed: ' + e.message + ' — click Sync now to retry', true);
+    }
+  }, 500);
 }
 
 async function att2Move(id, dir) {
@@ -11329,13 +11340,14 @@ function att2ExportCsv() {
   }
 })();
 
-// Background pull every 60s if the tab is visible
+// Background pull every 60s if the tab is visible AND no clicks are in flight
 setInterval(function(){
   var tab = document.getElementById('tAtt2');
   if (!tab) return;
   var visible = tab.classList.contains('on') || tab.style.display !== 'none';
   if (!visible) return;
   if (ATT2.loading) return;
+  if (Object.keys(ATT2_PENDING).length > 0) return; // pending saves — don't clobber in-flight work
   if (Date.now() - ATT2.lastSync < 45000) return; // throttle
   att2Reload(true);
 }, 60000);

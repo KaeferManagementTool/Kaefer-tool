@@ -370,7 +370,8 @@ if(localStorage.getItem('kaefer_setup_done')){
       <button class="scb" id="sc-environmental" onclick="tSC('environmental')">EVSVG Green</button>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:9px 13px" class="np">
-      <button class="ob" onclick="clrRR()">Clear</button><button class="rb" onclick="addRR()">&#10003; Add</button>
+      <input type="hidden" id="rr-edit-id" value="">
+      <button class="ob" onclick="clrRR()">Clear</button><button class="rb" id="rr-save-btn" onclick="addRR()">&#10003; Add</button>
     </div>
   </div>
   <div class="card" style="margin-bottom:11px">
@@ -1321,7 +1322,32 @@ window.onerror=function(msg,src,line,col,err){
 function gl(k){try{return localStorage.getItem(k);}catch(e){return null;}}
 function sl(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
 function glj(k,d){try{var r=localStorage.getItem(k);return r?JSON.parse(r):d;}catch(e){return d;}}
-function fd(d){if(!d)return'';var p=d.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
+function fd(d){
+  if(!d) return '';
+  var s = String(d);
+  // ISO datetime from Google Sheets autocast: convert to local date
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    var dt = new Date(s);
+    if (!isNaN(dt.getTime())) {
+      return String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear();
+    }
+  }
+  var p = s.split('-');
+  return p.length === 3 ? p[2]+'/'+p[1]+'/'+p[0] : s;
+}
+// Normalise any date-like value back to plain YYYY-MM-DD for storage
+function fdISO(d){
+  if(!d) return '';
+  var s = String(d);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    var dt = new Date(s);
+    if (!isNaN(dt.getTime())) {
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+    }
+  }
+  return s;
+}
 var MNS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 var MNS3=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 function sT(id,btn){
@@ -1720,8 +1746,61 @@ var SCC={safe:'#1565c0',efficient:'#e65100',proud:'#e53935',healthy:'#2e7d32',en
 var SCP={safe:'ps',efficient:'pe',proud:'pp',healthy:'ph2',environmental:'pv'};
 function mkSVG(k){var c2=SCC[k];return'<svg width="18" height="18" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="54" height="54" rx="9" fill="white" stroke="'+c2+'" stroke-width="4"/><circle cx="30" cy="13" r="5" fill="none" stroke="'+c2+'" stroke-width="3"/><line x1="30" y1="18" x2="30" y2="36" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="22" x2="44" y2="13" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="22" x2="20" y2="30" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="36" x2="40" y2="48" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/><line x1="30" y1="36" x2="22" y2="48" stroke="'+c2+'" stroke-width="3" stroke-linecap="round"/></svg>';}
 function tSC(k){document.getElementById('sc-'+k).classList.toggle('on-'+k);}
-function clrRR(){document.getElementById('rd').value=new Date().toISOString().split('T')[0];document.getElementById('rn').value='';document.getElementById('rc2').value='';SCK.forEach(function(k){document.getElementById('sc-'+k).classList.remove('on-'+k);});}
-function addRR(){var name=document.getElementById('rn').value.trim(),comment=document.getElementById('rc2').value.trim();if(!name){alert('Enter name.');return;}if(!comment){alert('Describe what they did.');return;}var chosen=SCK.filter(function(k){return document.getElementById('sc-'+k).classList.contains('on-'+k);});var log=glj('kaefer_rr',[]);log.unshift({id:Date.now(),date:document.getElementById('rd').value,name:name,comment:comment,choices:chosen});sl('kaefer_rr',log);clrRR();rRR();if(getURL())scheduleSyncRR();}
+function clrRR(){
+  document.getElementById('rd').value=new Date().toISOString().split('T')[0];
+  document.getElementById('rn').value='';
+  document.getElementById('rc2').value='';
+  SCK.forEach(function(k){document.getElementById('sc-'+k).classList.remove('on-'+k);});
+  var eid=document.getElementById('rr-edit-id'); if(eid) eid.value='';
+  var btn=document.getElementById('rr-save-btn'); if(btn) btn.innerHTML='&#10003; Add';
+}
+function editRR(id){
+  var log=glj('kaefer_rr',[]);
+  var en=log.filter(function(e){return String(e.id)===String(id);})[0];
+  if(!en){alert('Entry not found. Try refresh.');return;}
+  document.getElementById('rd').value=fdISO(en.date);
+  document.getElementById('rn').value=en.name||'';
+  document.getElementById('rc2').value=en.comment||'';
+  SCK.forEach(function(k){
+    var btn=document.getElementById('sc-'+k);
+    if(!btn) return;
+    if((en.choices||[]).indexOf(k)>=0) btn.classList.add('on-'+k);
+    else btn.classList.remove('on-'+k);
+  });
+  document.getElementById('rr-edit-id').value=String(id);
+  var saveBtn=document.getElementById('rr-save-btn');
+  if(saveBtn) saveBtn.innerHTML='&#10003; Update';
+  document.getElementById('rn').focus();
+  document.getElementById('rn').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function addRR(){
+  var name=document.getElementById('rn').value.trim(),
+      comment=document.getElementById('rc2').value.trim();
+  if(!name){alert('Enter name.');return;}
+  if(!comment){alert('Describe what they did.');return;}
+  var chosen=SCK.filter(function(k){return document.getElementById('sc-'+k).classList.contains('on-'+k);});
+  var editId=(document.getElementById('rr-edit-id')||{}).value||'';
+  var log=glj('kaefer_rr',[]);
+  var cleanDate=fdISO(document.getElementById('rd').value);
+  if(editId){
+    // Update existing
+    var found=false;
+    log=log.map(function(e){
+      if(String(e.id)===String(editId)){
+        found=true;
+        return {id:e.id,date:cleanDate,name:name,comment:comment,choices:chosen};
+      }
+      return e;
+    });
+    if(!found){ alert('Original entry no longer exists — saving as new.'); log.unshift({id:Date.now(),date:cleanDate,name:name,comment:comment,choices:chosen}); }
+  } else {
+    log.unshift({id:Date.now(),date:cleanDate,name:name,comment:comment,choices:chosen});
+  }
+  sl('kaefer_rr',log);
+  clrRR();
+  rRR();
+  if(getURL())scheduleSyncRR();
+}
 function clrRRLog(){if(!confirm('Delete all?'))return;var arr=glj('kaefer_rr',[]);arr.forEach(function(e){addTomb('rr',e.id);});sl('kaefer_rr',[]);rRR();if(getURL())scheduleSyncRR();}
 function dRR(id){if(!confirm('Delete?'))return;addTomb('rr',id);sl('kaefer_rr',glj('kaefer_rr',[]).filter(function(e){return e.id!==id;}));rRR();if(getURL())scheduleSyncRR();}
 function rRR(){
@@ -1730,7 +1809,7 @@ function rRR(){
   SCK.forEach(function(k,i){document.getElementById('rt'+(i+1)).textContent=log.filter(function(e){return(e.choices||[]).indexOf(k)>=0;}).length;});
   var em=document.getElementById('rre'),tbl=document.getElementById('rrt'),tb=document.getElementById('rrb');
   if(!log.length){em.style.display='';tbl.style.display='none';return;}em.style.display='none';tbl.style.display='';tb.innerHTML='';
-  log.forEach(function(en){var pills=(en.choices||[]).map(function(k){return'<span class="pill '+SCP[k]+'">'+SCL[k]+'</span>';}).join('')||'<span style="color:#bbb;font-size:10px">None</span>';var tr=document.createElement('tr');tr.innerHTML='<td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:700">'+en.name+'</td><td>'+pills+'</td><td style="font-size:12px">'+en.comment+'</td><td class="np"><button class="ob" style="font-size:11px;padding:2px 6px;color:#c62828;border-color:#c62828" onclick="dRR('+en.id+')">Del</button></td>';tb.appendChild(tr);});
+  log.forEach(function(en){var pills=(en.choices||[]).map(function(k){return'<span class="pill '+SCP[k]+'">'+SCL[k]+'</span>';}).join('')||'<span style="color:#bbb;font-size:10px">None</span>';var tr=document.createElement('tr');tr.innerHTML='<td style="white-space:nowrap;font-size:11px">'+fd(en.date)+'</td><td style="font-weight:700">'+en.name+'</td><td>'+pills+'</td><td style="font-size:12px">'+en.comment+'</td><td class="np" style="white-space:nowrap"><button class="ob" style="font-size:11px;padding:2px 6px;margin-right:4px" onclick="editRR(\''+en.id+'\')">Edit</button><button class="ob" style="font-size:11px;padding:2px 6px;color:#c62828;border-color:#c62828" onclick="dRR('+en.id+')">Del</button></td>';tb.appendChild(tr);});
 }
 var SCO=['safe','proud','environmental','healthy','efficient'];
 var SCBG={safe:'#fff9c4',proud:'#fce4ec',environmental:'#e8f5e9',healthy:'#e1f5fe',efficient:'#fff3e0'};

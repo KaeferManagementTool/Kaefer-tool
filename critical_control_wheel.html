@@ -3266,7 +3266,13 @@ function rDM(){
   if (typeof ATT2 === 'undefined' || !ATT2.loaded) {
     var tb0 = document.getElementById('dm-tbody');
     if (tb0) tb0.innerHTML = '<tr><td colspan="10" style="padding:20px;text-align:center;color:#999">Loading from Attendance 2…</td></tr>';
-    if (typeof att2Reload === 'function') { att2Reload(true).then(function(){ rDM(); }); }
+    // Defer so ATT2 has a chance to initialise if we're mid page-load
+    setTimeout(function(){
+      if (typeof ATT2 !== 'undefined' && typeof att2Reload === 'function') {
+        var p = att2Reload(true);
+        if (p && p.then) p.then(function(){ rDM(); }); else rDM();
+      }
+    }, 200);
     return;
   }
   // v2 helpers (closed over this call)
@@ -11061,6 +11067,7 @@ async function att2Call(action, data) {
 }
 
 async function att2Reload(silent) {
+  if (typeof ATT2 === 'undefined') return; // early-load safety
   if (ATT2.loading) return;
   ATT2.loading = true;
   if (!silent) att2SetStatus('Loading...');

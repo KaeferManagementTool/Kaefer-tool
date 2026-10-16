@@ -872,7 +872,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 const TABS = [
   { id:'dashboard',   label:'Dashboard',         accent:'var(--t-dashboard)',   phase:1, status:'in build',
     desc:'A single live overview — today\'s crew size, open actions, recent inspections, this week\'s shortfall, upcoming expiries. First screen you see every morning.' },
-  { id:'daily',       label:'Daily Meeting',     accent:'var(--t-daily)',       phase:2, status:'coming',
+  { id:'daily',       label:'Daily Meeting',     accent:'var(--t-daily)',       phase:2, status:'in build',
     desc:'Big-screen view for the morning team meeting. Today\'s jobs down the left (dragged from Hours Register), team composition down the right pulled live from Attendance & Offsite.' },
   { id:'attendance',  label:'Attendance',        accent:'var(--t-attendance)',  phase:1, status:'in build',
     desc:'The v2 attendance grid you already have. Click a date cell to cycle through statuses, up/down arrows to reorder, migrate from v1 one-click.' },
@@ -2877,6 +2877,220 @@ function hrSaveColours() {
   hrRender();
 }
 
+/* ============================================================
+   DAILY MEETING VIEW
+============================================================ */
+const DAILY = {
+  date: new Date().toISOString().slice(0,10),
+  bigScreen: false
+};
+const TEAMS = [
+  { id:'GREEN',     label:'GREEN TEAM',    colour:'#2e7d32', bg:'#e8f5e9' },
+  { id:'RED',       label:'RED TEAM',      colour:'#c62828', bg:'#ffebee' },
+  { id:'ORANGE',    label:'ORANGE TEAM',   colour:'#ef6c00', bg:'#fff3e0' },
+  { id:'DISMANTLE', label:'DISMANTLE',     colour:'#4527a0', bg:'#ede7f6' },
+  { id:'SCF-YARD',  label:'SCF-YARD',      colour:'#00695c', bg:'#e0f2f1' },
+  { id:'UNASSIGNED',label:'UNASSIGNED',    colour:'#607d8b', bg:'#eceff1' }
+];
+const DAYS_WK_UP = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+const DAYS_WK_SHORT = ['sun','mon','tue','wed','thu','fri','sat'];
+
+function dmGetTeams()       { try { return JSON.parse(localStorage.getItem('kaefer_v2_daily_teams') || '{}'); } catch(e) { return {}; } }
+function dmSetTeams(t)      { localStorage.setItem('kaefer_v2_daily_teams', JSON.stringify(t)); }
+function dmGetSafety()      { try { return JSON.parse(localStorage.getItem('kaefer_v2_daily_safety') || '{}'); } catch(e) { return {}; } }
+function dmSetSafety(s)     { localStorage.setItem('kaefer_v2_daily_safety', JSON.stringify(s)); }
+
+function dmPersonTeam(dateKey, personId) {
+  const t = dmGetTeams();
+  return (t[dateKey] && t[dateKey][personId]) || 'UNASSIGNED';
+}
+function dmSetPersonTeam(dateKey, personId, teamId) {
+  const t = dmGetTeams();
+  if (!t[dateKey]) t[dateKey] = {};
+  t[dateKey][personId] = teamId;
+  dmSetTeams(t);
+}
+function dmJobTeam(jobId) {
+  const r = HR.rows.find(x => x.id === jobId); return r ? (r.team || 'UNASSIGNED') : 'UNASSIGNED';
+}
+function dmSetJobTeam(jobId, teamId) {
+  const r = HR.rows.find(x => x.id === jobId); if (!r) return;
+  r.team = teamId; hrSave();
+}
+
+function render_daily(stage, tabCfg) {
+  // Make sure both data layers are loaded
+  if (!ATT2.loaded) { attReload().then(() => { if (ACTIVE === 'daily') render_daily(stage, tabCfg); }); }
+  if (!HR.loaded)   hrLoad();
+  if (!OFF.loaded)  offLoad();
+
+  const dateKey = DAILY.date;
+  const dow = new Date(dateKey+'T00:00:00').getDay();
+  const dayShort = DAYS_WK_SHORT[dow];
+  const dayUp = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
+  const safety = dmGetSafety()[dateKey] || '';
+
+  // Jobs for today = HR rows where day matches today's weekday
+  const todayJobs = HR.rows.filter(r => r.day === dayShort);
+  // People = ATT2 persons who are active on this date and not archived off before it
+  const d0 = new Date(dateKey+'T00:00:00');
+  const activePeople = ATT2.persons.filter(p => {
+    if (!p.group) return false;
+    const s = pStart(p), e = pEnd(p);
+    if (s && d0 < s) return false;
+    if (e && d0 > e) return false;
+    return true;
+  });
+  // Offsite today
+  const offsiteToday = OFF.items.filter(o => o.date === dateKey);
+  const offsiteByPerson = {};
+  offsiteToday.forEach(o => { if (o.person_id) offsiteByPerson[o.person_id] = o; });
+
+  stage.innerHTML = `
+    <div class="card" id="daily-card">
+      <div class="card-h" style="background:${DAILY.bigScreen?'#1a1a1a':'var(--surface-2)'}">
+        <span class="accent" style="--accent:var(--t-daily)"></span>
+        <h2 style="${DAILY.bigScreen?'color:#fff;font-size:20px':''}">Daily Meeting · <span style="color:var(--t-daily)">${dayUp}</span></h2>
+        <input type="date" value="${dateKey}" onchange="DAILY.date=this.value;render_daily(document.getElementById('stage'))" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;margin-left:12px">
+        <button class="btn-ghost" style="margin-left:6px" onclick="DAILY.date=new Date().toISOString().slice(0,10);render_daily(document.getElementById('stage'))">Today</button>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn-ghost" onclick="dailyToggleBigScreen()">${DAILY.bigScreen?'↙ Exit big screen':'↗ Big screen'}</button>
+        <button class="btn-ghost" style="margin-left:6px" onclick="window.print()">🖨 Print</button>
+      </div>
+
+      <div style="background:linear-gradient(90deg,var(--t-rr),#c2185b);color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.9">🛡 Smart Choice of the day:</span>
+        <input type="text" id="daily-safety" value="${escHtml(safety)}" placeholder="Type the safety message for the morning..." style="flex:1;padding:6px 10px;border:0;border-radius:var(--r-sm);font-size:${DAILY.bigScreen?'15px':'13px'};font-weight:600;background:rgba(255,255,255,.9);color:#1a1a1a" oninput="dmSaveSafety(this.value)">
+      </div>
+
+      <div style="display:grid;grid-template-columns:${DAILY.bigScreen?'1.6fr 1fr':'1.4fr 1fr'};gap:0">
+        <div style="padding:14px;border-right:1px solid var(--line)">
+          <h3 style="margin:0 0 10px;font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--mute)">Today's jobs (${todayJobs.length})</h3>
+          <div id="daily-jobs"></div>
+        </div>
+        <div style="padding:14px">
+          <h3 style="margin:0 0 10px;font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--mute)">Team composition (${activePeople.length} people)</h3>
+          <div id="daily-teams"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  renderDailyJobs(todayJobs);
+  renderDailyTeams(activePeople, dateKey, offsiteByPerson);
+}
+
+function renderDailyJobs(jobs) {
+  const wrap = document.getElementById('daily-jobs');
+  if (!wrap) return;
+  if (!jobs.length) {
+    wrap.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mute);font-style:italic">No jobs assigned to this day. Open Hours Register and set a day for each job.</div>';
+    return;
+  }
+  // Group jobs by team
+  const byTeam = {};
+  TEAMS.forEach(t => byTeam[t.id] = []);
+  jobs.forEach(j => {
+    const t = j.team || 'UNASSIGNED';
+    (byTeam[t] = byTeam[t] || []).push(j);
+  });
+  let html = '';
+  TEAMS.forEach(team => {
+    const list = byTeam[team.id] || [];
+    if (!list.length && team.id !== 'UNASSIGNED') return;
+    html += `<div style="margin-bottom:10px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden">
+      <div style="background:${team.colour};color:#fff;padding:6px 11px;font-weight:800;font-size:11px;letter-spacing:1px">${team.label} <span style="opacity:.75;font-weight:600">· ${list.length}</span></div>
+      <div>`;
+    if (!list.length) html += '<div style="padding:10px 14px;color:var(--mute);font-size:12px;font-style:italic">—</div>';
+    list.forEach(j => {
+      html += `<div style="padding:7px 11px;border-top:1px solid var(--line);background:${team.bg};display:flex;gap:10px;align-items:center">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:12.5px;color:#1a1a1a">${escHtml(j.desc||j.short||'(no description)')}</div>
+          <div style="font-size:10px;color:var(--mute);margin-top:2px">${escHtml(j.order||'')} · ${escHtml(j.loc||'')}${j.hours?' · '+escHtml(j.hours)+' hrs':''}</div>
+        </div>
+        <select onchange="dmSetJobTeam('${j.id}',this.value);render_daily(document.getElementById('stage'))" style="padding:3px 7px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;font-weight:600;background:#fff">
+          ${TEAMS.map(t=>`<option value="${t.id}" ${t.id===team.id?'selected':''}>${t.label.replace(' TEAM','')}</option>`).join('')}
+        </select>
+      </div>`;
+    });
+    html += '</div></div>';
+  });
+  wrap.innerHTML = html;
+}
+
+function renderDailyTeams(people, dateKey, offsiteByPerson) {
+  const wrap = document.getElementById('daily-teams');
+  if (!wrap) return;
+  // Group people by team (today's assignment)
+  const byTeam = {};
+  TEAMS.forEach(t => byTeam[t.id] = []);
+  const extras = { AL: [], SL: [], X: [], OFFSITE: [] }; // special buckets
+
+  people.forEach(p => {
+    const status = (ATT2.ticks[p.id] || {})[dateKey] || '';
+    const offsite = offsiteByPerson[p.id];
+    if (status === 'AL') { extras.AL.push({p, status, offsite}); return; }
+    if (status === 'SL') { extras.SL.push({p, status, offsite}); return; }
+    if (status === 'X')  { extras.X.push({p, status, offsite}); return; }
+    if (offsite)         { extras.OFFSITE.push({p, status, offsite}); return; }
+    const team = dmPersonTeam(dateKey, p.id);
+    (byTeam[team] = byTeam[team] || []).push({p, status, offsite});
+  });
+
+  let html = '';
+  TEAMS.forEach(team => {
+    const list = byTeam[team.id] || [];
+    if (!list.length && team.id !== 'UNASSIGNED') return;
+    html += `<div style="margin-bottom:10px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden">
+      <div style="background:${team.colour};color:#fff;padding:6px 11px;font-weight:800;font-size:11px;letter-spacing:1px">${team.label} · ${list.length}</div>`;
+    if (!list.length) html += '<div style="padding:8px 12px;color:var(--mute);font-size:11px;font-style:italic">—</div>';
+    list.forEach(({p}) => {
+      html += `<div style="padding:5px 11px;border-top:1px solid var(--line);background:${team.bg};display:flex;gap:8px;align-items:center">
+        <span style="flex:1;font-size:12px;font-weight:600;color:#1a1a1a">${escHtml(p.name)}</span>
+        <select onchange="dmSetPersonTeam('${dateKey}','${p.id}',this.value);render_daily(document.getElementById('stage'))" style="padding:2px 6px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:10px;font-weight:600;background:#fff">
+          ${TEAMS.map(t=>`<option value="${t.id}" ${t.id===team.id?'selected':''}>${t.label.replace(' TEAM','')}</option>`).join('')}
+        </select>
+      </div>`;
+    });
+    html += '</div>';
+  });
+
+  // Leave + offsite blocks
+  const extraBlocks = [
+    { k:'AL',       lbl:'ANNUAL LEAVE', col:'var(--info)' },
+    { k:'SL',       lbl:'SICK LEAVE',   col:'var(--err)' },
+    { k:'X',        lbl:'ABSENT',       col:'#880e4f' },
+    { k:'OFFSITE',  lbl:'OFFSITE',      col:'#00695c' }
+  ];
+  extraBlocks.forEach(blk => {
+    const list = extras[blk.k];
+    if (!list.length) return;
+    html += `<div style="margin-bottom:10px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden">
+      <div style="background:${blk.col};color:#fff;padding:5px 11px;font-weight:800;font-size:11px;letter-spacing:1px">${blk.lbl} · ${list.length}</div>`;
+    list.forEach(({p, offsite}) => {
+      const note = offsite ? ` · <span style="color:var(--mute);font-weight:400">${escHtml(offsite.reason||'')}</span>` : '';
+      html += `<div style="padding:5px 11px;border-top:1px solid var(--line);font-size:11.5px"><b>${escHtml(p.name)}</b>${note}</div>`;
+    });
+    html += '</div>';
+  });
+  wrap.innerHTML = html;
+}
+
+function dmSaveSafety(val) {
+  const s = dmGetSafety();
+  s[DAILY.date] = val;
+  dmSetSafety(s);
+}
+
+function dailyToggleBigScreen() {
+  DAILY.bigScreen = !DAILY.bigScreen;
+  document.body.style.background = DAILY.bigScreen ? '#1a1a1a' : '';
+  // Hide header + tab bar in big-screen mode
+  document.querySelector('.topbar').style.display = DAILY.bigScreen ? 'none' : '';
+  document.getElementById('tabwrap').style.display = DAILY.bigScreen ? 'none' : '';
+  document.querySelector('.statusbar').style.display = DAILY.bigScreen ? 'none' : '';
+  render_daily(document.getElementById('stage'));
+}
+
 /* Background sync every 60s while attendance is visible */
 setInterval(() => {
   if (ACTIVE !== 'attendance') return;
@@ -2959,6 +3173,7 @@ function renderStage() {
   }
   if (t.id === 'attendance') { render_attendance(stage, t); return; }
   if (t.id === 'manning')    { render_manning(stage, t); return; }
+  if (t.id === 'daily')      { render_daily(stage, t); return; }
   if (t.id === 'actions')    { render_actions(stage, t); return; }
   if (t.id === 'offsite')    { render_offsite(stage, t); return; }
   if (t.id === 'rr')         { render_rr(stage, t); return; }

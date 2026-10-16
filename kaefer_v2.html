@@ -1673,6 +1673,523 @@ async function actSaveEdit() {
   catch(e) { actSetStatus('Save failed: ' + e.message, true); }
 }
 
+/* ============================================================
+   OFFSITE REGISTER (localStorage for now — server sync in a later pass)
+============================================================ */
+const OFF = { items: [], loaded: false, editingId: null };
+function offLoad() {
+  try { OFF.items = JSON.parse(localStorage.getItem('kaefer_v2_offsite') || '[]'); } catch(e) { OFF.items = []; }
+  OFF.loaded = true;
+  if (ACTIVE === 'offsite') offRender();
+}
+function offSave() { localStorage.setItem('kaefer_v2_offsite', JSON.stringify(OFF.items)); }
+
+function render_offsite(stage, tabCfg) {
+  if (!OFF.loaded) offLoad();
+  const today = new Date().toISOString().slice(0,10);
+  const people = ATT2.loaded ? ATT2.persons.filter(p => !pIsArchived(p)).sort((a,b)=> a.name.localeCompare(b.name)) : [];
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-offsite)"></span>
+        <h2>Offsite Register</h2>
+        <span class="sub">Who's off-site, when, why</span>
+      </div>
+      <div class="att-ctrls">
+        <div class="field" style="min-width:170px"><label>Person</label>
+          <select id="off-person">
+            <option value="">— Select —</option>
+            ${people.map(p=>`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`).join('')}
+            <option value="__other__">Other / Non-roster</option>
+          </select>
+        </div>
+        <div class="field" style="display:none" id="off-other-wrap"><label>Name</label><input type="text" id="off-other-name"></div>
+        <div class="field"><label>Date</label><input type="date" id="off-date" value="${today}"></div>
+        <div class="field"><label>Out</label><input type="text" id="off-out" placeholder="e.g. 08:00 or Multiple" style="width:110px"></div>
+        <div class="field"><label>In</label><input type="text" id="off-in" placeholder="e.g. 14:00 or Multiple" style="width:110px"></div>
+        <div class="field" style="flex:1 1 200px"><label>Reason</label><input type="text" id="off-reason" placeholder="e.g. RMA Works, Personal Lock"></div>
+        <div class="field"><label>Work Order</label><input type="text" id="off-wo" style="width:120px"></div>
+        <div class="field"><label>RTAY Rep</label><input type="text" id="off-rep" style="width:140px"></div>
+        <button class="btn" style="background:var(--t-offsite)" onclick="offAdd()">+ Log</button>
+      </div>
+      <div class="att-ctrls" style="padding-top:0">
+        <div class="field"><label>From</label><input type="date" id="off-from"></div>
+        <div class="field"><label>To</label><input type="date" id="off-to"></div>
+        <div class="field"><label>Search</label><input type="text" id="off-filter" placeholder="Name / reason / WO" oninput="offRender()"></div>
+        <div class="spacer"></div>
+        <button class="btn-ghost" onclick="offExport()">📥 CSV</button>
+      </div>
+      <div class="att-status" id="off-status">Stored locally in your browser (shared sync coming in a later update)</div>
+      <div style="overflow-x:auto">
+        <table class="dm-table" id="off-table">
+          <thead><tr>
+            <th>Date</th><th>Day</th><th>Person</th><th>Out</th><th>In</th><th>Reason</th><th>Work Order</th><th>RTAY Rep</th><th>&nbsp;</th>
+          </tr></thead>
+          <tbody id="off-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  document.getElementById('off-person').onchange = e => {
+    document.getElementById('off-other-wrap').style.display = e.target.value === '__other__' ? '' : 'none';
+  };
+  document.getElementById('off-from').onchange = offRender;
+  document.getElementById('off-to').onchange = offRender;
+  offRender();
+}
+
+function offRender() {
+  const tb = document.getElementById('off-tbody');
+  if (!tb) return;
+  const from = document.getElementById('off-from').value;
+  const to   = document.getElementById('off-to').value;
+  const filter = (document.getElementById('off-filter').value||'').toLowerCase().trim();
+  const items = OFF.items.filter(o => {
+    if (from && o.date < from) return false;
+    if (to   && o.date > to)   return false;
+    if (filter) {
+      const hay = ((o.name||'')+' '+(o.reason||'')+' '+(o.wo||'')).toLowerCase();
+      if (!hay.includes(filter)) return false;
+    }
+    return true;
+  }).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  if (!items.length) {
+    tb.innerHTML = '<tr><td colspan="9" style="padding:28px;text-align:center;color:var(--mute)">No entries. Log one above.</td></tr>';
+    return;
+  }
+  const DAYNAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  tb.innerHTML = items.map(o => {
+    const dayN = o.date ? DAYNAMES[new Date(o.date+'T00:00:00').getDay()] : '';
+    return `<tr>
+      <td style="white-space:nowrap;font-size:11px">${fdDisplay(o.date)}</td>
+      <td>${dayN}</td>
+      <td style="font-weight:600">${escHtml(o.name||'')}</td>
+      <td>${escHtml(o.out||'')}</td>
+      <td>${escHtml(o.in||'')}</td>
+      <td>${escHtml(o.reason||'')}</td>
+      <td>${escHtml(o.wo||'')}</td>
+      <td>${escHtml(o.rep||'')}</td>
+      <td><button class="edit-btn" onclick="offDelete(${o.id})" style="color:var(--err);border-color:var(--err)">Del</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function offAdd() {
+  const sel = document.getElementById('off-person').value;
+  let name = '';
+  if (sel === '__other__') name = document.getElementById('off-other-name').value.trim();
+  else if (sel) {
+    const p = ATT2.persons.find(x => x.id === sel);
+    name = p ? p.name : '';
+  }
+  if (!name) { alert('Pick a person or enter a name.'); return; }
+  const reason = document.getElementById('off-reason').value.trim();
+  if (!reason) { alert('Enter a reason.'); return; }
+  OFF.items.unshift({
+    id: Date.now(),
+    person_id: sel === '__other__' ? '' : sel,
+    name,
+    date: document.getElementById('off-date').value,
+    out:  document.getElementById('off-out').value.trim() || 'Multiple',
+    in:   document.getElementById('off-in').value.trim()  || 'Multiple',
+    reason,
+    wo:   document.getElementById('off-wo').value.trim(),
+    rep:  document.getElementById('off-rep').value.trim()
+  });
+  offSave();
+  // reset
+  ['off-reason','off-wo','off-rep','off-out','off-in','off-other-name'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('off-person').value = '';
+  document.getElementById('off-other-wrap').style.display = 'none';
+  offRender();
+}
+function offDelete(id) {
+  if (!confirm('Delete this entry?')) return;
+  OFF.items = OFF.items.filter(o => o.id !== id);
+  offSave(); offRender();
+}
+function offExport() {
+  const items = OFF.items.slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const DAYNAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const rows = [['Date','Day','Person','Out','In','Reason','Work Order','RTAY Rep']];
+  items.forEach(o => {
+    const dayN = o.date ? DAYNAMES[new Date(o.date+'T00:00:00').getDay()] : '';
+    rows.push([fdDisplay(o.date), dayN, o.name||'', o.out||'', o.in||'', o.reason||'', o.wo||'', o.rep||'']);
+  });
+  const csv = rows.map(r => r.map(c => { let s = String(c==null?'':c); if (/[,"\n]/.test(s)) s = '"' + s.replace(/"/g,'""') + '"'; return s; }).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = 'offsite_register.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ============================================================
+   R&R Recognition
+============================================================ */
+const RR = { items: [], loaded: false, loading: false, editingId: null };
+const SC_KEYS = ['safe','efficient','proud','healthy','environmental'];
+const SC_LBL = {safe:'Safe',efficient:'Efficient',proud:'Proud',healthy:'Healthy',environmental:'Green'};
+const SC_COL = {safe:'#f9a825',efficient:'#f57c00',proud:'#c2185b',healthy:'#0288d1',environmental:'#388e3c'};
+
+async function rrLoad(silent) {
+  if (RR.loading) return;
+  RR.loading = true;
+  if (!silent) rrSetStatus('Loading...');
+  try {
+    const u = workerUrl();
+    if (!u) throw new Error('Sync URL not set');
+    const r = await fetch(u + '?action=load_rr&t=' + Date.now(), { redirect:'follow' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Server error');
+    RR.items = j.data || [];
+    // Load local In Portal flags
+    const portal = JSON.parse(localStorage.getItem('kaefer_v2_rr_portal') || '{}');
+    RR.items.forEach(e => { e.inPortal = !!portal[String(e.id)]; });
+    RR.loaded = true;
+    rrSetStatus(RR.items.length + ' recognitions · last sync ' + new Date().toLocaleTimeString('en-AU'));
+    if (ACTIVE === 'rr') rrRender();
+  } catch(e) {
+    rrSetStatus('Load error: ' + e.message, true);
+  }
+  RR.loading = false;
+}
+async function rrPushSave(entry, isDelete) {
+  const u = workerUrl();
+  if (!u) throw new Error('Sync URL not set');
+  const data = isDelete ? { upserts: [], deletes: [entry.id] } : { upserts: [{ id: entry.id, date: entry.date, name: entry.name, comment: entry.comment, choices: entry.choices||[] }], deletes: [] };
+  const payload = JSON.stringify({ action:'save_rr', who: whoSync(), data });
+  await fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload });
+}
+function rrSetStatus(msg, isErr) {
+  const el = document.getElementById('rr-status');
+  if (!el) return; el.textContent = msg; el.classList.toggle('err', !!isErr);
+}
+
+function render_rr(stage, tabCfg) {
+  const today = new Date().toISOString().slice(0,10);
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-rr)"></span>
+        <h2>Recognition (R&R)</h2>
+        <span class="sub">Smart Choices · tick ‘In Portal’ once entered into KAEFER's portal</span>
+        <button class="btn" style="background:var(--t-rr);margin-left:auto" onclick="rrLoad()">↻ Sync now</button>
+      </div>
+      <div class="att-ctrls">
+        <div class="field"><label>Date</label><input type="date" id="rr-date" value="${today}"></div>
+        <div class="field"><label>Name</label><input type="text" id="rr-name" placeholder="Who did it"></div>
+        <div class="field" style="flex:1 1 320px"><label>What did they do?</label><input type="text" id="rr-desc" placeholder="Describe..."></div>
+        <button class="btn" style="background:var(--t-rr)" id="rr-save-btn" onclick="rrSave()">+ Add</button>
+      </div>
+      <div class="att-ctrls" style="padding-top:0">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${SC_KEYS.map(k=>`<button class="rr-sc" data-k="${k}" onclick="rrToggleChoice('${k}')" style="background:#fff;border:1.5px solid ${SC_COL[k]};color:${SC_COL[k]};padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;cursor:pointer">${SC_LBL[k]}</button>`).join('')}
+        </div>
+      </div>
+      <div class="att-status" id="rr-status">Loading...</div>
+      <div style="overflow-x:auto">
+        <table class="dm-table">
+          <thead><tr><th>Date</th><th>Name</th><th>Smart Choices</th><th>Description</th><th>In Portal</th><th>&nbsp;</th></tr></thead>
+          <tbody id="rr-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (!RR.loaded) rrLoad();
+  else { rrRender(); rrLoad(true); }
+}
+
+let RR_CHOICES = [];
+function rrToggleChoice(k) {
+  if (RR_CHOICES.includes(k)) RR_CHOICES = RR_CHOICES.filter(x=>x!==k);
+  else RR_CHOICES.push(k);
+  document.querySelectorAll('.rr-sc').forEach(b => {
+    const on = RR_CHOICES.includes(b.dataset.k);
+    b.style.background = on ? SC_COL[b.dataset.k] : '#fff';
+    b.style.color = on ? '#fff' : SC_COL[b.dataset.k];
+  });
+}
+
+function rrRender() {
+  const tb = document.getElementById('rr-tbody');
+  if (!tb) return;
+  if (!RR.items.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--mute)">No recognitions yet.</td></tr>';
+    return;
+  }
+  tb.innerHTML = RR.items.map(en => {
+    const chips = (en.choices||[]).map(k =>
+      `<span style="display:inline-block;background:${SC_COL[k]};color:#fff;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;margin-right:3px">${SC_LBL[k]||k}</span>`
+    ).join('') || '<span style="color:#bbb;font-size:10px">None</span>';
+    const inPortal = !!en.inPortal;
+    return `<tr${inPortal?' style="background:#f1f8f1;color:var(--mute)"':''}>
+      <td style="font-size:11px;white-space:nowrap">${fdDisplay(en.date)}</td>
+      <td style="font-weight:700">${escHtml(en.name||'')}</td>
+      <td>${chips}</td>
+      <td style="font-size:12px">${escHtml(en.comment||'')}</td>
+      <td style="text-align:center"><input type="checkbox" ${inPortal?'checked':''} onchange="rrTogglePortal('${en.id}',this.checked)" style="width:18px;height:18px;cursor:pointer" title="Tick once entered into the KAEFER portal"></td>
+      <td style="white-space:nowrap"><button class="edit-btn" onclick="rrOpenEdit('${en.id}')">Edit</button> <button class="edit-btn" onclick="rrDelete('${en.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function rrSave() {
+  const name = document.getElementById('rr-name').value.trim();
+  const comment = document.getElementById('rr-desc').value.trim();
+  if (!name) { alert('Enter a name.'); return; }
+  if (!comment) { alert('Describe what they did.'); return; }
+  const date = document.getElementById('rr-date').value;
+  const existingId = (document.getElementById('rr-save-btn').dataset.edit || '').trim();
+  const entry = existingId
+    ? { ...RR.items.find(x => String(x.id)===existingId), name, comment, choices: RR_CHOICES.slice(), date }
+    : { id: Date.now(), date, name, comment, choices: RR_CHOICES.slice() };
+  if (existingId) RR.items = RR.items.map(x => String(x.id)===existingId ? entry : x);
+  else RR.items.unshift(entry);
+  // reset
+  document.getElementById('rr-name').value = '';
+  document.getElementById('rr-desc').value = '';
+  document.getElementById('rr-save-btn').dataset.edit = '';
+  document.getElementById('rr-save-btn').textContent = '+ Add';
+  RR_CHOICES = [];
+  document.querySelectorAll('.rr-sc').forEach(b => { b.style.background='#fff'; b.style.color=SC_COL[b.dataset.k]; });
+  rrRender();
+  rrSetStatus('Saving...');
+  try { await rrPushSave(entry, false); rrSetStatus('Saved — ' + new Date().toLocaleTimeString('en-AU')); }
+  catch(e) { rrSetStatus('Save failed: ' + e.message, true); }
+}
+function rrOpenEdit(id) {
+  const en = RR.items.find(x => String(x.id)===String(id));
+  if (!en) return;
+  document.getElementById('rr-date').value = fdISO(en.date);
+  document.getElementById('rr-name').value = en.name || '';
+  document.getElementById('rr-desc').value = en.comment || '';
+  RR_CHOICES = (en.choices||[]).slice();
+  document.querySelectorAll('.rr-sc').forEach(b => {
+    const on = RR_CHOICES.includes(b.dataset.k);
+    b.style.background = on ? SC_COL[b.dataset.k] : '#fff';
+    b.style.color = on ? '#fff' : SC_COL[b.dataset.k];
+  });
+  const btn = document.getElementById('rr-save-btn');
+  btn.dataset.edit = String(id); btn.textContent = '✓ Update';
+  document.getElementById('rr-name').focus();
+}
+async function rrDelete(id) {
+  const en = RR.items.find(x => String(x.id)===String(id));
+  if (!en) return;
+  if (!confirm('Delete this recognition?')) return;
+  RR.items = RR.items.filter(x => String(x.id)!==String(id));
+  rrRender();
+  try { await rrPushSave(en, true); rrSetStatus('Deleted'); }
+  catch(e) { rrSetStatus('Delete failed: ' + e.message, true); }
+}
+function rrTogglePortal(id, checked) {
+  const en = RR.items.find(x => String(x.id)===String(id));
+  if (en) en.inPortal = !!checked;
+  const map = JSON.parse(localStorage.getItem('kaefer_v2_rr_portal') || '{}');
+  if (checked) map[String(id)] = true; else delete map[String(id)];
+  localStorage.setItem('kaefer_v2_rr_portal', JSON.stringify(map));
+  rrRender();
+}
+
+/* ============================================================
+   INSPECTIONS
+============================================================ */
+const INSP_CHECKLIST = [
+  { t:'Documentation', r:true, i:['JHA tasks appropriate for the job','JHA used and understood by all','Hazards clearly identified and controlled','TAKE 5 completed','Permits are approved and established','Isolations are approved, in place and verified','Work area is demarcated and sign posted','SDS available at work front where applicable'] },
+  { t:'Housekeeping', r:false, i:['Adequate access / egress to work sites','Rubbish bins provided, used and emptied regularly','Waste stored / removed / segregated correctly','Work platforms clear / free of loose items','Materials secured at height to prevent drop objects','Adequate lighting – night work','All hoses and leads are off the ground','Correct signage in place, legible and visible','Hazardous substances correctly labelled and stored'] },
+  { t:'Critical Risk Activity', r:true, i:['Risk assessment undertaken for all high-risk activities','Controls in place and deemed effective','Work completed as per THA / TRA / SWMS','Site operatives hold appropriate licences','VOC conducted for High-Risk Work Licences','VOC no older than 2 years from issue','Correct tools being used for the job'] },
+  { t:'Working at Height Compliance', r:true, i:['Risk assessments done for all W@H tasks','W@H equipment is registered','W@H equipment inspected and tagged correctly','Working at height permit in place','Site operatives trained, licensed and competent','Drop zone / exclusion zone in place and marked','Tools are tethered / tool lanyards in use','Employees under fall restraint secured 100%','Anchor points certified by competent person','Prestart completed on EWP','Spotters in place as required','Effective rescue plan in place'] },
+  { t:'PPE', r:false, i:['Task specific PPE available, aligned to JHA','Boots are laced up to the top','Correct gloves being worn for the tasks','Area and task specific PPE worn at work front'] },
+  { t:'Vehicles & Mobile Equipment', r:false, i:['All vehicles reverse parked','Daily pre-start check completed','Vehicle is clean and tidy'] }
+];
+const INSP = { items: [], loaded: false, loading: false };
+const INSP_FORM = { answers: {}, comments: {} };
+
+async function inspLoad(silent) {
+  if (INSP.loading) return;
+  INSP.loading = true;
+  if (!silent) inspSetStatus('Loading...');
+  try {
+    const u = workerUrl();
+    if (!u) throw new Error('Sync URL not set');
+    const r = await fetch(u + '?action=load_log&t=' + Date.now(), { redirect:'follow' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Server error');
+    INSP.items = j.data || [];
+    INSP.loaded = true;
+    inspSetStatus(INSP.items.length + ' inspections · last sync ' + new Date().toLocaleTimeString('en-AU'));
+    if (ACTIVE === 'inspections') inspRender();
+  } catch(e) {
+    inspSetStatus('Load error: ' + e.message, true);
+  }
+  INSP.loading = false;
+}
+async function inspPush(entry, isDelete) {
+  const u = workerUrl();
+  if (!u) throw new Error('Sync URL not set');
+  const data = isDelete ? { upserts: [], deletes: [entry.id] } : { upserts: [entry], deletes: [] };
+  const payload = JSON.stringify({ action:'save_log', who: whoSync(), data });
+  await fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload });
+}
+function inspSetStatus(msg, isErr) {
+  const el = document.getElementById('insp-status');
+  if (!el) return; el.textContent = msg; el.classList.toggle('err', !!isErr);
+}
+
+function render_inspections(stage, tabCfg) {
+  const today = new Date().toISOString().slice(0,10);
+  INSP_FORM.answers = {}; INSP_FORM.comments = {};
+  let checklist = '';
+  INSP_CHECKLIST.forEach((sec, si) => {
+    checklist += `<div style="margin-bottom:10px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden">
+      <div style="padding:8px 12px;background:${sec.r?'var(--err)':'var(--mute)'};color:#fff;font-size:12px;font-weight:700">${sec.r?'⚠ ':''}${sec.t}</div>`;
+    sec.i.forEach((item, ii) => {
+      const id = `${si}_${ii}`;
+      checklist += `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;padding:7px 12px;border-top:1px solid var(--line);align-items:center">
+        <div style="font-size:12px">${escHtml(item)}</div>
+        <div style="display:flex;gap:3px">
+          <button class="yn-btn" data-id="${id}" data-v="YES" onclick="inspPick('${id}','YES')" style="padding:4px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;font-size:11px;font-weight:700;cursor:pointer">YES</button>
+          <button class="yn-btn" data-id="${id}" data-v="NO" onclick="inspPick('${id}','NO')" style="padding:4px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;font-size:11px;font-weight:700;cursor:pointer">NO</button>
+          <button class="yn-btn" data-id="${id}" data-v="N/A" onclick="inspPick('${id}','N/A')" style="padding:4px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;font-size:11px;font-weight:700;cursor:pointer">N/A</button>
+        </div>
+        <input type="text" placeholder="Comment..." data-cm="${id}" style="padding:4px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px">
+      </div>`;
+    });
+    checklist += '</div>';
+  });
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-inspections)"></span>
+        <h2>Inspection</h2>
+        <span class="sub">Walk-through checklist · score auto-calculated</span>
+      </div>
+      <div class="att-ctrls">
+        <div class="field"><label>Date</label><input type="date" id="insp-date" value="${today}"></div>
+        <div class="field"><label>Inspector</label><input type="text" id="insp-insp" value="${escHtml(whoSync()||'')}"></div>
+        <div class="field" style="flex:1 1 160px"><label>Site</label><input type="text" id="insp-site" placeholder="e.g. Yarwun"></div>
+        <div class="field" style="flex:1 1 160px"><label>Area</label><input type="text" id="insp-area" placeholder="e.g. Digestion"></div>
+        <div class="field" style="flex:1 1 160px"><label>Team</label><input type="text" id="insp-team" placeholder="e.g. Green Team"></div>
+      </div>
+      <div style="padding:12px">${checklist}</div>
+      <div style="padding:12px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line);background:var(--surface-2)">
+        <button class="btn-ghost" onclick="inspClear()">Clear</button>
+        <button class="btn" style="background:var(--t-inspections)" onclick="inspSave()">✓ Save inspection</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-inspections)"></span>
+        <h2>Inspection log</h2>
+        <span class="sub">Click a row to see the NO items</span>
+        <button class="btn-ghost" style="margin-left:auto" onclick="inspLoad()">↻ Sync</button>
+      </div>
+      <div class="att-status" id="insp-status">Loading...</div>
+      <div style="overflow-x:auto">
+        <table class="dm-table">
+          <thead><tr><th>Date</th><th>Inspector</th><th>Site</th><th>Area</th><th>YES</th><th>NO</th><th>N/A</th><th>Score</th><th>&nbsp;</th></tr></thead>
+          <tbody id="insp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (!INSP.loaded) inspLoad();
+  else { inspRender(); inspLoad(true); }
+}
+
+function inspPick(id, v) {
+  INSP_FORM.answers[id] = v;
+  document.querySelectorAll(`.yn-btn[data-id="${id}"]`).forEach(b => {
+    const picked = b.dataset.v === v;
+    b.style.background = picked ? (v==='YES'?'var(--ok)':v==='NO'?'var(--err)':'var(--mute)') : '#fff';
+    b.style.color = picked ? '#fff' : 'var(--ink)';
+    b.style.borderColor = picked ? 'transparent' : 'var(--line)';
+  });
+}
+function inspClear() {
+  INSP_FORM.answers = {}; INSP_FORM.comments = {};
+  document.querySelectorAll('.yn-btn').forEach(b => { b.style.background='#fff'; b.style.color='var(--ink)'; b.style.borderColor='var(--line)'; });
+  document.querySelectorAll('[data-cm]').forEach(i => i.value='');
+}
+async function inspSave() {
+  const insp = document.getElementById('insp-insp').value.trim();
+  const site = document.getElementById('insp-site').value.trim();
+  if (!insp || !site) { alert('Fill in Inspector and Site.'); return; }
+  // collect items
+  const items = [];
+  let yes=0, no=0, na=0;
+  INSP_CHECKLIST.forEach((sec, si) => {
+    sec.i.forEach((item, ii) => {
+      const id = `${si}_${ii}`;
+      const val = INSP_FORM.answers[id] || '';
+      const cm = (document.querySelector(`[data-cm="${id}"]`)||{}).value||'';
+      items.push({ sec: sec.t, item, val, cm: cm.trim() });
+      if (val==='YES') yes++; else if (val==='NO') no++; else if (val==='N/A') na++;
+    });
+  });
+  const sc = (yes+no) > 0 ? Math.round(yes/(yes+no)*100) : 0;
+  const entry = {
+    id: Date.now(),
+    date: document.getElementById('insp-date').value,
+    insp, site,
+    area: document.getElementById('insp-area').value.trim(),
+    team: document.getElementById('insp-team').value.trim(),
+    yes, no, na, sc, items
+  };
+  INSP.items.unshift(entry);
+  inspRender();
+  inspSetStatus('Saving...');
+  try { await inspPush(entry, false); inspSetStatus('Saved · Score ' + sc + '%'); inspClear(); document.getElementById('insp-site').value=''; document.getElementById('insp-area').value=''; document.getElementById('insp-team').value=''; }
+  catch(e) { inspSetStatus('Save failed: ' + e.message, true); }
+}
+function inspRender() {
+  const tb = document.getElementById('insp-tbody');
+  if (!tb) return;
+  if (!INSP.items.length) {
+    tb.innerHTML = '<tr><td colspan="9" style="padding:28px;text-align:center;color:var(--mute)">No inspections yet.</td></tr>';
+    return;
+  }
+  const rows = [];
+  INSP.items.forEach(en => {
+    const scCol = en.sc >= 90 ? 'var(--ok)' : en.sc >= 70 ? 'var(--warn)' : 'var(--err)';
+    rows.push(`<tr onclick="inspToggle('${en.id}')" style="cursor:pointer">
+      <td style="font-size:11px;white-space:nowrap">${fdDisplay(en.date)}</td>
+      <td style="font-weight:700">${escHtml(en.insp||'')}</td>
+      <td>${escHtml(en.site||'')}</td>
+      <td>${escHtml(en.area||'')}</td>
+      <td style="color:var(--ok);font-weight:700">${en.yes||0}</td>
+      <td style="color:var(--err);font-weight:700">${en.no||0}</td>
+      <td style="color:var(--mute)">${en.na||0}</td>
+      <td><span style="background:${scCol};color:#fff;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700">${en.sc||0}%</span></td>
+      <td><button class="edit-btn" onclick="event.stopPropagation();inspDelete('${en.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
+    </tr>`);
+    const nos = (en.items||[]).filter(it => it.val === 'NO');
+    rows.push(`<tr id="insp-det-${en.id}" style="display:none;background:var(--surface-2)"><td colspan="9" style="padding:12px 16px">
+      ${en.team ? `<div style="font-size:11px;color:var(--mute);margin-bottom:6px"><b>Team:</b> ${escHtml(en.team)}</div>` : ''}
+      ${nos.length
+        ? `<div style="font-size:10px;font-weight:700;color:var(--err);margin-bottom:4px;text-transform:uppercase">⚠ Items marked NO</div>
+           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px">
+             ${nos.map(it => `<div style="background:#fff;border:1px solid #ffcdd2;border-radius:var(--r-sm);padding:5px 8px">
+               <div style="font-size:9px;text-transform:uppercase;color:var(--err)">${escHtml(it.sec)}</div>
+               <div style="font-size:11px;color:var(--err)">${escHtml(it.item)}</div>
+               ${it.cm ? `<div style="font-size:10px;color:#555;font-style:italic">${escHtml(it.cm)}</div>` : ''}
+             </div>`).join('')}
+           </div>`
+        : '<div style="color:var(--ok);font-size:12px">✓ All items passed</div>'
+      }
+    </td></tr>`);
+  });
+  tb.innerHTML = rows.join('');
+}
+function inspToggle(id) {
+  const r = document.getElementById('insp-det-' + id);
+  if (r) r.style.display = r.style.display === 'none' ? '' : 'none';
+}
+async function inspDelete(id) {
+  if (!confirm('Delete this inspection?')) return;
+  const en = INSP.items.find(x => String(x.id)===String(id));
+  INSP.items = INSP.items.filter(x => String(x.id)!==String(id));
+  inspRender();
+  if (en) try { await inspPush(en, true); inspSetStatus('Deleted'); } catch(e) { inspSetStatus('Delete failed: ' + e.message, true); }
+}
+
 /* Background sync every 60s while attendance is visible */
 setInterval(() => {
   if (ACTIVE !== 'attendance') return;
@@ -1756,6 +2273,9 @@ function renderStage() {
   if (t.id === 'attendance') { render_attendance(stage, t); return; }
   if (t.id === 'manning')    { render_manning(stage, t); return; }
   if (t.id === 'actions')    { render_actions(stage, t); return; }
+  if (t.id === 'offsite')    { render_offsite(stage, t); return; }
+  if (t.id === 'rr')         { render_rr(stage, t); return; }
+  if (t.id === 'inspections'){ render_inspections(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

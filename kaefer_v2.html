@@ -1866,11 +1866,13 @@ function rrSetStatus(msg, isErr) {
 
 function render_rr(stage, tabCfg) {
   const today = new Date().toISOString().slice(0,10);
+  const thisYr = new Date().getFullYear();
+  const thisMo = new Date().getMonth();
   stage.innerHTML = `
     <div class="card">
       <div class="card-h"><span class="accent" style="--accent:var(--t-rr)"></span>
         <h2>Recognition (R&R)</h2>
-        <span class="sub">Smart Choices · tick ‘In Portal’ once entered into KAEFER's portal</span>
+        <span class="sub">Smart Choices · tick 'In Portal' once entered into KAEFER's portal</span>
         <button class="btn" style="background:var(--t-rr);margin-left:auto" onclick="rrLoad()">↻ Sync now</button>
       </div>
       <div class="att-ctrls">
@@ -1892,7 +1894,29 @@ function render_rr(stage, tabCfg) {
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-rr)"></span>
+        <h2>📄 Smart Choices Report</h2>
+        <span class="sub">Breakdown by month · outstanding contributions</span>
+        <button class="btn-ghost" style="margin-left:auto" onclick="rrPrintReport()">🖨 Print</button>
+      </div>
+      <div class="att-ctrls">
+        <div class="field"><label>From Month</label><select id="rr-fm">${MNAME.map((n,i)=>`<option value="${i}" ${i===thisMo?'selected':''}>${n}</option>`).join('')}</select></div>
+        <div class="field"><label>From Year</label><select id="rr-fy">${[2024,2025,2026,2027].map(y=>`<option value="${y}" ${y===thisYr?'selected':''}>${y}</option>`).join('')}</select></div>
+        <div class="field"><label>To Month</label><select id="rr-tm">${MNAME.map((n,i)=>`<option value="${i}" ${i===thisMo?'selected':''}>${n}</option>`).join('')}</select></div>
+        <div class="field"><label>To Year</label><select id="rr-ty">${[2024,2025,2026,2027].map(y=>`<option value="${y}" ${y===thisYr?'selected':''}>${y}</option>`).join('')}</select></div>
+        <div class="field"><label>Site</label><input type="text" id="rr-site" placeholder="e.g. KAEFER" value="KAEFER"></div>
+        <div class="spacer"></div>
+      </div>
+      <div id="rr-report-wrap" style="padding:14px"></div>
+    </div>
   `;
+  ['rr-fm','rr-fy','rr-tm','rr-ty','rr-site'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.onchange = rrRenderReport;
+    if (el) el.oninput  = rrRenderReport;
+  });
   if (!RR.loaded) rrLoad();
   else { rrRender(); rrLoad(true); }
 }
@@ -1906,6 +1930,91 @@ function rrToggleChoice(k) {
     b.style.background = on ? SC_COL[b.dataset.k] : '#fff';
     b.style.color = on ? '#fff' : SC_COL[b.dataset.k];
   });
+}
+
+function rrRenderReport() {
+  const wrap = document.getElementById('rr-report-wrap');
+  if (!wrap) return;
+  const fm = +(document.getElementById('rr-fm')||{}).value;
+  const fy = +(document.getElementById('rr-fy')||{}).value;
+  const tm = +(document.getElementById('rr-tm')||{}).value;
+  const ty = +(document.getElementById('rr-ty')||{}).value;
+  const site = ((document.getElementById('rr-site')||{}).value||'KAEFER').trim();
+  if (fy*12+fm > ty*12+tm) { wrap.innerHTML = '<div style="padding:20px;text-align:center;color:var(--err)">From date is after To date</div>'; return; }
+  const label = MNAME[fm].slice(0,3).toUpperCase() + (fy!==ty?' '+fy:'') + '–' + MNAME[tm].slice(0,3).toUpperCase() + ' ' + ty;
+  const slots = [];
+  for (let y=fy; y<=ty; y++) { const ms=(y===fy?fm:0), me=(y===ty?tm:11); for (let mo=ms; mo<=me; mo++) slots.push({ y, m: mo }); }
+  const entries = RR.items.filter(en => {
+    if (!en.date) return false;
+    const d = new Date(fdISO(en.date)+'T00:00:00');
+    if (isNaN(d)) return false;
+    const ek = d.getFullYear()*12 + d.getMonth();
+    return ek >= fy*12+fm && ek <= ty*12+tm;
+  });
+  if (!entries.length) {
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No recognitions in ${label} at ${escHtml(site)}.</div>`;
+    return;
+  }
+  const SCO = ['safe','proud','environmental','healthy','efficient'];
+  const SCO_LBL = {safe:'Safe', proud:'Proud', environmental:'Green', healthy:'Healthy', efficient:'Efficient'};
+  const totals = {safe:0,proud:0,environmental:0,healthy:0,efficient:0};
+  const perMonth = {};
+  slots.forEach(s => { perMonth[s.y+'_'+s.m] = {safe:0,proud:0,environmental:0,healthy:0,efficient:0}; });
+  entries.forEach(en => {
+    const d = new Date(fdISO(en.date)+'T00:00:00');
+    const k = d.getFullYear()+'_'+d.getMonth();
+    (en.choices||[]).forEach(c => { if (perMonth[k] && perMonth[k][c] !== undefined) { perMonth[k][c]++; totals[c]++; } });
+  });
+
+  let ct = `<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:14px;align-items:start" class="rr-report-grid">
+    <div>
+      <div style="background:#1a237e;color:#fff;padding:7px 11px;font-weight:700;font-size:12px;border-radius:var(--r-md) var(--r-md) 0 0">CONTRIBUTION FIGURES</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r-md) var(--r-md);overflow:hidden">
+        <thead><tr style="background:#283593;color:#fff">
+          <th style="padding:7px 8px;text-align:left">&nbsp;</th>${SCO.map(k=>`<th style="padding:7px 8px;text-align:center;text-transform:uppercase;font-size:10px;letter-spacing:.5px">${SCO_LBL[k]} Choice</th>`).join('')}
+        </tr></thead><tbody>`;
+  slots.forEach(s => {
+    const lbl = MNAME[s.m].slice(0,3).toUpperCase() + (fy!==ty?" '"+String(s.y).slice(2):'');
+    ct += `<tr><td style="padding:7px 10px;font-weight:700;background:var(--surface-2);color:var(--ink)">${lbl}</td>`;
+    SCO.forEach(k => {
+      const v = perMonth[s.y+'_'+s.m][k];
+      const bg = v>0 ? ({safe:'#fff9c4',proud:'#fce4ec',environmental:'#e8f5e9',healthy:'#e1f5fe',efficient:'#fff3e0'})[k] : '#fff';
+      const col = v>0 ? SC_COL[k] : '#bbb';
+      ct += `<td style="padding:7px;text-align:center;background:${bg};color:${col};font-weight:${v>0?'700':'400'};border-top:1px solid var(--line)">${v}</td>`;
+    });
+    ct += '</tr>';
+  });
+  ct += `<tr style="background:#c8a200;color:#fff"><td style="padding:8px 10px;font-weight:800">TOTAL</td>${SCO.map(k=>`<td style="padding:8px;text-align:center;font-weight:800">${totals[k]}</td>`).join('')}</tr>`;
+  ct += '</tbody></table></div>';
+
+  // Outstanding contributions
+  ct += `<div>
+    <div style="background:#1a237e;color:#fff;padding:7px 11px;font-weight:700;font-size:12px;border-radius:var(--r-md) var(--r-md) 0 0">OUTSTANDING CONTRIBUTIONS</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r-md) var(--r-md);overflow:hidden">
+      <thead><tr style="background:#283593;color:#fff">
+        <th style="padding:7px 8px;text-align:left;text-transform:uppercase;font-size:10px">Choice</th>
+        <th style="padding:7px 8px;text-align:left;text-transform:uppercase;font-size:10px">Nominee</th>
+        <th style="padding:7px 8px;text-align:left;text-transform:uppercase;font-size:10px">Description</th>
+      </tr></thead><tbody>`;
+  entries.forEach(en => {
+    const chips = (en.choices||[]).map(k=>`<span style="display:inline-block;width:16px;height:16px;border-radius:3px;background:${SC_COL[k]};margin-right:2px" title="${SC_LBL[k]||k}"></span>`).join('');
+    ct += `<tr style="border-top:1px solid var(--line)"><td style="padding:7px 8px">${chips || '—'}</td><td style="padding:7px 8px;font-weight:700;white-space:nowrap">${escHtml(en.name||'')}</td><td style="padding:7px 8px;font-size:11.5px">${escHtml(en.comment||'')}</td></tr>`;
+  });
+  ct += '</tbody></table></div></div>';
+
+  wrap.innerHTML = `<h3 style="margin:0 0 4px;color:var(--brand);font-size:18px;letter-spacing:.5px">SMART CHOICES OVERVIEW</h3>
+    <p style="margin:0 0 12px;font-size:12px;color:var(--mute)">Winners from ${label} at ${escHtml(site)}.</p>${ct}`;
+}
+
+function rrPrintReport() {
+  rrRenderReport();
+  const el = document.getElementById('rr-report-wrap');
+  if (!el || !el.innerHTML.trim()) { alert('Nothing to print — load the report first.'); return; }
+  const w = window.open('', '_blank');
+  w.document.write(`<!doctype html><html><head><title>Smart Choices Report</title>
+    <style>body{font-family:-apple-system,sans-serif;padding:20px;color:#1a1a1a}
+    table{border-collapse:collapse} h3{color:#CC0000}</style></head><body>${el.innerHTML}
+    <script>window.print();<\/script></body></html>`);
 }
 
 function rrRender() {
@@ -1929,6 +2038,7 @@ function rrRender() {
       <td style="white-space:nowrap"><button class="edit-btn" onclick="rrOpenEdit('${en.id}')">Edit</button> <button class="edit-btn" onclick="rrDelete('${en.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
     </tr>`;
   }).join('');
+  rrRenderReport();
 }
 
 async function rrSave() {

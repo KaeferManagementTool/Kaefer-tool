@@ -298,6 +298,240 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--line);
 }
 
+/* ---------- Attendance grid ---------- */
+.att-ctrls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.att-ctrls .field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.att-ctrls .field label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mute);
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.att-ctrls .field input, .att-ctrls .field select {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  background: var(--surface);
+}
+.att-ctrls .spacer { flex: 1; }
+.att-legend {
+  padding: 6px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--mute);
+  display: flex;
+  gap: 11px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.att-legend .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.att-legend .sw {
+  width: 12px; height: 12px; border-radius: 2px; display: inline-block;
+}
+.att-status {
+  padding: 6px 14px;
+  font-size: 11.5px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  color: var(--mute);
+}
+.att-status.err { color: var(--err); background: #fff5f5; }
+.att-scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+.att-grid {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 100%;
+  font-family: inherit;
+}
+.att-grid th, .att-grid td {
+  border: 1px solid #e8e8e8;
+  text-align: center;
+  padding: 3px 2px;
+}
+.att-grid th.name, .att-grid td.name {
+  text-align: left;
+  padding: 6px 10px;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  white-space: nowrap;
+  min-width: 170px;
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.att-grid thead th {
+  background: var(--charcoal);
+  color: #fff;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 5px 3px;
+  font-size: 9px;
+}
+.att-grid thead th.name {
+  z-index: 4;
+}
+.att-grid thead th.wknd { background: #cfd8dc; color: #546e7a; }
+.att-grid thead th.today { background: var(--warn); color: #fff; }
+.att-grid tr.group-row td {
+  background: var(--charcoal);
+  color: #fff;
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+.att-grid tr.group-row td.name { background: var(--charcoal); color: #fff; }
+.att-grid td.name { background: var(--surface); }
+.att-grid tr.archived td.name { background: var(--surface-2); color: var(--mute); font-style: italic; }
+.att-grid td.cell {
+  cursor: pointer;
+  font-weight: 700;
+  min-width: 26px;
+  height: 28px;
+  user-select: none;
+}
+.att-grid td.cell.wknd { background: #eceff1; cursor: default; color: #90a4ae; }
+.att-grid td.cell.skip { background: #eceff1; cursor: default; color: #b0bec5; }
+.att-grid td.cell.start { outline: 2px solid var(--ok); outline-offset: -2px; }
+.att-grid td.cell.end { outline: 2px solid var(--err); outline-offset: -2px; }
+.att-grid td.sum {
+  background: var(--surface-2);
+  font-weight: 700;
+  font-size: 11px;
+  min-width: 32px;
+}
+.att-grid .edit-btn {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  font-size: 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-weight: 600;
+}
+.att-grid .edit-btn:hover { background: var(--surface-2); }
+.arch-badge {
+  display: inline-block;
+  font-size: 9px;
+  background: var(--mute);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+/* status colours (match the v2 palette) */
+.cs-p   { background: #c8e6c9; color: #1b5e20; }
+.cs-SL  { background: #ffcdd2; color: #b71c1c; }
+.cs-AL  { background: #bbdefb; color: #0d47a1; }
+.cs-X   { background: #f8bbd0; color: #880e4f; }
+.cs-PH  { background: #ffe0b2; color: #bf360c; }
+.cs-LATE{ background: #fff59d; color: #827717; }
+.cs-BL  { background: #e1bee7; color: #4a148c; }
+
+/* ---------- Modal ---------- */
+.ml {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 14px;
+}
+.ml.on { display: flex; }
+.ml .box {
+  background: #fff;
+  border-radius: var(--r-lg);
+  max-width: 440px;
+  width: 100%;
+  overflow: hidden;
+  box-shadow: var(--shadow-3);
+  animation: pop .14s ease;
+}
+@keyframes pop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.ml .mh {
+  background: var(--accent, var(--brand));
+  color: #fff;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+}
+.ml .mh h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.ml .mh .x {
+  margin-left: auto;
+  background: transparent;
+  color: #fff;
+  border: 0;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+.ml .mb { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.ml .mb label { font-size: 11px; font-weight: 700; color: var(--mute); letter-spacing: .5px; text-transform: uppercase; display: block; margin-bottom: 4px; }
+.ml .mb input, .ml .mb select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+}
+.ml .mb .hint { font-size: 11px; color: var(--mute); font-weight: 400; text-transform: none; letter-spacing: 0; display: inline; margin-left: 6px; }
+.ml .mf {
+  padding: 12px 16px;
+  background: var(--surface-2);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+}
+.ml .mf .btn-del { margin-right: auto; }
+.btn-ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-prim {
+  background: var(--accent, var(--brand));
+  color: #fff;
+  border: 0;
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-danger { color: var(--err); border-color: var(--err); background: #fff; }
+
 /* ---------- Hero (dashboard) ---------- */
 .hero {
   background: linear-gradient(135deg, var(--charcoal), #37474f);
@@ -438,6 +672,65 @@ button, input, select, textarea { font: inherit; color: inherit; }
 <!-- ===================== STAGE ===================== -->
 <main class="stage" id="stage"></main>
 
+<!-- Attendance: Add / Edit Person modal -->
+<div class="ml" id="att-pm-ml">
+  <div class="box">
+    <div class="mh" style="--accent:var(--t-attendance)">
+      <h3 id="att-pm-title">Add Person</h3>
+      <button class="x" onclick="attClosePerson()">×</button>
+    </div>
+    <div class="mb">
+      <div>
+        <label>Full Name</label>
+        <input type="text" id="att-pm-name" placeholder="e.g. John Smith" autocomplete="off">
+      </div>
+      <div>
+        <label>Group</label>
+        <select id="att-pm-group">
+          <option value="OFFICE STAFF">Office Staff</option>
+          <option value="YARD STAFF">Yard Staff</option>
+          <option value="SCAFFOLDERS" selected>Scaffolders</option>
+        </select>
+      </div>
+      <div>
+        <label>Start Date <span class="hint">blank = always active</span></label>
+        <input type="date" id="att-pm-start">
+      </div>
+      <div>
+        <label>End Date <span class="hint">blank = still employed</span></label>
+        <input type="date" id="att-pm-end">
+      </div>
+      <div id="att-pm-id" style="font-size:10px;color:var(--mute);font-family:monospace"></div>
+    </div>
+    <div class="mf">
+      <button class="btn-ghost btn-danger btn-del" id="att-pm-del" onclick="attDeletePerson()" style="display:none">🗑 Delete</button>
+      <button class="btn-ghost" onclick="attClosePerson()">Cancel</button>
+      <button class="btn-prim" style="--accent:var(--t-attendance)" onclick="attSavePerson()">✓ Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Attendance: Migrate modal -->
+<div class="ml" id="att-mig-ml">
+  <div class="box">
+    <div class="mh" style="--accent:var(--t-manning)">
+      <h3>Migrate from v1</h3>
+      <button class="x" onclick="attCloseMigrate()">×</button>
+    </div>
+    <div class="mb">
+      <p style="margin:0;font-size:13px">Copies everyone + every tick from the old Employees + Attendance sheets into the new Persons2 + AttendanceTicks2. Assigns a permanent ID to each person.</p>
+      <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:var(--r-sm);padding:9px 11px;font-size:12px;color:#bf360c">
+        <b>⚠ Already migrated?</b> Running again is safe — matches on name, won't double up.
+      </div>
+      <div id="att-mig-result" style="font-size:12px;font-family:monospace;background:var(--surface-2);padding:8px;border-radius:var(--r-sm);display:none;white-space:pre-wrap"></div>
+    </div>
+    <div class="mf">
+      <button class="btn-ghost" onclick="attCloseMigrate()">Cancel</button>
+      <button class="btn-prim" style="--accent:var(--t-manning)" onclick="attRunMigrate()">▶ Run migration</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    TABS CONFIG
@@ -478,6 +771,405 @@ const TABS = [
 
 /* State */
 let ACTIVE = 'dashboard';
+
+/* ============================================================
+   CORE: Sync + date helpers (shared by every tab)
+============================================================ */
+function workerUrl() { return localStorage.getItem('kaefer_url') || ''; }
+function whoSync()   { return (localStorage.getItem('kaefer_supervisor') || '').toString().slice(0,80); }
+
+async function apiCall(action, data) {
+  const u = workerUrl();
+  if (!u) throw new Error('Sync URL not set — set it up in the v1 tool first.');
+  const payload = { action, data: data || {}, who: whoSync() };
+  const resp = await fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) });
+  const txt = await resp.text();
+  let j;
+  try { j = JSON.parse(txt); } catch(e) { throw new Error('Bad response: ' + txt.slice(0,120)); }
+  if (!j.ok) throw new Error(j.error || 'Server error');
+  return j;
+}
+
+/* YYYY-MM-DD <-> DD/MM/YYYY helpers */
+function fdDisplay(s) {
+  if (!s) return '';
+  const str = String(s);
+  if (/^\d{4}-\d{2}-\d{2}T/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d)) return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
+  }
+  const p = str.split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : str;
+}
+function fdISO(s) {
+  if (!s) return '';
+  const str = String(s);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d)) return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  return str;
+}
+function escHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ============================================================
+   ATTENDANCE 2 — persistent state across tab switches
+============================================================ */
+const ATT2 = {
+  loaded: false, loading: false,
+  persons: [], ticks: {},
+  editingId: null, lastSync: 0,
+  mon: new Date().getMonth(),
+  yr:  new Date().getFullYear(),
+  filter: '', group: '', showArch: false
+};
+const STATUSES = ['','SL','AL','X','PH','LATE','BL'];
+const PENDING = {}; let INFLIGHT = 0;
+
+function updateStatus(msg, isErr) {
+  const el = document.getElementById('att-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+}
+
+async function attReload(silent) {
+  if (ATT2.loading) return;
+  ATT2.loading = true;
+  if (!silent) updateStatus('Loading...');
+  try {
+    const j = await apiCall('att2_load');
+    ATT2.persons = (j.persons || []).sort((a,b)=> (a.order||0)-(b.order||0));
+    ATT2.ticks   = j.ticks || {};
+    ATT2.loaded  = true;
+    ATT2.lastSync = Date.now();
+    updateStatus('Loaded ' + ATT2.persons.length + ' people — last sync ' + new Date().toLocaleTimeString('en-AU'));
+    if (ACTIVE === 'attendance') attRender();
+  } catch(e) {
+    updateStatus('Load error: ' + e.message, true);
+  }
+  ATT2.loading = false;
+}
+
+function parseD(s) {
+  if (!s) return null;
+  const str = fdISO(s);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const p = str.split('-');
+    const d = new Date(+p[0], +p[1]-1, +p[2]);
+    return isNaN(d) ? null : d;
+  }
+  return null;
+}
+function pStart(p) { return parseD(p.start); }
+function pEnd(p)   { return parseD(p.end); }
+function pShowsInMonth(p, yr, mo) {
+  const ms = new Date(yr, mo, 1), me = new Date(yr, mo+1, 0);
+  const s = pStart(p), e = pEnd(p);
+  if (s && s > me) return false;
+  if (e && e < ms) return false;
+  return true;
+}
+function pIsArchived(p) {
+  const e = pEnd(p);
+  if (!e) return false;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return e < today;
+}
+
+function render_attendance(stage, tabCfg) {
+  const now = new Date();
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-attendance)"></span>
+        <h2>Attendance</h2>
+        <span class="sub">Live from the sheet · click a date to cycle status</span>
+        <button class="btn-ghost" style="margin-left:12px" onclick="attOpenMigrate()">▶ Migrate from v1</button>
+        <button class="btn" style="background:var(--t-attendance);margin-left:6px" onclick="attReload()">↻ Sync now</button>
+      </div>
+      <div class="att-ctrls">
+        <div class="field"><label>Month</label>
+          <select id="att-mon" onchange="ATT2.mon=+this.value;attRender()"></select>
+        </div>
+        <div class="field"><label>Year</label>
+          <select id="att-yr" onchange="ATT2.yr=+this.value;attRender()"></select>
+        </div>
+        <div class="field"><label>Search</label>
+          <input type="text" id="att-filter" placeholder="Name..." oninput="ATT2.filter=this.value;attRender()">
+        </div>
+        <div class="field"><label>Group</label>
+          <select id="att-grp" onchange="ATT2.group=this.value;attRender()">
+            <option value="">All</option>
+            <option value="OFFICE STAFF">Office</option>
+            <option value="YARD STAFF">Yard</option>
+            <option value="SCAFFOLDERS">Scaffolders</option>
+          </select>
+        </div>
+        <div class="field"><label>Archived</label>
+          <select id="att-arch" onchange="ATT2.showArch=this.value==='1';attRender()">
+            <option value="0">Hide</option>
+            <option value="1">Show</option>
+          </select>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" style="background:var(--t-attendance)" onclick="attOpenAdd()">+ Add Person</button>
+        <button class="btn-ghost" onclick="attExportCsv()">📥 CSV</button>
+      </div>
+      <div class="att-legend">
+        <span style="font-weight:700;color:var(--ink)">Legend:</span>
+        <span class="chip"><span class="sw cs-p"></span>Present</span>
+        <span class="chip"><span class="sw cs-SL"></span>SL</span>
+        <span class="chip"><span class="sw cs-AL"></span>AL</span>
+        <span class="chip"><span class="sw cs-X"></span>Absent</span>
+        <span class="chip"><span class="sw cs-PH"></span>PH</span>
+        <span class="chip"><span class="sw cs-LATE"></span>Late</span>
+        <span class="chip"><span class="sw cs-BL"></span>BL</span>
+      </div>
+      <div class="att-status" id="att-status">Loading...</div>
+      <div class="att-scroll"><div id="att-grid"></div></div>
+    </div>
+  `;
+  // populate selects
+  const monEl = document.getElementById('att-mon');
+  ['January','February','March','April','May','June','July','August','September','October','November','December']
+    .forEach((n,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=n; if (i===ATT2.mon) o.selected=true; monEl.appendChild(o); });
+  const yrEl = document.getElementById('att-yr');
+  [2024,2025,2026,2027].forEach(y=>{ const o=document.createElement('option'); o.value=y; o.textContent=y; if (y===ATT2.yr) o.selected=true; yrEl.appendChild(o); });
+  document.getElementById('att-filter').value = ATT2.filter;
+  document.getElementById('att-grp').value = ATT2.group;
+  document.getElementById('att-arch').value = ATT2.showArch ? '1' : '0';
+
+  if (!ATT2.loaded) { attReload(); }
+  else { attRender(); attReload(true); }
+}
+
+const GROUPS = ['OFFICE STAFF','YARD STAFF','SCAFFOLDERS'];
+const DN = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+function attRender() {
+  const grid = document.getElementById('att-grid');
+  if (!grid) return;
+  if (!ATT2.loaded) { grid.innerHTML = '<div style="padding:28px;text-align:center;color:var(--mute)">Not loaded yet.</div>'; return; }
+  const yr = ATT2.yr, mon = ATT2.mon;
+  const dim = new Date(yr, mon+1, 0).getDate();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const filter = (ATT2.filter||'').toLowerCase().trim();
+  const grp = ATT2.group;
+
+  const days = [];
+  for (let d=1; d<=dim; d++) {
+    const dt = new Date(yr, mon, d);
+    days.push({ d, wk: dt.getDay(), dk: yr+'-'+String(mon+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'), dt });
+  }
+
+  let h = '<table class="att-grid"><thead><tr><th class="name">Name</th>';
+  days.forEach(dy => {
+    const wknd = dy.wk === 0 || dy.wk === 6;
+    const isToday = dy.dt.getTime() === today.getTime();
+    h += `<th class="${wknd?'wknd':''}${isToday?' today':''}"><div>${DN[dy.wk]}</div><div style="font-size:11px;font-weight:900">${dy.d}</div></th>`;
+  });
+  h += '<th style="background:var(--ok)">P</th><th style="background:var(--err)">SL</th><th style="background:var(--info)">AL</th><th style="background:#880e4f">X</th>';
+  h += '<th class="np" style="min-width:52px">Edit</th></tr></thead><tbody>';
+
+  let shown = 0;
+  GROUPS.forEach(g => {
+    if (grp && grp !== g) return;
+    const list = ATT2.persons.filter(p => {
+      if (p.group !== g) return false;
+      if (!pShowsInMonth(p, yr, mon)) return false;
+      if (!ATT2.showArch && pIsArchived(p)) return false;
+      if (filter && p.name.toLowerCase().indexOf(filter) < 0) return false;
+      return true;
+    });
+    if (!list.length) return;
+    h += `<tr class="group-row"><td class="name" colspan="${days.length+6}">${g} <span style="opacity:.65;font-weight:400">(${list.length})</span></td></tr>`;
+    list.forEach(p => {
+      shown++;
+      const sD = pStart(p), eD = pEnd(p);
+      const pTicks = ATT2.ticks[p.id] || {};
+      let P=0, sl=0, al=0, x=0;
+      const isArch = pIsArchived(p);
+      let row = `<tr${isArch?' class="archived"':''}><td class="name">${escHtml(p.name)}${isArch?' <span class="arch-badge">ARCHIVED</span>':''}</td>`;
+      days.forEach(dy => {
+        const wknd = dy.wk===0 || dy.wk===6;
+        const dayDate = new Date(yr, mon, dy.d);
+        const preStart = sD && dayDate < sD;
+        const postEnd  = eD && dayDate > eD;
+        const startDay = sD && dayDate.getTime() === sD.getTime();
+        const endDay   = eD && dayDate.getTime() === eD.getTime();
+        const skip = preStart || postEnd;
+        const v = skip ? '' : (pTicks[dy.dk] || '');
+        if (!wknd && !skip) {
+          if (!v) P++;
+          else if (v==='SL') sl++;
+          else if (v==='AL') al++;
+          else if (v==='X')  x++;
+        }
+        let cls = 'cell';
+        if (wknd) cls += ' wknd';
+        else if (skip) cls += ' skip';
+        else cls += ' cs-' + (v || 'p');
+        if (startDay) cls += ' start';
+        else if (endDay) cls += ' end';
+        const click = (!wknd && !skip) ? `onclick="attCycle('${p.id}','${dy.dk}')"` : '';
+        const inner = skip ? (wknd?'':'—') : (wknd?'':(v || '✓'));
+        row += `<td class="${cls}" ${click}>${inner}</td>`;
+      });
+      row += `<td class="sum" style="color:var(--ok)">${P}</td><td class="sum" style="color:var(--err)">${sl}</td><td class="sum" style="color:var(--info)">${al}</td><td class="sum" style="color:#880e4f">${x}</td>`;
+      row += `<td><button class="edit-btn" onclick="attOpenEdit('${p.id}')">Edit</button></td></tr>`;
+      h += row;
+    });
+  });
+  h += '</tbody></table>';
+  if (!shown) h += '<div style="padding:30px;text-align:center;color:var(--mute)">No one matches these filters. <a href="javascript:attOpenAdd()" style="color:var(--t-attendance);font-weight:600">Add a person</a> or widen the search.</div>';
+  grid.innerHTML = h;
+}
+
+function attCycle(pid, dk) {
+  const current = (ATT2.ticks[pid] || {})[dk] || '';
+  const idx = STATUSES.indexOf(current);
+  const next = STATUSES[(idx+1) % STATUSES.length];
+  if (!ATT2.ticks[pid]) ATT2.ticks[pid] = {};
+  if (next) ATT2.ticks[pid][dk] = next; else delete ATT2.ticks[pid][dk];
+  attRender();
+  ATT2.lastSync = Date.now();
+  updateStatus('Saving ' + (next || 'Present') + '...');
+  const key = pid + '|' + dk;
+  if (PENDING[key]) clearTimeout(PENDING[key]);
+  PENDING[key] = setTimeout(() => {
+    delete PENDING[key];
+    INFLIGHT++;
+    const finalStatus = (ATT2.ticks[pid] || {})[dk] || '';
+    apiCall('att2_tick', { person_id: pid, date: dk, status: finalStatus })
+      .then(()=> {
+        ATT2.lastSync = Date.now();
+        updateStatus('Saved ' + (finalStatus || 'Present') + ' — ' + new Date().toLocaleTimeString('en-AU'));
+      })
+      .catch(e => updateStatus('Save failed: ' + e.message, true))
+      .then(()=> { INFLIGHT--; });
+  }, 500);
+}
+
+function attOpenAdd() {
+  ATT2.editingId = null;
+  document.getElementById('att-pm-title').textContent = 'Add Person';
+  document.getElementById('att-pm-name').value = '';
+  document.getElementById('att-pm-group').value = 'SCAFFOLDERS';
+  document.getElementById('att-pm-start').value = '';
+  document.getElementById('att-pm-end').value = '';
+  document.getElementById('att-pm-id').textContent = '';
+  document.getElementById('att-pm-del').style.display = 'none';
+  document.getElementById('att-pm-ml').classList.add('on');
+  setTimeout(()=> document.getElementById('att-pm-name').focus(), 50);
+}
+function attOpenEdit(id) {
+  const p = ATT2.persons.find(x => x.id === id);
+  if (!p) return;
+  ATT2.editingId = id;
+  document.getElementById('att-pm-title').textContent = 'Edit ' + p.name;
+  document.getElementById('att-pm-name').value = p.name;
+  document.getElementById('att-pm-group').value = p.group;
+  document.getElementById('att-pm-start').value = p.start || '';
+  document.getElementById('att-pm-end').value = p.end || '';
+  document.getElementById('att-pm-id').textContent = 'ID: ' + p.id;
+  document.getElementById('att-pm-del').style.display = '';
+  document.getElementById('att-pm-ml').classList.add('on');
+}
+function attClosePerson() {
+  document.getElementById('att-pm-ml').classList.remove('on');
+  ATT2.editingId = null;
+}
+async function attSavePerson() {
+  const name = document.getElementById('att-pm-name').value.trim();
+  if (!name) { alert('Name required.'); return; }
+  const data = {
+    id: ATT2.editingId || '',
+    name,
+    group: document.getElementById('att-pm-group').value,
+    start: document.getElementById('att-pm-start').value,
+    end: document.getElementById('att-pm-end').value
+  };
+  try {
+    await apiCall('att2_person_save', data);
+    attClosePerson();
+    await attReload();
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+async function attDeletePerson() {
+  if (!ATT2.editingId) return;
+  const p = ATT2.persons.find(x => x.id === ATT2.editingId);
+  if (!p) return;
+  if (!confirm('Permanently delete ' + p.name + '?\n\nTheir attendance history stays in the sheet, but they will no longer appear in the tool.')) return;
+  try {
+    await apiCall('att2_person_delete', { id: ATT2.editingId });
+    attClosePerson();
+    await attReload();
+  } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+function attOpenMigrate() {
+  document.getElementById('att-mig-result').style.display = 'none';
+  document.getElementById('att-mig-result').textContent = '';
+  document.getElementById('att-mig-ml').classList.add('on');
+}
+function attCloseMigrate() { document.getElementById('att-mig-ml').classList.remove('on'); }
+async function attRunMigrate() {
+  const r = document.getElementById('att-mig-result');
+  r.style.display = ''; r.textContent = 'Running migration... (may take 10-30 seconds)';
+  try {
+    const j = await apiCall('att2_migrate', {});
+    r.textContent = '✓ Migration complete.\n  People added: ' + (j.personsMigrated||0) + '\n  Ticks migrated: ' + (j.ticksMigrated||0);
+    await attReload();
+  } catch(e) { r.textContent = '✗ Migration failed: ' + e.message; }
+}
+
+function attExportCsv() {
+  if (!ATT2.loaded) { alert('Load first.'); return; }
+  const yr=ATT2.yr, mon=ATT2.mon, dim=new Date(yr,mon+1,0).getDate();
+  const rows = [['ID','Name','Group','Start','End']];
+  for (let d=1; d<=dim; d++) rows[0].push(String(d).padStart(2,'0')+'/'+String(mon+1).padStart(2,'0'));
+  rows[0].push('P','SL','AL','X','PH','LATE','BL');
+  const dayKeys = [];
+  for (let d=1; d<=dim; d++) dayKeys.push(yr+'-'+String(mon+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+  ATT2.persons.forEach(p => {
+    if (!pShowsInMonth(p, yr, mon)) return;
+    const pt = ATT2.ticks[p.id] || {};
+    const row = [p.id, p.name, p.group, p.start||'', p.end||''];
+    const counts = {P:0,SL:0,AL:0,X:0,PH:0,LATE:0,BL:0};
+    dayKeys.forEach((dk,i) => {
+      const dt = new Date(yr, mon, i+1); const wknd = dt.getDay()===0 || dt.getDay()===6;
+      const sD = pStart(p), eD = pEnd(p);
+      const skip = (sD && dt<sD) || (eD && dt>eD);
+      const v = skip ? '' : (pt[dk]||'');
+      row.push(v || (skip?'-':(wknd?'':'P')));
+      if (!skip && !wknd) { if (!v) counts.P++; else if (counts[v]!==undefined) counts[v]++; }
+    });
+    row.push(counts.P, counts.SL, counts.AL, counts.X, counts.PH, counts.LATE, counts.BL);
+    rows.push(row);
+  });
+  const csv = rows.map(r => r.map(c => {
+    let s = String(c==null?'':c);
+    if (s.indexOf(',')>=0 || s.indexOf('"')>=0 || s.indexOf('\n')>=0) s = '"' + s.replace(/"/g,'""') + '"';
+    return s;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'attendance_v2_' + yr + '_' + String(mon+1).padStart(2,'0') + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* Background sync every 60s while attendance is visible */
+setInterval(() => {
+  if (ACTIVE !== 'attendance') return;
+  if (ATT2.loading) return;
+  if (Object.keys(PENDING).length > 0 || INFLIGHT > 0) return;
+  if (Date.now() - ATT2.lastSync < 45000) return;
+  attReload(true);
+}, 60000);
 
 /* ============================================================
    RENDER
@@ -550,6 +1242,7 @@ function renderStage() {
     stage.innerHTML = renderDashboard();
     return;
   }
+  if (t.id === 'attendance') { render_attendance(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

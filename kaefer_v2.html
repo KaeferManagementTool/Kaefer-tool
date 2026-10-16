@@ -532,6 +532,80 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .btn-danger { color: var(--err); border-color: var(--err); background: #fff; }
 
+/* ---------- Direct Manning ---------- */
+.dm-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 14px;
+}
+.stat-card {
+  background: var(--surface);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  border-top: 4px solid var(--accent, var(--mute));
+  box-shadow: var(--shadow-1);
+}
+.stat-card .lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mute);
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.stat-card .val {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1;
+}
+.stat-card .val .pct { font-size: 13px; font-weight: 600; margin-left: 6px; }
+.dm-chart {
+  background: var(--surface);
+  margin: 0 14px 14px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+.dm-chart canvas { display: block; width: 100%; height: 220px; }
+.dm-chart .legend {
+  display: flex; gap: 14px; font-size: 11px; color: var(--mute);
+  margin-bottom: 6px;
+}
+.dm-chart .legend .ln { display: inline-flex; align-items: center; gap: 5px; }
+.dm-chart .legend .sw { width: 18px; height: 3px; border-radius: 2px; }
+.dm-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.dm-table thead th {
+  background: var(--surface-2);
+  padding: 7px 8px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  color: var(--mute);
+  border-bottom: 2px solid var(--line);
+  position: sticky; top: 0;
+}
+.dm-table thead th:first-child, .dm-table thead th:nth-child(2) { text-align: left; }
+.dm-table tbody td {
+  padding: 6px 8px; text-align: center; border-bottom: 1px solid var(--line);
+}
+.dm-table tbody td:first-child, .dm-table tbody td:nth-child(2) { text-align: left; }
+.dm-table tbody tr.wknd { color: #bdbdbd; background: var(--surface-2); font-style: italic; }
+.dm-table tbody tr.short { background: #fff8e1; }
+.dm-table .num-ok { color: var(--ok); font-weight: 700; }
+.dm-table .num-warn { color: var(--warn); font-weight: 700; }
+.dm-table .num-err { color: var(--err); font-weight: 700; }
+.dm-sub { color: var(--mute); font-size: 10px; font-weight: 400; margin-left: 3px; }
+
+@media (max-width: 820px) {
+  .dm-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* ---------- Hero (dashboard) ---------- */
 .hero {
   background: linear-gradient(135deg, var(--charcoal), #37474f);
@@ -1162,6 +1236,236 @@ function attExportCsv() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
+/* ============================================================
+   DIRECT MANNING — reads from ATT2, same data layer
+============================================================ */
+const DM = {
+  mode: 'month',
+  mon: new Date().getMonth(),
+  yr:  new Date().getFullYear()
+};
+const MNAME = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DNAME = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function dmBaseKey(yr, mo) { return 'kaefer_v2_dm_base_' + yr + '_' + mo; }
+function dmGetBase(yr, mo) {
+  const v = localStorage.getItem(dmBaseKey(yr, mo));
+  return v ? parseInt(v, 10) : 15;
+}
+function dmSetBase(yr, mo, val) {
+  const n = parseInt(val, 10);
+  if (!isNaN(n) && n > 0) localStorage.setItem(dmBaseKey(yr, mo), String(n));
+}
+
+function dmEmpsForMonth(yr, mo) {
+  const ms = new Date(yr, mo, 1), me = new Date(yr, mo+1, 0);
+  return ATT2.persons.filter(p => {
+    if (!p || !p.group) return false;
+    const s = pStart(p), e = pEnd(p);
+    if (s && s > me) return false;
+    if (e && e < ms) return false;
+    return true;
+  }).sort((a,b)=> (a.order||0)-(b.order||0));
+}
+function dmStat(p, dk) { return (ATT2.ticks[p.id] || {})[dk] || ''; }
+function dmPreStart(p, dk) { const s = pStart(p); return s && new Date(dk+'T00:00:00') < s; }
+function dmTermPast(p, dk) { const e = pEnd(p); return e && new Date(dk+'T00:00:00') > e; }
+
+function render_manning(stage, tabCfg) {
+  if (!ATT2.loaded) {
+    stage.innerHTML = '<div class="card"><div class="card-h"><span class="accent" style="--accent:var(--t-manning)"></span><h2>Direct Manning</h2></div><div class="card-b" style="text-align:center;padding:40px;color:var(--mute)">Loading Attendance data...</div></div>';
+    attReload().then(() => { if (ACTIVE === 'manning') render_manning(stage, tabCfg); });
+    return;
+  }
+
+  const base = dmGetBase(DM.yr, DM.mon);
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-manning)"></span>
+        <h2>Direct Manning</h2>
+        <span class="sub">Baseline vs counted · ${MNAME[DM.mon]} ${DM.yr}</span>
+      </div>
+      <div class="att-ctrls">
+        <div class="field"><label>Month</label><select id="dm-mon">${MNAME.map((n,i)=>`<option value="${i}" ${i===DM.mon?'selected':''}>${n}</option>`).join('')}</select></div>
+        <div class="field"><label>Year</label><select id="dm-yr">${[2024,2025,2026,2027].map(y=>`<option value="${y}" ${y===DM.yr?'selected':''}>${y}</option>`).join('')}</select></div>
+        <div class="field"><label>Baseline</label><input type="number" id="dm-base" value="${base}" min="1" max="200" style="width:80px"></div>
+        <div class="spacer"></div>
+        <button class="btn-ghost" onclick="attReload()">↻ Refresh data</button>
+      </div>
+
+      <div class="dm-stats" id="dm-stats"></div>
+
+      <div class="dm-chart">
+        <div class="legend">
+          <span class="ln"><span class="sw" style="background:var(--t-manning)"></span>Baseline</span>
+          <span class="ln"><span class="sw" style="background:var(--warn)"></span>Counted</span>
+        </div>
+        <canvas id="dm-canvas"></canvas>
+      </div>
+
+      <div style="overflow-x:auto">
+        <table class="dm-table" id="dm-table">
+          <thead><tr>
+            <th>Date</th><th>Day</th><th>Baseline</th>
+            <th>Scaff</th><th>Yard Pulled</th><th>Counted</th><th>Shortfall</th>
+            <th>AL</th><th>SL</th><th>Absent</th>
+          </tr></thead>
+          <tbody id="dm-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // wire controls
+  document.getElementById('dm-mon').onchange = e => { DM.mon = +e.target.value; render_manning(stage, tabCfg); };
+  document.getElementById('dm-yr').onchange  = e => { DM.yr  = +e.target.value; render_manning(stage, tabCfg); };
+  document.getElementById('dm-base').onchange = e => { dmSetBase(DM.yr, DM.mon, e.target.value); dmCompute(); };
+
+  dmCompute();
+}
+
+function dmCompute() {
+  const yr = DM.yr, mon = DM.mon;
+  const base = dmGetBase(yr, mon);
+  const dim = new Date(yr, mon+1, 0).getDate();
+  const rows = [];
+  const dLabels = [], dBase = [], dCounted = [];
+  let totCounted = 0, totShort = 0, totAL = 0, totSL = 0, totAbs = 0, wdays = 0, totBaseline = 0;
+
+  for (let d = 1; d <= dim; d++) {
+    const dt = new Date(yr, mon, d);
+    const wk = dt.getDay();
+    const dk = yr + '-' + String(mon+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    const dateLabel = String(d).padStart(2,'0') + '/' + String(mon+1).padStart(2,'0') + '/' + yr;
+    if (wk === 0 || wk === 6) { rows.push({ dateLabel, day: DNAME[wk], wknd: true }); continue; }
+    wdays++;
+    totBaseline += base;
+
+    const scaffs = dmEmpsForMonth(yr, mon).filter(p => p.group === 'SCAFFOLDERS');
+    const yards  = dmEmpsForMonth(yr, mon).filter(p => p.group === 'YARD STAFF');
+    let sP=0, sAL=0, sSL=0, sAbs=0;
+    scaffs.forEach(p => {
+      if (dmTermPast(p, dk) || dmPreStart(p, dk)) return;
+      const v = dmStat(p, dk);
+      if (v === 'AL') sAL++;
+      else if (v === 'SL') sSL++;
+      else if (v === 'X') sAbs++;
+      else if (v === 'PH') {}
+      else sP++;
+    });
+    const scaffEligible = sP + sAL + sSL + sAbs;
+    let yP = 0;
+    yards.forEach(p => {
+      if (dmTermPast(p, dk) || dmPreStart(p, dk)) return;
+      const v = dmStat(p, dk);
+      if (v === 'AL' || v === 'SL' || v === 'X' || v === 'PH') return;
+      yP++;
+    });
+
+    let counted, yardPulled, shortfall;
+    if (sP >= base) { counted = base; yardPulled = 0; shortfall = 0; }
+    else { yardPulled = Math.min(base - sP, yP); counted = sP + yardPulled; shortfall = base - counted; }
+
+    totCounted += counted; totShort += shortfall; totAL += sAL; totSL += sSL; totAbs += sAbs;
+    rows.push({ dateLabel, day: DNAME[wk], wknd: false, base, scaff: sP, scaffEligible, yardPulled, yardAvail: yP, counted, shortfall, al: sAL, sl: sSL, abs: sAbs });
+    dLabels.push(d);
+    dBase.push(base);
+    dCounted.push(counted);
+  }
+
+  // stats
+  const avgBase = wdays > 0 ? Math.round(dBase.reduce((a,b)=>a+b,0)/wdays) : 0;
+  const pct = totBaseline > 0 ? Math.round(totShort/totBaseline*1000)/10 : 0;
+  const pctCol = pct > 15 ? 'var(--err)' : pct > 5 ? 'var(--warn)' : 'var(--ok)';
+  document.getElementById('dm-stats').innerHTML = `
+    <div class="stat-card" style="--accent:var(--t-manning)"><div class="lbl">Avg Baseline</div><div class="val">${avgBase}</div></div>
+    <div class="stat-card" style="--accent:var(--ok)"><div class="lbl">Counted Days</div><div class="val" style="color:var(--ok)">${totCounted}</div></div>
+    <div class="stat-card" style="--accent:${totShort>0?'var(--err)':'var(--ok)'}"><div class="lbl">Shortfall Days</div><div class="val" style="color:${totShort>0?'var(--err)':'var(--ok)'}">${totShort} <span class="pct" style="color:${pctCol}">(${pct}%)</span></div></div>
+    <div class="stat-card" style="--accent:var(--warn)"><div class="lbl">Scaff AL+SL+X</div><div class="val" style="color:var(--warn)">${totAL+totSL+totAbs}</div></div>
+  `;
+
+  // chart
+  const cv = document.getElementById('dm-canvas');
+  if (cv) drawLineChart(cv, dLabels, dBase, dCounted);
+
+  // table
+  const tb = document.getElementById('dm-tbody');
+  tb.innerHTML = rows.map(r => {
+    if (r.wknd) return `<tr class="wknd"><td>${r.dateLabel}</td><td>${r.day}</td><td colspan="8" style="text-align:center">Weekend</td></tr>`;
+    const shortCls = r.shortfall > 0 ? 'num-err' : 'num-ok';
+    return `<tr${r.shortfall>0?' class="short"':''}>
+      <td>${r.dateLabel}</td>
+      <td><b>${r.day}</b></td>
+      <td><b>${r.base}</b></td>
+      <td style="color:var(--t-manning);font-weight:600">${r.scaff}<span class="dm-sub">of ${r.scaffEligible}</span></td>
+      <td style="color:${r.yardPulled>0?'var(--warn)':'#bbb'};font-weight:${r.yardPulled>0?'700':'400'}">${r.yardPulled} / ${r.yardAvail}</td>
+      <td class="num-ok">${r.counted}</td>
+      <td class="${shortCls}">${r.shortfall>0?'−'+r.shortfall:'0'}</td>
+      <td style="color:var(--info)">${r.al}</td>
+      <td style="color:var(--err)">${r.sl}</td>
+      <td style="color:#880e4f">${r.abs}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* Simple canvas line chart (two series) */
+function drawLineChart(cv, labels, s1, s2) {
+  const ctx = cv.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.offsetWidth, h = cv.offsetHeight || 220;
+  cv.width = w * dpr; cv.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 32, padR = 10, padT = 8, padB = 24;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+  if (!labels.length) return;
+
+  const allVals = [...s1, ...s2];
+  const maxV = Math.max(...allVals, 1);
+  const nice = Math.ceil(maxV / 5) * 5;
+
+  // axis + grid
+  ctx.strokeStyle = '#eceff1'; ctx.lineWidth = 1;
+  ctx.fillStyle = '#90a4ae'; ctx.font = '10px -apple-system, sans-serif';
+  for (let i = 0; i <= 5; i++) {
+    const y = padT + chartH - (chartH * i / 5);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    ctx.fillText(String(Math.round(nice * i / 5)), 4, y + 3);
+  }
+  // x labels (every 2-5 days)
+  const step = labels.length > 20 ? 5 : labels.length > 10 ? 2 : 1;
+  labels.forEach((lb, i) => {
+    if (i % step !== 0 && i !== labels.length - 1) return;
+    const x = padL + (chartW * i / Math.max(labels.length - 1, 1));
+    ctx.fillText(String(lb), x - 6, h - 6);
+  });
+
+  function plot(series, colour, dashed, filled) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 2;
+    ctx.setLineDash(dashed ? [4, 3] : []);
+    ctx.beginPath();
+    series.forEach((v, i) => {
+      const x = padL + (chartW * i / Math.max(labels.length - 1, 1));
+      const y = padT + chartH - (chartH * v / nice);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // dots
+    ctx.fillStyle = colour;
+    series.forEach((v, i) => {
+      const x = padL + (chartW * i / Math.max(labels.length - 1, 1));
+      const y = padT + chartH - (chartH * v / nice);
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI*2); ctx.fill();
+    });
+  }
+  plot(s1, 'rgba(21,101,192,.85)', false);  // baseline (blue)
+  plot(s2, 'rgba(245,124,0,.9)', false);    // counted (orange)
+}
+
 /* Background sync every 60s while attendance is visible */
 setInterval(() => {
   if (ACTIVE !== 'attendance') return;
@@ -1243,6 +1547,7 @@ function renderStage() {
     return;
   }
   if (t.id === 'attendance') { render_attendance(stage, t); return; }
+  if (t.id === 'manning')    { render_manning(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

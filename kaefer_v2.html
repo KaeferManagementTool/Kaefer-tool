@@ -784,6 +784,42 @@ button, input, select, textarea { font: inherit; color: inherit; }
   </div>
 </div>
 
+<!-- Hours Register: Paste modal -->
+<div class="ml" id="hr-paste-ml">
+  <div class="box" style="max-width:720px">
+    <div class="mh" style="--accent:var(--t-hours)">
+      <h3>Paste Hours Register from Excel</h3>
+      <button class="x" onclick="hrClosePaste()">×</button>
+    </div>
+    <div class="mb">
+      <p style="margin:0;font-size:12.5px;color:var(--mute)">Select the week's data in Excel (including the <b>WEEK XX</b> and <b>BREAK IN WORK</b> rows), copy, then paste into the box below. Cell colours are read as job status.</p>
+      <div id="hr-paste-area" contenteditable="true" style="min-height:160px;max-height:40vh;overflow:auto;border:2px dashed var(--line);border-radius:var(--r-md);padding:10px;background:var(--surface-2);font-size:11px"></div>
+    </div>
+    <div class="mf">
+      <button class="btn-ghost" onclick="hrClosePaste()">Cancel</button>
+      <button class="btn-prim" style="--accent:var(--t-hours)" onclick="hrParsePaste()">▶ Parse &amp; load</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hours Register: Colours modal -->
+<div class="ml" id="hr-colours-ml">
+  <div class="box">
+    <div class="mh" style="--accent:var(--t-hours)">
+      <h3>Edit colour labels</h3>
+      <button class="x" onclick="hrCloseColours()">×</button>
+    </div>
+    <div class="mb">
+      <p style="margin:0;font-size:12.5px;color:var(--mute)">Rename each colour to match what it means for you. The order is the click-cycle order on status cells.</p>
+      <div id="hr-colours-list"></div>
+    </div>
+    <div class="mf">
+      <button class="btn-ghost" onclick="hrCloseColours()">Cancel</button>
+      <button class="btn-prim" style="--accent:var(--t-hours)" onclick="hrSaveColours()">✓ Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Actions: Edit modal -->
 <div class="ml" id="act-em-ml">
   <div class="box">
@@ -2300,6 +2336,322 @@ async function inspDelete(id) {
   if (en) try { await inspPush(en, true); inspSetStatus('Deleted'); } catch(e) { inspSetStatus('Delete failed: ' + e.message, true); }
 }
 
+/* ============================================================
+   HOURS REGISTER — paste from Excel, edit through the week
+============================================================ */
+const HR = {
+  rows: [],        // {id, date, planner, order, op, loc, desc, short, hours, status, notes, days:{mon:bool,tue:bool,...}}
+  loaded: false,
+  weekLabel: ''    // e.g. "WEEK 42 2026"
+};
+const HR_DEFAULT_COLOURS = [
+  { id:'green',  bg:'#c8e6c9', fg:'#1b5e20', label:'Complete' },
+  { id:'orange', bg:'#ffe0b2', fg:'#bf360c', label:'Not Ready' },
+  { id:'red',    bg:'#ffcdd2', fg:'#b71c1c', label:'Blocked' },
+  { id:'yellow', bg:'#fff59d', fg:'#827717', label:'In Progress' },
+  { id:'blue',   bg:'#bbdefb', fg:'#0d47a1', label:'Deferred' },
+  { id:'purple', bg:'#e1bee7', fg:'#4a148c', label:'Awaiting Permit' },
+  { id:'grey',   bg:'#eceff1', fg:'#455a64', label:'Cancelled' }
+];
+const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
+const DAYS_UP = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+
+function hrLoad() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('kaefer_v2_hours') || '{}');
+    HR.rows = Array.isArray(saved.rows) ? saved.rows : [];
+    HR.weekLabel = saved.weekLabel || '';
+  } catch(e) { HR.rows = []; HR.weekLabel = ''; }
+  HR.loaded = true;
+  if (ACTIVE === 'hours') hrRender();
+}
+function hrSave() {
+  localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.rows, weekLabel: HR.weekLabel }));
+}
+function hrGetColours() {
+  try {
+    const c = JSON.parse(localStorage.getItem('kaefer_v2_hr_colours') || 'null');
+    if (Array.isArray(c) && c.length) return c;
+  } catch(e) {}
+  return HR_DEFAULT_COLOURS;
+}
+function hrSetColours(c) { localStorage.setItem('kaefer_v2_hr_colours', JSON.stringify(c)); }
+
+function render_hours(stage, tabCfg) {
+  if (!HR.loaded) hrLoad();
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-hours)"></span>
+        <h2>Hours Register</h2>
+        <span class="sub">Weekly plan · pasted from your Excel register</span>
+        <button class="btn-ghost" style="margin-left:auto" onclick="hrOpenPaste()">📋 Paste from Excel</button>
+        <button class="btn-ghost" onclick="hrOpenColours()" style="margin-left:6px">🎨 Colours</button>
+        <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy incomplete for email</button>
+      </div>
+      <div class="att-ctrls">
+        <div class="field" style="flex:1 1 220px"><label>Week label</label><input type="text" id="hr-wk" placeholder="e.g. WEEK 42 2026" value="${escHtml(HR.weekLabel)}"></div>
+        <div class="field"><label>Add ad-hoc job</label>
+          <button class="btn" style="background:var(--t-hours)" onclick="hrAddBlank()">+ New break-in</button>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn-ghost btn-danger" onclick="hrReset()">Reset week</button>
+      </div>
+      <div class="att-status" id="hr-status">${HR.rows.length ? HR.rows.length + ' rows loaded · stored locally' : 'No week loaded. Click "Paste from Excel" to start.'}</div>
+      <div style="overflow-x:auto">
+        <table class="dm-table" id="hr-table">
+          <thead><tr>
+            <th>Status</th>
+            <th>Date</th>
+            <th>Order</th>
+            <th>Op</th>
+            <th>Functional Location</th>
+            <th>Description</th>
+            <th>Short Text</th>
+            <th>Hrs</th>
+            <th>Notes</th>
+            ${DAYS_UP.map(d=>`<th style="min-width:40px">${d}</th>`).join('')}
+            <th>Plan?</th>
+            <th>&nbsp;</th>
+          </tr></thead>
+          <tbody id="hr-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  const wkEl = document.getElementById('hr-wk');
+  wkEl.onchange = () => { HR.weekLabel = wkEl.value.trim(); hrSave(); };
+  hrRender();
+}
+
+function hrRender() {
+  const tb = document.getElementById('hr-tbody');
+  if (!tb) return;
+  if (!HR.rows.length) {
+    tb.innerHTML = '<tr><td colspan="18" style="padding:34px;text-align:center;color:var(--mute)">No jobs loaded. Click <b>Paste from Excel</b> at the top to drop in this week\'s register.</td></tr>';
+    return;
+  }
+  const colours = hrGetColours();
+  const colMap = Object.fromEntries(colours.map(c => [c.id, c]));
+  tb.innerHTML = HR.rows.map(r => {
+    const c = colMap[r.status] || colours[1];
+    const dayTicks = DAYS.map(d => {
+      const on = r.days && r.days[d];
+      return `<td style="padding:4px"><input type="checkbox" ${on?'checked':''} onchange="hrToggleDay('${r.id}','${d}',this.checked)" style="width:18px;height:18px;cursor:pointer"></td>`;
+    }).join('');
+    return `<tr>
+      <td style="background:${c.bg};color:${c.fg};padding:4px 6px;cursor:pointer;font-weight:700;font-size:10px;text-align:center;user-select:none" onclick="hrCycleStatus('${r.id}')" title="Click to cycle colour">${c.label.toUpperCase()}</td>
+      <td style="font-size:11px;white-space:nowrap">${fdDisplay(r.date)}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','order',this.textContent)" style="font-size:11px">${escHtml(r.order||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','op',this.textContent)" style="font-size:11px">${escHtml(r.op||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','loc',this.textContent)" style="font-size:11px">${escHtml(r.loc||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','desc',this.textContent)" style="font-size:11.5px">${escHtml(r.desc||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','short',this.textContent)" style="font-size:11px">${escHtml(r.short||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','hours',this.textContent)" style="text-align:center;font-weight:700">${escHtml(r.hours||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','notes',this.textContent)" style="font-size:11px;color:var(--err);min-width:120px">${escHtml(r.notes||'')}</td>
+      ${dayTicks}
+      <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
+      <td><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function hrCycleStatus(id) {
+  const r = HR.rows.find(x => x.id === id); if (!r) return;
+  const colours = hrGetColours();
+  const idx = colours.findIndex(c => c.id === r.status);
+  r.status = colours[(idx + 1) % colours.length].id;
+  hrSave(); hrRender();
+}
+function hrEditField(id, field, val) {
+  const r = HR.rows.find(x => x.id === id); if (!r) return;
+  r[field] = val.trim();
+  hrSave();
+}
+function hrToggleDay(id, day, on) {
+  const r = HR.rows.find(x => x.id === id); if (!r) return;
+  if (!r.days) r.days = {};
+  r.days[day] = !!on;
+  hrSave();
+}
+function hrDelete(id) {
+  if (!confirm('Delete this row?')) return;
+  HR.rows = HR.rows.filter(x => x.id !== id);
+  hrSave(); hrRender();
+}
+function hrAddBlank() {
+  const today = new Date().toISOString().slice(0,10);
+  HR.rows.unshift({
+    id: 'hr_' + Date.now(),
+    date: today, planner:'', order:'', op:'', loc:'', desc:'(New break-in job)', short:'',
+    hours:'', status:'orange', notes:'', days:{}, planned:false
+  });
+  hrSave(); hrRender();
+}
+function hrReset() {
+  if (!confirm('Clear the whole week? (Rows will be deleted.)')) return;
+  HR.rows = []; HR.weekLabel = '';
+  hrSave();
+  document.getElementById('hr-wk').value = '';
+  hrRender();
+}
+
+/* ---------- Paste from Excel ---------- */
+function hrOpenPaste() {
+  const ml = document.getElementById('hr-paste-ml');
+  document.getElementById('hr-paste-area').innerHTML = '';
+  ml.classList.add('on');
+  setTimeout(() => document.getElementById('hr-paste-area').focus(), 60);
+}
+function hrClosePaste() { document.getElementById('hr-paste-ml').classList.remove('on'); }
+
+function hrParsePaste() {
+  const area = document.getElementById('hr-paste-area');
+  const html = area.innerHTML;
+  if (!html.trim()) { alert('Paste something first.'); return; }
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const trs = Array.from(doc.querySelectorAll('tr'));
+  const newRows = [];
+  let mode = 'planned'; // flips to unplanned on BREAK IN WORK header
+  trs.forEach(tr => {
+    const cells = Array.from(tr.querySelectorAll('td, th'));
+    const text = cells.map(c => c.textContent.trim()).join(' ').trim();
+    if (!text) return;
+    // Section header detection
+    const up = text.toUpperCase();
+    if (/BREAK IN WORK/.test(up)) { mode = 'unplanned'; return; }
+    if (/^WEEK\s*\d+/.test(up)) {
+      mode = 'planned';
+      HR.weekLabel = text;
+      return;
+    }
+    // Must have at least a date-like or an order number to be a job row
+    const vals = cells.map(c => c.textContent.trim());
+    if (vals.length < 4) return;
+    // Detect date (first cell or any cell matching date format)
+    let date = '';
+    for (const v of vals.slice(0, 3)) {
+      if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(v)) {
+        const p = v.split(/[\/\-]/);
+        const yr = p[2].length === 2 ? '20'+p[2] : p[2];
+        date = yr + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
+        break;
+      }
+      if (/^\d{4}-\d{2}-\d{2}/.test(v)) { date = v.slice(0,10); break; }
+    }
+    // Detect order (long number)
+    const orderIdx = vals.findIndex(v => /^\d{6,}$/.test(v));
+    const order = orderIdx >= 0 ? vals[orderIdx] : '';
+    if (!date && !order) return; // not a job row
+    // Pick up colour from first non-blank cell's background
+    let colour = 'orange';
+    for (const c of cells) {
+      const style = (c.getAttribute('style') || '') + ' ' + (c.getAttribute('bgcolor') || '');
+      const m = style.match(/background[^:]*:\s*(rgb\([^)]+\)|#[0-9a-f]{3,6})/i);
+      const bg = m ? m[1] : (c.getAttribute('bgcolor') || '');
+      if (bg) {
+        const d = detectColourBucket(bg);
+        if (d) { colour = d; break; }
+      }
+    }
+    newRows.push({
+      id: 'hr_' + Date.now() + '_' + newRows.length,
+      date, order,
+      planner: vals[1] || '',
+      op: vals[orderIdx+1] || vals[3] || '',
+      loc: vals[orderIdx+2] || vals[4] || '',
+      desc: vals[orderIdx+3] || vals[5] || '',
+      short: vals[orderIdx+4] || vals[6] || '',
+      hours: vals[orderIdx+5] || vals[7] || '',
+      notes: vals[orderIdx+6] || vals[8] || '',
+      status: colour,
+      days: {},
+      planned: (mode === 'planned')
+    });
+  });
+  if (!newRows.length) { alert('Nothing recognised as a job row. Make sure you copied the data rows from Excel (including the section headers like WEEK 42 or BREAK IN WORK).'); return; }
+  HR.rows = newRows;
+  hrSave();
+  hrClosePaste();
+  document.getElementById('hr-wk').value = HR.weekLabel;
+  hrRender();
+}
+
+function detectColourBucket(bg) {
+  // Normalise to RGB
+  let r, g, b;
+  const m = bg.match(/rgb\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (m) { r=+m[1]; g=+m[2]; b=+m[3]; }
+  else if (/^#[0-9a-f]{6}$/i.test(bg)) { r=parseInt(bg.slice(1,3),16); g=parseInt(bg.slice(3,5),16); b=parseInt(bg.slice(5,7),16); }
+  else if (/^#[0-9a-f]{3}$/i.test(bg)) { r=parseInt(bg[1]+bg[1],16); g=parseInt(bg[2]+bg[2],16); b=parseInt(bg[3]+bg[3],16); }
+  else return null;
+  // Ignore white/near-white
+  if (r > 240 && g > 240 && b > 240) return null;
+  // Dominant hue bucketing
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  if (max - min < 25) return 'grey';
+  if (g > r && g > b) return 'green';
+  if (r > g && r > b && g > b - 20 && g > 100) return 'orange';
+  if (r > g && r > b) return 'red';
+  if (b > r && b > g) return 'blue';
+  if (r > 150 && g > 150 && b < 100) return 'yellow';
+  if (r > 100 && b > 100 && g < 100) return 'purple';
+  return 'orange';
+}
+
+function hrCopyIncomplete() {
+  const colours = hrGetColours();
+  const colMap = Object.fromEntries(colours.map(c => [c.id, c]));
+  // "Incomplete" = anything NOT the first colour (default: not Complete / green)
+  const completeId = colours[0].id;
+  const incomplete = HR.rows.filter(r => r.status !== completeId);
+  if (!incomplete.length) { alert('No incomplete jobs — nothing to copy.'); return; }
+  // Build an HTML table and plain-text table, copy both as rich clipboard
+  const title = `Outstanding jobs — ${HR.weekLabel || new Date().toLocaleDateString('en-AU')}`;
+  const hdr = ['Status','Date','Work Order','Description','Hours','Notes'];
+  const rows = incomplete.map(r => [ (colMap[r.status]||{}).label||r.status, fdDisplay(r.date), r.order, r.desc, r.hours, r.notes ]);
+  const htmlRows = rows.map(cells =>
+    '<tr>' + cells.map((c,i)=>`<td style="padding:4px 8px;border:1px solid #ccc${i===0?';background:'+(colMap[incomplete[rows.indexOf(cells)].status]||{}).bg+';font-weight:bold':''}">${escHtml(c||'')}</td>`).join('') + '</tr>'
+  ).join('');
+  const htmlTable = `<p><b>${title}</b></p><table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px">
+    <tr>${hdr.map(h=>`<th style="padding:4px 8px;border:1px solid #ccc;background:#1a2a4a;color:#fff;text-align:left">${h}</th>`).join('')}</tr>
+    ${htmlRows}
+  </table>`;
+  const textTable = title + '\n' + hdr.join('\t') + '\n' + rows.map(r => r.map(c => (c||'').replace(/\t/g,' ')).join('\t')).join('\n');
+  if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+    const item = new ClipboardItem({ 'text/html': new Blob([htmlTable], {type:'text/html'}), 'text/plain': new Blob([textTable], {type:'text/plain'}) });
+    navigator.clipboard.write([item]).then(() => alert('✓ Copied ' + incomplete.length + ' incomplete jobs. Paste into your email.'));
+  } else {
+    // Fallback: copy plain text
+    navigator.clipboard.writeText(textTable).then(() => alert('✓ Copied ' + incomplete.length + ' incomplete jobs (plain text).'));
+  }
+}
+
+/* ---------- Colours editor ---------- */
+function hrOpenColours() {
+  const ml = document.getElementById('hr-colours-ml');
+  const list = document.getElementById('hr-colours-list');
+  const colours = hrGetColours();
+  list.innerHTML = colours.map((c, i) => `
+    <div style="display:flex;gap:8px;align-items:center;padding:6px 0">
+      <div style="width:28px;height:28px;border-radius:var(--r-sm);background:${c.bg};border:1px solid #ccc"></div>
+      <input type="text" value="${escHtml(c.label)}" data-i="${i}" style="flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px">
+    </div>
+  `).join('');
+  ml.classList.add('on');
+}
+function hrCloseColours() { document.getElementById('hr-colours-ml').classList.remove('on'); }
+function hrSaveColours() {
+  const colours = hrGetColours();
+  document.querySelectorAll('#hr-colours-list input').forEach(inp => {
+    const i = +inp.dataset.i;
+    colours[i].label = inp.value.trim() || colours[i].label;
+  });
+  hrSetColours(colours);
+  hrCloseColours();
+  hrRender();
+}
+
 /* Background sync every 60s while attendance is visible */
 setInterval(() => {
   if (ACTIVE !== 'attendance') return;
@@ -2386,6 +2738,7 @@ function renderStage() {
   if (t.id === 'offsite')    { render_offsite(stage, t); return; }
   if (t.id === 'rr')         { render_rr(stage, t); return; }
   if (t.id === 'inspections'){ render_inspections(stage, t); return; }
+  if (t.id === 'hours')      { render_hours(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

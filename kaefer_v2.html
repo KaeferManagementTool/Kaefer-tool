@@ -784,6 +784,27 @@ button, input, select, textarea { font: inherit; color: inherit; }
   </div>
 </div>
 
+<!-- Actions: Edit modal -->
+<div class="ml" id="act-em-ml">
+  <div class="box">
+    <div class="mh" style="--accent:var(--t-actions)">
+      <h3>Edit Action</h3>
+      <button class="x" onclick="actCloseEdit()">×</button>
+    </div>
+    <div class="mb">
+      <div><label>Action / Description</label><input type="text" id="act-em-desc"></div>
+      <div><label>Responsible</label><input type="text" id="act-em-resp"></div>
+      <div><label>Due date</label><input type="date" id="act-em-due"></div>
+      <div><label>Priority</label><select id="act-em-pri"><option>High</option><option>Medium</option><option>Low</option></select></div>
+      <div><label>Status</label><select id="act-em-status"><option>Ongoing</option><option>In Progress</option><option>Blocked</option><option>On Hold</option></select></div>
+    </div>
+    <div class="mf">
+      <button class="btn-ghost" onclick="actCloseEdit()">Cancel</button>
+      <button class="btn-prim" style="--accent:var(--t-actions)" onclick="actSaveEdit()">✓ Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Attendance: Migrate modal -->
 <div class="ml" id="att-mig-ml">
   <div class="box">
@@ -1466,6 +1487,192 @@ function drawLineChart(cv, labels, s1, s2) {
   plot(s2, 'rgba(245,124,0,.9)', false);    // counted (orange)
 }
 
+/* ============================================================
+   ACTIONS
+============================================================ */
+const ACT = { items: [], loaded: false, loading: false, editingId: null, filter: '', showDone: false };
+
+async function actLoad(silent) {
+  if (ACT.loading) return;
+  ACT.loading = true;
+  if (!silent) actSetStatus('Loading...');
+  try {
+    const u = workerUrl();
+    if (!u) throw new Error('Sync URL not set');
+    // Push nothing, just pull latest
+    const r = await fetch(u + '?action=load_act&t=' + Date.now(), { redirect:'follow' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Server error');
+    ACT.items = j.data || [];
+    ACT.loaded = true;
+    actSetStatus(ACT.items.length + ' actions · last sync ' + new Date().toLocaleTimeString('en-AU'));
+    if (ACTIVE === 'actions') actRender();
+  } catch(e) {
+    actSetStatus('Load error: ' + e.message, true);
+  }
+  ACT.loading = false;
+}
+async function actPush() {
+  const u = workerUrl();
+  if (!u) throw new Error('Sync URL not set');
+  const payload = JSON.stringify({ action:'save_act', data: ACT.items });
+  await fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: payload });
+}
+function actSetStatus(msg, isErr) {
+  const el = document.getElementById('act-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+}
+
+function render_actions(stage, tabCfg) {
+  const today = new Date().toISOString().slice(0,10);
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h"><span class="accent" style="--accent:var(--t-actions)"></span>
+        <h2>Actions</h2>
+        <span class="sub">Open and completed items</span>
+        <button class="btn" style="background:var(--t-actions);margin-left:auto" onclick="actLoad()">↻ Sync now</button>
+      </div>
+      <div class="att-ctrls">
+        <div class="field" style="flex:1 1 240px"><label>Action / Description</label><input type="text" id="act-desc" placeholder="e.g. Replace missing handrail on tundish platform"></div>
+        <div class="field"><label>Responsible</label><input type="text" id="act-resp" placeholder="Name"></div>
+        <div class="field"><label>Date raised</label><input type="date" id="act-date" value="${today}"></div>
+        <div class="field"><label>Due date</label><input type="date" id="act-due"></div>
+        <div class="field"><label>Priority</label><select id="act-pri"><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+        <button class="btn" style="background:var(--t-actions)" onclick="actAdd()">+ Add</button>
+      </div>
+      <div class="att-ctrls" style="padding-top:0">
+        <div class="field"><label>Search</label><input type="text" id="act-filter" placeholder="Description or name..." oninput="ACT.filter=this.value;actRender()"></div>
+        <div class="field"><label>Show</label>
+          <select id="act-show" onchange="ACT.showDone=this.value==='all';actRender()">
+            <option value="open">Open only</option><option value="all">Open + Done</option>
+          </select>
+        </div>
+        <div class="spacer"></div>
+      </div>
+      <div class="att-status" id="act-status">Loading...</div>
+      <div style="overflow-x:auto">
+        <table class="dm-table" id="act-table">
+          <thead><tr>
+            <th>Date</th><th>Action</th><th>Responsible</th><th>Due</th><th>Priority</th><th>Status</th><th>&nbsp;</th>
+          </tr></thead>
+          <tbody id="act-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (!ACT.loaded) actLoad();
+  else { actRender(); actLoad(true); }
+}
+
+function actRender() {
+  const tb = document.getElementById('act-tbody');
+  if (!tb) return;
+  const filter = (ACT.filter||'').toLowerCase().trim();
+  const items = ACT.items.filter(a => {
+    if (!ACT.showDone && a.done) return false;
+    if (filter && !((a.desc||'').toLowerCase().includes(filter) || (a.resp||'').toLowerCase().includes(filter))) return false;
+    return true;
+  });
+  if (!items.length) {
+    tb.innerHTML = '<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--mute)">Nothing to show. Add an action above.</td></tr>';
+    return;
+  }
+  const today = new Date(); today.setHours(0,0,0,0);
+  tb.innerHTML = items.map(a => {
+    const dueD = a.due ? new Date(a.due+'T00:00:00') : null;
+    const overdue = !a.done && dueD && dueD < today;
+    const soon    = !a.done && dueD && !overdue && (dueD - today)/86400000 <= 7;
+    const pCol = a.pri === 'High' ? 'var(--err)' : a.pri === 'Medium' ? 'var(--warn)' : 'var(--ok)';
+    const dueCls = overdue ? 'num-err' : soon ? 'num-warn' : '';
+    const statCol = a.done ? 'var(--ok)' : (a.status === 'Blocked' || a.status === 'On Hold') ? 'var(--warn)' : 'var(--info)';
+    return `<tr${a.done?' style="opacity:.6;background:var(--surface-2)"':''}>
+      <td style="font-size:11px;white-space:nowrap">${fdDisplay(a.date)}</td>
+      <td style="max-width:380px">${escHtml(a.desc||'')}${a.done&&a.doneDate?` <div style="font-size:10px;color:var(--ok);margin-top:2px">✓ Done ${escHtml(a.doneDate)}</div>`:''}</td>
+      <td style="font-weight:600">${escHtml(a.resp||'')}</td>
+      <td class="${dueCls}" style="white-space:nowrap">${a.due?fdDisplay(a.due):'<span style="color:#bbb">—</span>'}</td>
+      <td><span style="background:${pCol};color:#fff;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700">${a.pri||'Medium'}</span></td>
+      <td style="color:${statCol};font-weight:600;font-size:12px">${a.done?'Done':escHtml(a.status||'Ongoing')}</td>
+      <td style="white-space:nowrap">
+        ${a.done
+          ? `<button class="edit-btn" onclick="actRestore(${a.id})" style="color:var(--ok);border-color:var(--ok)">↺ Reopen</button>`
+          : `<button class="edit-btn" onclick="actComplete(${a.id})" style="color:var(--ok);border-color:var(--ok)">✓ Done</button>`}
+        <button class="edit-btn" onclick="actOpenEdit(${a.id})" style="margin-left:3px">Edit</button>
+        <button class="edit-btn" onclick="actDelete(${a.id})" style="color:var(--err);border-color:var(--err);margin-left:3px">Del</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function actAdd() {
+  const desc = document.getElementById('act-desc').value.trim();
+  const resp = document.getElementById('act-resp').value.trim();
+  if (!desc) { alert('Enter a description.'); return; }
+  if (!resp) { alert('Enter a responsible person.'); return; }
+  ACT.items.unshift({
+    id: Date.now(),
+    date: document.getElementById('act-date').value || new Date().toISOString().slice(0,10),
+    desc, resp,
+    due: document.getElementById('act-due').value,
+    pri: document.getElementById('act-pri').value,
+    status: 'Ongoing',
+    done: false, doneDate: ''
+  });
+  ['act-desc','act-resp','act-due'].forEach(id => document.getElementById(id).value='');
+  actRender();
+  actSetStatus('Saving...');
+  try { await actPush(); actSetStatus('Saved — ' + new Date().toLocaleTimeString('en-AU')); }
+  catch(e) { actSetStatus('Save failed: ' + e.message, true); }
+}
+async function actComplete(id) {
+  const a = ACT.items.find(x => x.id === id); if (!a) return;
+  a.done = true;
+  a.doneDate = new Date().toLocaleDateString('en-AU', { day:'2-digit', month:'short', year:'numeric' });
+  actRender();
+  actSetStatus('Saving...');
+  try { await actPush(); actSetStatus('Marked done'); } catch(e) { actSetStatus('Save failed: ' + e.message, true); }
+}
+async function actRestore(id) {
+  const a = ACT.items.find(x => x.id === id); if (!a) return;
+  a.done = false; a.doneDate = '';
+  actRender();
+  actSetStatus('Saving...');
+  try { await actPush(); actSetStatus('Reopened'); } catch(e) { actSetStatus('Save failed: ' + e.message, true); }
+}
+async function actDelete(id) {
+  if (!confirm('Delete this action permanently?')) return;
+  ACT.items = ACT.items.filter(x => x.id !== id);
+  actRender();
+  try { await actPush(); actSetStatus('Deleted'); } catch(e) { actSetStatus('Save failed: ' + e.message, true); }
+}
+
+function actOpenEdit(id) {
+  const a = ACT.items.find(x => x.id === id); if (!a) return;
+  ACT.editingId = id;
+  document.getElementById('act-em-desc').value = a.desc || '';
+  document.getElementById('act-em-resp').value = a.resp || '';
+  document.getElementById('act-em-due').value = a.due || '';
+  document.getElementById('act-em-pri').value = a.pri || 'Medium';
+  document.getElementById('act-em-status').value = a.status || 'Ongoing';
+  document.getElementById('act-em-ml').classList.add('on');
+}
+function actCloseEdit() { document.getElementById('act-em-ml').classList.remove('on'); ACT.editingId = null; }
+async function actSaveEdit() {
+  if (!ACT.editingId) return;
+  const a = ACT.items.find(x => x.id === ACT.editingId); if (!a) return;
+  a.desc = document.getElementById('act-em-desc').value.trim();
+  a.resp = document.getElementById('act-em-resp').value.trim();
+  a.due  = document.getElementById('act-em-due').value;
+  a.pri  = document.getElementById('act-em-pri').value;
+  a.status = document.getElementById('act-em-status').value;
+  actCloseEdit();
+  actRender();
+  actSetStatus('Saving...');
+  try { await actPush(); actSetStatus('Saved — ' + new Date().toLocaleTimeString('en-AU')); }
+  catch(e) { actSetStatus('Save failed: ' + e.message, true); }
+}
+
 /* Background sync every 60s while attendance is visible */
 setInterval(() => {
   if (ACTIVE !== 'attendance') return;
@@ -1548,6 +1755,7 @@ function renderStage() {
   }
   if (t.id === 'attendance') { render_attendance(stage, t); return; }
   if (t.id === 'manning')    { render_manning(stage, t); return; }
+  if (t.id === 'actions')    { render_actions(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

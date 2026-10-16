@@ -2379,22 +2379,34 @@ function hrSetColours(c) { localStorage.setItem('kaefer_v2_hr_colours', JSON.str
 
 function render_hours(stage, tabCfg) {
   if (!HR.loaded) hrLoad();
+  const archive = hrGetArchive();
   stage.innerHTML = `
     <div class="card">
       <div class="card-h"><span class="accent" style="--accent:var(--t-hours)"></span>
         <h2>Hours Register</h2>
-        <span class="sub">Weekly plan · pasted from your Excel register</span>
-        <button class="btn-ghost" style="margin-left:auto" onclick="hrOpenPaste()">📋 Paste from Excel</button>
+        <span class="sub" id="hr-sub">Weekly plan · pasted from your Excel register</span>
+        <div style="margin-left:auto;display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;border:1px solid var(--line)">
+          <button id="hr-mode-cur"  onclick="hrSetMode('current')"  style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:var(--t-hours);color:#fff">Current week</button>
+          <button id="hr-mode-arch" onclick="hrSetMode('archive')"  style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--mute)">Archive (${archive.length})</button>
+        </div>
+        <button class="btn-ghost" style="margin-left:12px" onclick="hrOpenPaste()">📋 Paste from Excel</button>
         <button class="btn-ghost" onclick="hrOpenColours()" style="margin-left:6px">🎨 Colours</button>
-        <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy incomplete for email</button>
+        <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy incomplete</button>
       </div>
-      <div class="att-ctrls">
+      <div class="att-ctrls" id="hr-ctrls-current">
         <div class="field" style="flex:1 1 220px"><label>Week label</label><input type="text" id="hr-wk" placeholder="e.g. WEEK 42 2026" value="${escHtml(HR.weekLabel)}"></div>
         <div class="field"><label>Add ad-hoc job</label>
           <button class="btn" style="background:var(--t-hours)" onclick="hrAddBlank()">+ New break-in</button>
         </div>
         <div class="spacer"></div>
+        <button class="btn-ghost" onclick="hrArchiveCurrent()">📦 Archive this week</button>
         <button class="btn-ghost btn-danger" onclick="hrReset()">Reset week</button>
+      </div>
+      <div class="att-ctrls" id="hr-ctrls-archive" style="display:none">
+        <div class="field" style="flex:1 1 360px"><label>Search archive</label><input type="text" id="hr-arch-filter" placeholder="Work order, description, week label, date..." oninput="hrRenderArchive()"></div>
+        <div class="field"><label>From</label><input type="date" id="hr-arch-from" onchange="hrRenderArchive()"></div>
+        <div class="field"><label>To</label><input type="date" id="hr-arch-to" onchange="hrRenderArchive()"></div>
+        <div class="spacer"></div>
       </div>
       <div class="att-status" id="hr-status">${HR.rows.length ? HR.rows.length + ' rows loaded · stored locally' : 'No week loaded. Click "Paste from Excel" to start.'}</div>
       <div style="overflow-x:auto">
@@ -2424,7 +2436,165 @@ function render_hours(stage, tabCfg) {
   `;
   const wkEl = document.getElementById('hr-wk');
   wkEl.onchange = () => { HR.weekLabel = wkEl.value.trim(); hrSave(); };
-  hrRender();
+  HR.viewMode = HR.viewMode || 'current';
+  hrSetMode(HR.viewMode);
+}
+
+function hrSetMode(mode) {
+  HR.viewMode = mode;
+  const cur = document.getElementById('hr-mode-cur');
+  const arc = document.getElementById('hr-mode-arch');
+  const curCtrls = document.getElementById('hr-ctrls-current');
+  const arcCtrls = document.getElementById('hr-ctrls-archive');
+  const sub = document.getElementById('hr-sub');
+  if (!cur || !arc) return;
+  if (mode === 'archive') {
+    cur.style.background = 'transparent'; cur.style.color = 'var(--mute)';
+    arc.style.background = 'var(--t-hours)'; arc.style.color = '#fff';
+    curCtrls.style.display = 'none'; arcCtrls.style.display = '';
+    sub.textContent = 'Browse all historical weeks';
+    hrRenderArchive();
+  } else {
+    cur.style.background = 'var(--t-hours)'; cur.style.color = '#fff';
+    arc.style.background = 'transparent'; arc.style.color = 'var(--mute)';
+    curCtrls.style.display = ''; arcCtrls.style.display = 'none';
+    sub.textContent = 'Weekly plan · pasted from your Excel register';
+    const archWrap = document.getElementById('hr-arch-wrap');
+    if (archWrap) archWrap.style.display = 'none';
+    const tbl = document.querySelector('#hr-table');
+    if (tbl) tbl.style.display = '';
+    hrRender();
+  }
+}
+
+function hrGetArchive() {
+  try { return JSON.parse(localStorage.getItem('kaefer_v2_hours_archive') || '[]'); } catch(e) { return []; }
+}
+function hrSetArchive(a) { localStorage.setItem('kaefer_v2_hours_archive', JSON.stringify(a)); }
+
+function hrArchiveCurrent() {
+  if (!HR.rows.length) { alert('Nothing to archive — the week is empty.'); return; }
+  const label = HR.weekLabel || prompt('Give this week a label (e.g. WEEK 42 2026):', 'WEEK ' + new Date().toLocaleDateString('en-AU'));
+  if (!label) return;
+  const archive = hrGetArchive();
+  archive.unshift({ label, archivedAt: new Date().toISOString(), rows: HR.rows });
+  hrSetArchive(archive);
+  HR.rows = []; HR.weekLabel = '';
+  hrSave();
+  alert('✓ Archived "' + label + '" (' + archive[0].rows.length + ' rows). You can start a new week now.');
+  const el = document.getElementById('hr-wk'); if (el) el.value = '';
+  // Refresh the mode button count by re-rendering the whole tab
+  render_hours(document.getElementById('stage'), null);
+}
+
+function hrRenderArchive() {
+  // Where does archive render? Build a dedicated container if missing
+  const tb = document.getElementById('hr-tbody');
+  if (!tb) return;
+  // Hide the table, show archive content in a wrapper under the status bar
+  tb.innerHTML = '';
+  let wrap = document.getElementById('hr-arch-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'hr-arch-wrap';
+    wrap.style.padding = '14px';
+    tb.parentNode.parentNode.appendChild(wrap);
+  }
+  wrap.style.display = '';
+  // Hide the main table while in archive mode
+  tb.closest('table').style.display = 'none';
+
+  const archive = hrGetArchive();
+  if (!archive.length) {
+    wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--mute)">No archived weeks yet. Click <b>📦 Archive this week</b> on the current view, or paste a new week to auto-archive the current one.</div>';
+    return;
+  }
+  const filter = ((document.getElementById('hr-arch-filter')||{}).value||'').toLowerCase().trim();
+  const from = (document.getElementById('hr-arch-from')||{}).value;
+  const to   = (document.getElementById('hr-arch-to')||{}).value;
+  const colours = hrGetColours();
+  const colMap = Object.fromEntries(colours.map(c => [c.id, c]));
+
+  let html = '';
+  let anyShown = false;
+  archive.forEach((wk, wi) => {
+    const matched = wk.rows.filter(r => {
+      if (from && (r.date||'') < from) return false;
+      if (to && (r.date||'') > to) return false;
+      if (!filter) return true;
+      const hay = ((r.order||'')+' '+(r.desc||'')+' '+(r.short||'')+' '+(r.loc||'')+' '+(r.notes||'')+' '+(wk.label||'')).toLowerCase();
+      return hay.includes(filter);
+    });
+    if (!matched.length) return;
+    anyShown = true;
+    const dt = wk.archivedAt ? new Date(wk.archivedAt).toLocaleString('en-AU') : '';
+    html += `<div style="margin-bottom:18px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#fff">
+      <div style="background:#1a2a4a;color:#fff;padding:9px 14px;display:flex;align-items:center;gap:10px">
+        <b style="font-size:13px;letter-spacing:.5px">${escHtml(wk.label||'(unnamed)')}</b>
+        <span style="font-size:10px;color:#90caf9">archived ${escHtml(dt)}</span>
+        <span style="font-size:10px;color:#90caf9">· ${matched.length}${matched.length!==wk.rows.length?' of '+wk.rows.length:''} rows</span>
+        <div style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="hrRestoreArchive(${wi})">↩ Restore as current</button>
+          <button class="btn-ghost btn-danger" style="padding:3px 10px;font-size:11px" onclick="hrDeleteArchive(${wi})">Delete</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto"><table class="dm-table" style="width:100%">
+        <thead><tr><th>Status</th><th>Date</th><th>Order</th><th>Op</th><th>Loc</th><th>Description</th><th>Short Text</th><th>Hrs</th><th>Notes</th><th>%</th><th>Erect</th><th>Dismantle</th><th>Modify</th><th>Day</th><th>Plan?</th></tr></thead>
+        <tbody>`;
+    matched.forEach(r => {
+      const c  = colMap[r.status]      || colours[1];
+      const hc = colMap[r.hoursStatus] || colours[1];
+      const rowBg = `background:${c.bg};color:${c.fg}`;
+      const dayLbl = r.day ? DAYS_UP[DAYS.indexOf(r.day)] : '';
+      html += `<tr>
+        <td style="${rowBg};font-size:10px;font-weight:700;text-align:center">${(c.label||'').toUpperCase()}</td>
+        <td style="${rowBg};font-size:11px;white-space:nowrap">${fdDisplay(r.date)}</td>
+        <td style="${rowBg};font-size:11px">${escHtml(r.order||'')}</td>
+        <td style="${rowBg};font-size:11px">${escHtml(r.op||'')}</td>
+        <td style="${rowBg};font-size:11px">${escHtml(r.loc||'')}</td>
+        <td style="${rowBg};font-size:11.5px">${escHtml(r.desc||'')}</td>
+        <td style="${rowBg};font-size:11px">${escHtml(r.short||'')}</td>
+        <td style="background:${hc.bg};color:${hc.fg};text-align:center;font-weight:700">${escHtml(r.hours||'')}</td>
+        <td style="font-size:11px;color:var(--err)">${escHtml(r.notes||'')}</td>
+        <td style="text-align:center">${escHtml(r.percent||'')}</td>
+        <td style="text-align:center;background:#e8f5e9;color:#1b5e20;font-weight:700">${escHtml(r.erect||'')}</td>
+        <td style="text-align:center;background:#ffebee;color:#b71c1c;font-weight:700">${escHtml(r.dismantle||'')}</td>
+        <td style="text-align:center;background:#e3f2fd;color:#0d47a1;font-weight:700">${escHtml(r.modify||'')}</td>
+        <td style="text-align:center;font-size:11px;font-weight:700">${dayLbl}</td>
+        <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  });
+  if (!anyShown) html = '<div style="padding:30px;text-align:center;color:var(--mute)">No archived rows match that search.</div>';
+  wrap.innerHTML = html;
+}
+
+function hrRestoreArchive(wi) {
+  const archive = hrGetArchive();
+  const wk = archive[wi]; if (!wk) return;
+  if (HR.rows.length && !confirm('This will archive your current week first and load "' + wk.label + '" as current. Continue?')) return;
+  if (HR.rows.length) {
+    const cur = { label: HR.weekLabel || '(unnamed)', archivedAt: new Date().toISOString(), rows: HR.rows };
+    archive.unshift(cur);
+  }
+  const restored = archive.splice(wi + (HR.rows.length ? 1 : 0), 1)[0];
+  hrSetArchive(archive);
+  HR.rows = restored.rows; HR.weekLabel = restored.label;
+  hrSave();
+  render_hours(document.getElementById('stage'), null);
+  hrSetMode('current');
+}
+function hrDeleteArchive(wi) {
+  const archive = hrGetArchive();
+  const wk = archive[wi]; if (!wk) return;
+  if (!confirm('Permanently delete archived week "' + wk.label + '"?')) return;
+  archive.splice(wi, 1);
+  hrSetArchive(archive);
+  hrRenderArchive();
+  // Update the counter in the mode button
+  const arc = document.getElementById('hr-mode-arch');
+  if (arc) arc.textContent = 'Archive (' + archive.length + ')';
 }
 
 function hrRender() {
@@ -2615,11 +2785,21 @@ function hrParsePaste() {
     });
   });
   if (!newRows.length) { alert('Nothing recognised as a job row. Make sure you copied the data rows from Excel (including the section headers like WEEK 42 or BREAK IN WORK).'); return; }
+  // Offer to archive the current week first (if any)
+  if (HR.rows.length) {
+    const archiveFirst = confirm('You have ' + HR.rows.length + ' rows in the current week ("' + (HR.weekLabel||'unnamed') + '").\n\nOK = archive it first, then load the new week.\nCancel = discard current and load new.');
+    if (archiveFirst) {
+      const archive = hrGetArchive();
+      archive.unshift({ label: HR.weekLabel || '(unnamed)', archivedAt: new Date().toISOString(), rows: HR.rows });
+      hrSetArchive(archive);
+    }
+  }
   HR.rows = newRows;
   hrSave();
   hrClosePaste();
   document.getElementById('hr-wk').value = HR.weekLabel;
-  hrRender();
+  // Full re-render so archive button count updates
+  render_hours(document.getElementById('stage'), null);
 }
 
 function detectColourBucket(bg) {

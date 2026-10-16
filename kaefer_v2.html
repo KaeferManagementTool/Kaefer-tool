@@ -2409,7 +2409,11 @@ function render_hours(stage, tabCfg) {
             <th>Short Text</th>
             <th>Hrs</th>
             <th>Notes</th>
-            ${DAYS_UP.map(d=>`<th style="min-width:40px">${d}</th>`).join('')}
+            <th style="background:#607d8b;color:#fff">%</th>
+            <th style="background:#2e7d32;color:#fff">Erect</th>
+            <th style="background:#c62828;color:#fff">Dismantle</th>
+            <th style="background:#1565c0;color:#fff">Modify</th>
+            <th style="min-width:80px">Day</th>
             <th>Plan?</th>
             <th>&nbsp;</th>
           </tr></thead>
@@ -2432,18 +2436,30 @@ function hrRender() {
   }
   const colours = hrGetColours();
   const colMap = Object.fromEntries(colours.map(c => [c.id, c]));
-  tb.innerHTML = HR.rows.map(r => {
+  // Sort by date (ascending), empty dates to top for the ad-hoc rows
+  const sorted = HR.rows.slice().sort((a, b) => (a.date||'~').localeCompare(b.date||'~'));
+  const DAYNAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+  let html = '';
+  let lastDate = null;
+  sorted.forEach(r => {
+    // Day separator when date changes
+    if (r.date && r.date !== lastDate) {
+      const dn = DAYNAMES[new Date(r.date+'T00:00:00').getDay()] || '';
+      html += `<tr><td colspan="16" style="background:#1a1a1a;color:#fff;padding:7px 12px;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase">${dn} · ${fdDisplay(r.date)}</td></tr>`;
+      lastDate = r.date;
+    }
     const c  = colMap[r.status]       || colours[1];
     const hc = colMap[r.hoursStatus]  || colours[1];
-    // Shared style for all "row-status" cells (date through short text)
     const rowBg = `background:${c.bg};color:${c.fg}`;
-    const dayTicks = DAYS.map(d => {
-      const on = r.days && r.days[d];
-      return `<td style="padding:4px"><input type="checkbox" ${on?'checked':''} onchange="hrToggleDay('${r.id}','${d}',this.checked)" style="width:18px;height:18px;cursor:pointer"></td>`;
-    }).join('');
-    return `<tr>
+    const dayVal = r.day || '';
+    const daySel = `<select onchange="hrEditField('${r.id}','day',this.value);hrRender()" style="padding:3px 6px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;font-weight:700;background:#fff">
+      <option value="">—</option>
+      ${DAYS_UP.map((d,i)=>`<option value="${DAYS[i]}" ${DAYS[i]===dayVal?'selected':''}>${d}</option>`).join('')}
+    </select>`;
+    html += `<tr>
       <td style="${rowBg};padding:4px 6px;cursor:pointer;font-weight:700;font-size:10px;text-align:center;user-select:none" onclick="hrCycleStatus('${r.id}')" title="Click to cycle job status colour">${c.label.toUpperCase()}</td>
-      <td style="${rowBg};font-size:11px;white-space:nowrap">${fdDisplay(r.date)}</td>
+      <td style="${rowBg};font-size:11px;white-space:nowrap"><input type="date" value="${r.date||''}" onchange="hrEditField('${r.id}','date',this.value);hrRender()" style="background:transparent;border:0;font-size:11px;color:inherit;font-weight:600;width:100%"></td>
       <td contenteditable="true" oninput="hrEditField('${r.id}','order',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.order||'')}</td>
       <td contenteditable="true" oninput="hrEditField('${r.id}','op',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.op||'')}</td>
       <td contenteditable="true" oninput="hrEditField('${r.id}','loc',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.loc||'')}</td>
@@ -2451,11 +2467,16 @@ function hrRender() {
       <td contenteditable="true" oninput="hrEditField('${r.id}','short',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.short||'')}</td>
       <td style="background:${hc.bg};color:${hc.fg};padding:4px;cursor:pointer;text-align:center;font-weight:700;user-select:none" onclick="hrCycleHours('${r.id}')" title="Click to cycle timesheet status (${hc.label})"><span contenteditable="true" oninput="hrEditField('${r.id}','hours',this.textContent)" onclick="event.stopPropagation()" style="display:inline-block;min-width:30px;cursor:text">${escHtml(r.hours||'')}</span></td>
       <td contenteditable="true" oninput="hrEditField('${r.id}','notes',this.textContent)" style="font-size:11px;color:var(--err);min-width:120px">${escHtml(r.notes||'')}</td>
-      ${dayTicks}
+      <td contenteditable="true" oninput="hrEditField('${r.id}','percent',this.textContent)" style="text-align:center;font-weight:600">${escHtml(r.percent||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','erect',this.textContent)" style="text-align:center;background:#e8f5e9;color:#1b5e20;font-weight:700">${escHtml(r.erect||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','dismantle',this.textContent)" style="text-align:center;background:#ffebee;color:#b71c1c;font-weight:700">${escHtml(r.dismantle||'')}</td>
+      <td contenteditable="true" oninput="hrEditField('${r.id}','modify',this.textContent)" style="text-align:center;background:#e3f2fd;color:#0d47a1;font-weight:700">${escHtml(r.modify||'')}</td>
+      <td style="text-align:center">${daySel}</td>
       <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
       <td><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
     </tr>`;
-  }).join('');
+  });
+  tb.innerHTML = html;
 }
 function hrCycleHours(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
@@ -2478,12 +2499,6 @@ function hrEditField(id, field, val) {
   r[field] = val.trim();
   hrSave();
 }
-function hrToggleDay(id, day, on) {
-  const r = HR.rows.find(x => x.id === id); if (!r) return;
-  if (!r.days) r.days = {};
-  r.days[day] = !!on;
-  hrSave();
-}
 function hrDelete(id) {
   if (!confirm('Delete this row?')) return;
   HR.rows = HR.rows.filter(x => x.id !== id);
@@ -2494,7 +2509,7 @@ function hrAddBlank() {
   HR.rows.unshift({
     id: 'hr_' + Date.now(),
     date: today, planner:'', order:'', op:'', loc:'', desc:'(New break-in job)', short:'',
-    hours:'', status:'orange', hoursStatus:'orange', notes:'', days:{}, planned:false
+    hours:'', status:'orange', hoursStatus:'orange', notes:'', day:'', percent:'', erect:'', dismantle:'', modify:'', planned:false
   });
   hrSave(); hrRender();
 }
@@ -2577,7 +2592,8 @@ function hrParsePaste() {
       notes: vals[orderIdx+6] || vals[8] || '',
       status: colour,
       hoursStatus: 'orange',
-      days: {},
+      day: '',
+      percent: '', erect: '', dismantle: '', modify: '',
       planned: (mode === 'planned')
     });
   });

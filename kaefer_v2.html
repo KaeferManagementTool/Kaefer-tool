@@ -151,7 +151,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   white-space: nowrap;
   transition: color .12s, border-color .12s, background .12s;
 }
-.tab:hover { color: var(--ink); background: var(--surface-2); }
+.tab:hover { color: var(--ink); background: var(--surface-2); cursor: grab; }
+.tab:active { cursor: grabbing; }
 .tab[aria-current="true"] {
   color: var(--ink);
   border-bottom-color: var(--accent, var(--brand));
@@ -481,13 +482,55 @@ let ACTIVE = 'dashboard';
 /* ============================================================
    RENDER
 ============================================================ */
+/* Tab order persistence — stored per browser */
+function loadTabOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('kaefer_v2_tab_order') || '[]');
+    if (!Array.isArray(saved) || !saved.length) return;
+    // Reorder TABS array to match saved order, keeping any new tabs at the end
+    const idMap = Object.fromEntries(TABS.map(t => [t.id, t]));
+    const ordered = [];
+    saved.forEach(id => { if (idMap[id]) { ordered.push(idMap[id]); delete idMap[id]; } });
+    Object.values(idMap).forEach(t => ordered.push(t));
+    TABS.length = 0;
+    TABS.push(...ordered);
+  } catch(e) {}
+}
+function saveTabOrder() {
+  try { localStorage.setItem('kaefer_v2_tab_order', JSON.stringify(TABS.map(t => t.id))); } catch(e) {}
+}
+
 function renderTabs() {
   const el = document.getElementById('tabs');
-  el.innerHTML = TABS.map(t =>
-    `<button class="tab" style="--accent:${t.accent}" aria-current="${t.id===ACTIVE}" onclick="setTab('${t.id}')">
+  el.innerHTML = TABS.map((t, i) =>
+    `<button class="tab" draggable="true" data-idx="${i}" style="--accent:${t.accent}" aria-current="${t.id===ACTIVE}" onclick="setTab('${t.id}')">
        <span class="dot"></span>${t.label}
      </button>`
   ).join('');
+  wireTabDrag();
+}
+
+/* Drag-to-reorder */
+let dragFromIdx = null;
+function wireTabDrag() {
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('dragstart', e => {
+      dragFromIdx = parseInt(btn.dataset.idx, 10);
+      btn.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    btn.addEventListener('dragend', () => { btn.style.opacity = ''; dragFromIdx = null; });
+    btn.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    btn.addEventListener('drop', e => {
+      e.preventDefault();
+      const toIdx = parseInt(btn.dataset.idx, 10);
+      if (dragFromIdx == null || dragFromIdx === toIdx) return;
+      const moved = TABS.splice(dragFromIdx, 1)[0];
+      TABS.splice(toIdx, 0, moved);
+      saveTabOrder();
+      renderTabs();
+    });
+  });
 }
 
 function setTab(id) {
@@ -605,6 +648,7 @@ function updateSync() {
 setInterval(updateSync, 60000);
 
 /* ---------- Init ---------- */
+loadTabOrder();
 renderTabs();
 renderStage();
 updateSync();

@@ -1745,6 +1745,29 @@ function offLoad() {
 }
 function offSave() { localStorage.setItem('kaefer_v2_offsite', JSON.stringify(OFF.items)); }
 
+function offGetDefaultRep() {
+  const v = localStorage.getItem('kaefer_v2_offsite_default_rep');
+  return v == null ? 'Jason Voss' : v;
+}
+function offSetDefaultRep(v) { localStorage.setItem('kaefer_v2_offsite_default_rep', v); }
+
+function offEditField(id, field, val) {
+  const o = OFF.items.find(x => x.id === id);
+  if (!o) return;
+  o[field] = (val || '').trim();
+  // If a row's rep is changed and this is on the latest entry, update the sticky default too
+  if (field === 'rep' && OFF.items[0] && OFF.items[0].id === id) offSetDefaultRep(o.rep);
+  offSave();
+}
+function offClearAll() {
+  if (!OFF.items.length) { alert('Register is already empty.'); return; }
+  if (!confirm('Delete ALL ' + OFF.items.length + ' offsite entries? This cannot be undone.')) return;
+  if (!confirm('Really delete everything? Type-yes-no second confirm.')) return;
+  OFF.items = [];
+  offSave();
+  if (ACTIVE === 'offsite') offRender();
+}
+
 function render_offsite(stage, tabCfg) {
   if (!OFF.loaded) offLoad();
   // Load the Attendance 2 roster so the Person dropdown fills in
@@ -1772,7 +1795,7 @@ function render_offsite(stage, tabCfg) {
         <div class="field"><label>In</label><input type="text" id="off-in" placeholder="e.g. 14:00 or Multiple" style="width:110px"></div>
         <div class="field" style="flex:1 1 200px"><label>Reason</label><input type="text" id="off-reason" placeholder="e.g. RMA Works, Personal Lock"></div>
         <div class="field"><label>Work Order</label><input type="text" id="off-wo" style="width:120px"></div>
-        <div class="field"><label>RTAY Rep</label><input type="text" id="off-rep" style="width:140px"></div>
+        <div class="field"><label>RTAY Rep <span style="font-weight:400;color:var(--mute);font-size:10px">· sticky</span></label><input type="text" id="off-rep" value="${escHtml(offGetDefaultRep())}" style="width:140px" title="Remembered until you change it — Jason Voss by default"></div>
         <button class="btn" style="background:var(--t-offsite)" onclick="offAdd()">+ Log</button>
       </div>
       <div class="att-ctrls" style="padding-top:0">
@@ -1782,8 +1805,9 @@ function render_offsite(stage, tabCfg) {
         <div class="spacer"></div>
         <button class="btn-ghost" onclick="offOpenBulkPaste()" title="Backfill many entries at once from Excel">📚 Bulk paste</button>
         <button class="btn-ghost" style="margin-left:4px" onclick="offExport()">📥 CSV</button>
+        <button class="btn-ghost btn-danger" style="margin-left:4px" onclick="offClearAll()" title="Delete ALL offsite entries">🗑 Clear all</button>
       </div>
-      <div class="att-status" id="off-status">Stored locally in your browser (shared sync coming in a later update)</div>
+      <div class="att-status" id="off-status">Stored locally in your browser · <b>any cell is click-to-edit</b> to fix dodgy entries · shared sync coming in a later update</div>
       <div style="overflow-x:auto">
         <table class="dm-table" id="off-table">
           <thead><tr>
@@ -1822,14 +1846,14 @@ function offRender() {
   tb.innerHTML = items.map(o => {
     const dayN = o.date ? DAYNAMES[new Date(o.date+'T00:00:00').getDay()] : '';
     return `<tr>
-      <td style="white-space:nowrap;font-size:11px">${fdDisplay(o.date)}</td>
-      <td>${dayN}</td>
-      <td style="font-weight:600">${escHtml(o.name||'')}</td>
-      <td>${escHtml(o.out||'')}</td>
-      <td>${escHtml(o.in||'')}</td>
-      <td>${escHtml(o.reason||'')}</td>
-      <td>${escHtml(o.wo||'')}</td>
-      <td>${escHtml(o.rep||'')}</td>
+      <td style="white-space:nowrap;font-size:11px"><input type="date" value="${o.date||''}" onchange="offEditField(${o.id},'date',this.value);offRender()" style="border:0;background:transparent;font-size:11px;width:120px;padding:2px 0"></td>
+      <td style="color:var(--mute)">${dayN}</td>
+      <td contenteditable="true" oninput="offEditField(${o.id},'name',this.textContent)" style="font-weight:600;min-width:120px">${escHtml(o.name||'')}</td>
+      <td contenteditable="true" oninput="offEditField(${o.id},'out',this.textContent)" style="min-width:70px">${escHtml(o.out||'')}</td>
+      <td contenteditable="true" oninput="offEditField(${o.id},'in',this.textContent)" style="min-width:70px">${escHtml(o.in||'')}</td>
+      <td contenteditable="true" oninput="offEditField(${o.id},'reason',this.textContent)" style="min-width:160px">${escHtml(o.reason||'')}</td>
+      <td contenteditable="true" oninput="offEditField(${o.id},'wo',this.textContent)" style="min-width:100px;font-family:monospace;font-size:11px">${escHtml(o.wo||'')}</td>
+      <td contenteditable="true" oninput="offEditField(${o.id},'rep',this.textContent)" style="min-width:110px">${escHtml(o.rep||'')}</td>
       <td><button class="edit-btn" onclick="offDelete(${o.id})" style="color:var(--err);border-color:var(--err)">Del</button></td>
     </tr>`;
   }).join('');
@@ -1844,6 +1868,7 @@ function offAdd() {
   if (match) { name = match.name; personId = match.id; }
   const reason = document.getElementById('off-reason').value.trim();
   if (!reason) { alert('Enter a reason.'); return; }
+  const rep = document.getElementById('off-rep').value.trim();
   OFF.items.unshift({
     id: Date.now(),
     person_id: personId,
@@ -1853,11 +1878,13 @@ function offAdd() {
     in:   document.getElementById('off-in').value.trim()  || 'Multiple',
     reason,
     wo:   document.getElementById('off-wo').value.trim(),
-    rep:  document.getElementById('off-rep').value.trim()
+    rep
   });
+  // Remember the rep for next time — leave the field populated
+  if (rep) offSetDefaultRep(rep);
   offSave();
-  // reset
-  ['off-person-search','off-reason','off-wo','off-rep','off-out','off-in'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
+  // reset (keep rep + date — they're commonly reused back-to-back)
+  ['off-person-search','off-reason','off-wo','off-out','off-in'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
   const otherWrap = document.getElementById('off-other-wrap'); if (otherWrap) otherWrap.style.display = 'none';
   document.getElementById('off-person-search').focus();
   offRender();

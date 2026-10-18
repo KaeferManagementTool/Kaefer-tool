@@ -892,7 +892,7 @@ const TABS = [
     desc:'One unified registers framework powering PPE, Vehicle, Tool, Training, Breathalyser, Heights, Tool Users. Same UI, same sync, 7 configurations.' },
   { id:'rr',          label:'R&R',               accent:'var(--t-rr)',          phase:3, status:'coming',
     desc:'Recognition log with Smart Choices tags, Edit on each row, "In Portal" tick to track what\'s been pushed to KAEFER\'s portal.' },
-  { id:'scaffold',    label:'Scaffold Register', accent:'var(--t-scaffold)',    phase:3, status:'coming',
+  { id:'scaffold',    label:'Scaffold Register', accent:'var(--t-scaffold)',    phase:3, status:'in build',
     desc:'Scaffold inventory, erect / dismantle status, inspections due.' },
   { id:'ccv',         label:'CCV Wheel',         accent:'var(--t-rr)',          phase:3, status:'coming',
     desc:'Critical control verification wheel. Keep the visualisation, standardise entry.' },
@@ -2425,6 +2425,8 @@ function render_hours(stage, tabCfg) {
             <th style="background:#2e7d32;color:#fff">Erect</th>
             <th style="background:#c62828;color:#fff">Dismantle</th>
             <th style="background:#1565c0;color:#fff">Modify</th>
+            <th style="background:var(--t-scaffold);color:#fff;min-width:100px" title="Link this HR job to a scaffold tag in the register">Scaffold</th>
+            <th style="background:#8a0a1f;color:#fff;text-align:center" title="Tick when the scaffold has been dismantled — auto-moves the gear list to Dismantled in the Scaffold Register">Dis</th>
             <th style="min-width:80px">Day</th>
             <th>Plan?</th>
             <th>&nbsp;</th>
@@ -2600,6 +2602,8 @@ function hrDeleteArchive(wi) {
 function hrRender() {
   const tb = document.getElementById('hr-tbody');
   if (!tb) return;
+  // Opportunistically load the Scaffold Register so the dropdowns populate
+  if (typeof SCF !== 'undefined' && !SCF.loaded && !SCF.loading && !SCF.err && workerUrl()) scfLoad();
   if (!HR.rows.length) {
     tb.innerHTML = '<tr><td colspan="18" style="padding:34px;text-align:center;color:var(--mute)">No jobs loaded. Click <b>Paste from Excel</b> at the top to drop in this week\'s register.</td></tr>';
     return;
@@ -2615,13 +2619,13 @@ function hrRender() {
   const renderSection = (list, banner) => {
     if (!list.length) return;
     if (banner) {
-      html += `<tr><td colspan="16" style="background:${banner.bg};color:#fff;padding:9px 12px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;text-align:center;border-top:3px solid ${banner.border}">${banner.label}</td></tr>`;
+      html += `<tr><td colspan="18" style="background:${banner.bg};color:#fff;padding:9px 12px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;text-align:center;border-top:3px solid ${banner.border}">${banner.label}</td></tr>`;
     }
     let lastDate = null;
     list.forEach(r => {
       if (r.date && r.date !== lastDate) {
         const dn = DAYNAMES[new Date(r.date+'T00:00:00').getDay()] || '';
-        html += `<tr><td colspan="16" style="background:#1a1a1a;color:#fff;padding:7px 12px;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase">${dn} · ${fdDisplay(r.date)}</td></tr>`;
+        html += `<tr><td colspan="18" style="background:#1a1a1a;color:#fff;padding:7px 12px;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase">${dn} · ${fdDisplay(r.date)}</td></tr>`;
         lastDate = r.date;
       }
       html += renderHrRow(r, colours, colMap);
@@ -2655,10 +2659,63 @@ function renderHrRow(r, colours, colMap) {
     <td contenteditable="true" oninput="hrEditField('${r.id}','erect',this.textContent)" style="text-align:center;background:#e8f5e9;color:#1b5e20;font-weight:700">${escHtml(r.erect||'')}</td>
     <td contenteditable="true" oninput="hrEditField('${r.id}','dismantle',this.textContent)" style="text-align:center;background:#ffebee;color:#b71c1c;font-weight:700">${escHtml(r.dismantle||'')}</td>
     <td contenteditable="true" oninput="hrEditField('${r.id}','modify',this.textContent)" style="text-align:center;background:#e3f2fd;color:#0d47a1;font-weight:700">${escHtml(r.modify||'')}</td>
+    <td style="padding:2px 4px">${hrScaffoldPicker(r)}</td>
+    <td style="text-align:center;padding:2px;background:${r.scaffoldDone?'#8a0a1f':'#fafafa'};cursor:${r.scaffoldId?'pointer':'not-allowed'};font-size:16px;user-select:none" onclick="hrToggleDismantleDone('${r.id}')" title="${r.scaffoldDone?'Scaffold marked dismantled — click to un-tick locally':r.scaffoldId?'Tick to dismantle the linked scaffold and move its gear list':'Pick a scaffold tag first'}">${r.scaffoldDone?'<span style="color:#fff;font-weight:900">✓</span>':r.scaffoldId?'<span style="color:var(--mute)">☐</span>':'<span style="color:#ccc">—</span>'}</td>
     <td style="text-align:center">${daySel}</td>
     <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
     <td><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
   </tr>`;
+}
+
+function hrScaffoldPicker(r) {
+  if (typeof SCF === 'undefined') return '<span style="font-size:10px;color:var(--mute);font-style:italic">—</span>';
+  if (SCF.loading && !SCF.loaded) return '<span style="font-size:10px;color:var(--mute);font-style:italic">loading…</span>';
+  if (!SCF.loaded) return '<span style="font-size:10px;color:var(--mute);font-style:italic">— not loaded —</span>';
+  const list = SCF.active || [];
+  const sel = r.scaffoldId || '';
+  // Also offer dismantled scaffolds if the row is already linked to one (so we can see the tag)
+  let dismantledOpt = '';
+  if (sel && !list.find(s => s.id === sel)) {
+    const dis = (SCF.dismantled || []).find(s => s.id === sel);
+    if (dis) dismantledOpt = `<option value="${dis.id}" selected>${escHtml(dis.tag||'(dismantled)')} ✓</option>`;
+  }
+  return `<select onchange="hrEditField('${r.id}','scaffoldId',this.value);hrRender()" style="padding:2px 4px;border:1px solid var(--line);border-radius:3px;font-size:10px;max-width:110px;background:#fff">
+    <option value="">— none —</option>
+    ${dismantledOpt}
+    ${list.map(s => `<option value="${s.id}" ${s.id===sel?'selected':''}>${escHtml(s.tag||'(no tag)')}</option>`).join('')}
+  </select>`;
+}
+
+function hrToggleDismantleDone(id) {
+  const r = HR.rows.find(x => x.id === id); if (!r) return;
+  if (r.scaffoldDone) {
+    if (!confirm('Un-tick this row locally? Note: the scaffold stays in the Dismantled register — this only clears the tick.')) return;
+    r.scaffoldDone = false;
+    hrSave(); hrRender();
+    return;
+  }
+  if (!r.scaffoldId) { alert('Pick a Scaffold tag for this job first.'); return; }
+  if (typeof SCF === 'undefined' || !SCF.loaded) { alert('Scaffold register not loaded yet. Try the Scaffold Register tab first.'); return; }
+  const scaff = (SCF.active || []).find(s => s.id === r.scaffoldId);
+  if (!scaff) { alert('That scaffold is no longer in the Active register.'); return; }
+  const date = prompt('Dismantle date (YYYY-MM-DD):', new Date().toISOString().slice(0,10));
+  if (!date) return;
+  const nd = new Date(date+'T00:00:00');
+  if (isNaN(nd)) { alert('Invalid date.'); return; }
+  const team = prompt('Dismantled by (team / scaffolder):', '');
+  if (team === null) return;
+  const u = workerUrl(); if (!u) { alert('Not connected.'); return; }
+  const payload = { action:'scaffold_action', subAction:'dismantle', id: scaff.id, fromTab:'active', dismantledAt: nd.toISOString(), dismantledBy: team };
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
+    .then(res => res.json())
+    .then(j => {
+      if (!j.ok) throw new Error(j.error || 'Dismantle failed');
+      r.scaffoldDone = true;
+      hrSave();
+      scfLoad();
+      hrRender();
+    })
+    .catch(e => alert('Dismantle failed: ' + e.message));
 }
 function hrCycleHours(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
@@ -3201,6 +3258,429 @@ function dailyToggleBigScreen() {
   render_daily(document.getElementById('stage'));
 }
 
+/* ============================================================
+   SCAFFOLD REGISTER
+============================================================ */
+const SCF_COMPONENTS = [{"category":"Standards","items":[{"id":"c000","desc":"Standard 0.5m/1\u20198\" (1 Ring) - w/Spigot","kg":3.31},{"id":"c001","desc":"Standard 1.0m/3\u20193\" (2 Ring) - w/Spigot","kg":5.62},{"id":"c002","desc":"Standard 1.5m/4\u201911\" (3 Ring) - w/Spigot","kg":7.94},{"id":"c003","desc":"Standard 2.0m/6\u20196\" (4 Ring) - w/Spigot","kg":10.32},{"id":"c004","desc":"Standard 3.0m/9\u20199\"\u2019 (6 Ring) - w/Spigot","kg":14.99},{"id":"c005","desc":"Standard 0.5m/1\u201918\" (1 Ring) - Hanging Spigot","kg":2.24},{"id":"c006","desc":"Standard 1.0m/3\u20193\" (2 Ring) - Hanging Spigot","kg":6.78},{"id":"c007","desc":"Standard 1.5m/4\u201911\" (3 Ring) - Hanging Spigot","kg":8.76},{"id":"c008","desc":"Standard 2.0m/6\u20196\" (4 Ring) - Hanging Spigot","kg":11.0},{"id":"c009","desc":"Standard 2.5m/8\u20192\" (5 Ring) - Hanging Spigot","kg":13.9},{"id":"c010","desc":"Standard 3.0m/9\u20199\"\u2019 (6 Ring) - Hanging Spigot","kg":15.63},{"id":"c011","desc":"Standard 4.0m/13\u20191\" (8 Ring) - Hanging Spigot","kg":19.96},{"id":"c012","desc":"Standard 1.0m/3\u20193\" (2 Ring) - Handrail Standard","kg":4.79}]},{"category":"Ledgers","items":[{"id":"c013","desc":"Ledger O-Type 0.15m/6\"","kg":1.17},{"id":"c014","desc":"Ledger O-Type 0.35m/1\u20192\"","kg":2.0},{"id":"c015","desc":"Ledger O-Type 0.60m/1\u201911\"","kg":3.0},{"id":"c016","desc":"Ledger O-Type .65m/2\u20192\"","kg":3.07},{"id":"c017","desc":"Ledger O-Type 0.84m/2\u2019 8-5/8\"","kg":3.64},{"id":"c018","desc":"Ledger O-Type .88m/2\u201910 5/8\"","kg":4.0},{"id":"c019","desc":"Ledger O-Type 1.065m/3\u20196\"","kg":4.59},{"id":"c020","desc":"Ledger O-Type 1.15m/3\u201910\"","kg":4.86},{"id":"c021","desc":"Ledger O-Type 1.57m/5\u20192\"","kg":6.45},{"id":"c022","desc":"Ledger O-Type 1.82m/6\u2019","kg":7.25},{"id":"c023","desc":"Ledger O-Type 2.13m/7\u2019","kg":8.4},{"id":"c024","desc":"Ledger O-Type 2.43m/8\u2019","kg":9.52},{"id":"c025","desc":"Ledger O-Type 3.05m/10\u2019","kg":11.59},{"id":"c026","desc":"Ledger to Plank Transom O-Type 240mm - 1 Board","kg":3.38},{"id":"c027","desc":"Ledger to Plank Transom O-Type 480mm - 2 Board","kg":4.23},{"id":"c028","desc":"Ledger to Plank Transom O-Type 720mm - 3 Board","kg":5.07}]},{"category":"Truss Ledgers","items":[{"id":"c029","desc":"Truss Ledger O-Type 1.57m/5\u20192\"","kg":10.72},{"id":"c030","desc":"Truss Ledger O-Type 1.82m/6\u2019","kg":12.51},{"id":"c031","desc":"Truss Ledger O-Type 2.13m/7\u2019","kg":14.33},{"id":"c032","desc":"Truss Ledger O-Type 2.43m/8\u2019","kg":16.68},{"id":"c033","desc":"Truss Ledger O-Type 3.05m/10\u2019","kg":21.12}]},{"category":"Bay Braces","items":[{"id":"c034","desc":"Bay Brace 2.0 x 0.60m/1\u201911\" ORANGE","kg":5.16},{"id":"c035","desc":"Bay Brace 2.0 x 0.84m/2\u2019 8-5/8\" WHITE","kg":7.25},{"id":"c036","desc":"Bay Brace 2.0 x 0.88 m/2\u201910 5/8\" BLUE","kg":7.65},{"id":"c037","desc":"Bay Brace 2.0 x 1.065m/3\u20196\" YELLOW","kg":7.84},{"id":"c038","desc":"Bay Brace 2.0 x 1.15m/3\u201910\" PINK","kg":7.94},{"id":"c039","desc":"Bay Brace 2.0 x 1.57m/5\u20192\" RED","kg":8.54},{"id":"c040","desc":"Bay Brace 2.0 x 1.82m/6\u20190\" BLACK","kg":8.97},{"id":"c041","desc":"Bay Brace 2.0 x 2.13m/7\u20190\" BROWN","kg":9.52},{"id":"c042","desc":"Bay Brace 2.0 x 2.43m/8\u20190 GREEN","kg":10.14},{"id":"c043","desc":"Bay Brace 2.0 x 3.05m/10\u20190\" BLUE","kg":11.48},{"id":"c044","desc":"Bay Brace 1.5 x 2.57m/8\u20195\"","kg":9.2},{"id":"c045","desc":"Bay Brace 1.0 x 1.065 m/3\u20196\"","kg":5.25},{"id":"c046","desc":"Bay Brace 1.0 x 1.57m/5\u20192\"","kg":6.24}]},{"category":"Transoms","items":[{"id":"c047","desc":"Mid Transom .88/2\u201910 5/8\"","kg":4.5},{"id":"c048","desc":"Mid Transom 1.065m/3\u20196\"","kg":5.09},{"id":"c049","desc":"Mid Transom 1.15M/3\u201910\"","kg":5.45},{"id":"c050","desc":"Mid Transom 1.57m/5\u20192\"","kg":6.82},{"id":"c051","desc":"Mid Transom 1.82M/6\u2019","kg":7.8},{"id":"c052","desc":"Mid Transom 2.13M/7\u2019","kg":9.08},{"id":"c053","desc":"Mid Transom 2.43M/8\u2019","kg":10.1},{"id":"c054","desc":"Mid Transom 3.05M/10\u2019","kg":12.45},{"id":"c055","desc":"Vertical Mid Transom .5M Bolt, 23mm Nut (AU) (DOG BONE)","kg":3.36},{"id":"c056","desc":"Ladder Access Transom w/ Spigot .65m/2\u20192\"","kg":6.11},{"id":"c057","desc":"Plank to Plank Transom O-Type 240mm - 1 Board","kg":3.67},{"id":"c058","desc":"Plank to Plank Transom O-Type 480mm - 2 Board","kg":4.55},{"id":"c059","desc":"Plank to Plank Transom O-Type 720mm - 3 Board","kg":5.47}]},{"category":"Lattice/Aluminium Beams","items":[{"id":"c060","desc":"Lattice Girder 4.26m/14\u2019 - No Spigot","kg":47.09},{"id":"c061","desc":"Lattice Girder 5.17m/17\u2019 - No Spigot","kg":55.42},{"id":"c062","desc":"Lattice Girder 6.39m/21\u2019 - No Spigot","kg":68.62},{"id":"c063","desc":"Lattice Girder 8.52m/28\u2019 - No Spigot","kg":92.87},{"id":"c064","desc":"Lattice Beam Connector","kg":1.9},{"id":"c065","desc":"Lattice Beam Aluminum 4M - 750","kg":26.0},{"id":"c066","desc":"Lattice Beam Aluminum 6M - 750","kg":38.1},{"id":"c067","desc":"Aluminum Lattice Girder Beam - 4.26M (500mm)","kg":21.88},{"id":"c068","desc":"Aluminum Lattice Girder Beam - 6.39M (500mm)","kg":33.08},{"id":"c069","desc":"Aluminum Lattice Girder Beam - 8.52M (500mm)","kg":42.13},{"id":"c070","desc":"Aluminum Lattice Girder Beam Adapter","kg":5.34},{"id":"c071","desc":"Aluminum Lattice Girder Beam Joiner - 500mm","kg":12.19},{"id":"c072","desc":"Aluminum Beam 6 1/2\" x 6.14m/20\u2019","kg":37.2},{"id":"c073","desc":"Aluminum Beam 6 1/2\" x 8.52m/ 28\u2019","kg":52.08}]},{"category":"Decks/Planks/Boards","items":[{"id":"c074","desc":"Steel Plank 240mm - O-Type 0.60m/1\u201911\"","kg":5.57},{"id":"c075","desc":"Steel Plank 240mm - O-Type 0.84m/2\u20198 5/8\"","kg":6.99},{"id":"c076","desc":"Steel Plank 240mm - O-Type 0.88m/2\u201910 5/8\"","kg":7.01},{"id":"c077","desc":"Steel Plank 240mm- O-Type 1.065m/3\u20196\"","kg":8.15},{"id":"c078","desc":"Steel Plank 240mm - O-Type 1.15m/3\u201910\"","kg":8.63},{"id":"c079","desc":"Steel Plank 240mm- O-Type 1.57m/5\u20192\"","kg":10.98},{"id":"c080","desc":"Steel Plank 240mm - O-Type 1.82m/6\u2019","kg":12.48},{"id":"c081","desc":"Steel Plank 240mm - O-Type 2.13m/7\u2019","kg":14.33},{"id":"c082","desc":"Steel Plank 240mm - O-Type 2.43m/8\u2019","kg":15.98},{"id":"c083","desc":"Steel Plank 240mm - O-Type 3.05m/10\u2019","kg":19.57},{"id":"c084","desc":"Infill Plank .88m/2\u201910 5/8\"","kg":3.45},{"id":"c085","desc":"Infill Plank 1.065m/3\u20196\"","kg":4.31},{"id":"c086","desc":"Infill Plank 1.15m/3\u201910\"","kg":4.82},{"id":"c087","desc":"Infill Plank 1.57m/5\u20192\"","kg":6.58},{"id":"c088","desc":"Infill Plank 1.82m/6\u2019","kg":7.89},{"id":"c089","desc":"Infill Plank 2.13m/7\u2019","kg":9.19},{"id":"c090","desc":"Infill Plank 2.43m/8\u2019","kg":10.43},{"id":"c091","desc":"Infill Plank 3.05m/10\u2019","kg":13.29},{"id":"c092","desc":"Interlocking Toeboard .35m/1\u20192\"","kg":1.14},{"id":"c093","desc":"Interlocking Toeboard 0.60m/1\u201911\"","kg":2.4},{"id":"c094","desc":"Interlocking Toeboard 0.84m/2\u2019 8-5/8\"","kg":2.6},{"id":"c095","desc":"SideBracket/Hop-Up O-Type MK1 [non-spigot] 0.31m/1\u20190\" - 1 Board","kg":4.55},{"id":"c096","desc":"SideBracket/Hop-Up O-Type MK2 [spigot] 0.31m/1\u20190\" - 1 Board","kg":4.55},{"id":"c097","desc":"SideBracket/Hop-Up O-Type 0.65 m/2\u20192\" 2 Board","kg":7.2},{"id":"c098","desc":"SideBracket/Hop-Up O-Type 0.88 m/2\u201910 5/8\" 3 Board","kg":8.46},{"id":"c099","desc":"Step Down Bracket 0.27m/11\" 1 Board","kg":3.32},{"id":"c100","desc":"Toe Board Retaining Clamp, 23mm Nut (AU)","kg":0.74},{"id":"c101","desc":"Toe Board Clamp","kg":1.33},{"id":"c102","desc":"Toe Board Corner Clamp","kg":1.8},{"id":"c103","desc":"Scaffold Board Retaining Clamp","kg":0.76},{"id":"c104","desc":"Interlocking Toeboard .88m/2\u201910 5/8\"","kg":2.8},{"id":"c105","desc":"Interlocking Toeboard 1.065M/3\u20196\"","kg":3.3},{"id":"c106","desc":"Interlocking Toeboard 1.15m/3\u201910\"","kg":3.6},{"id":"c107","desc":"Interlocking Toeboard 1.57m/5\u20192\"","kg":4.75},{"id":"c108","desc":"Interlocking Toeboard 1.82m/6\u20190\"","kg":5.5},{"id":"c109","desc":"Interlocking Toeboard 2.13m/7\u20190\"","kg":6.33},{"id":"c110","desc":"Interlocking Toeboard 2.43m/8\u20190\"","kg":7.19},{"id":"c111","desc":"Interlocking Toeboard 3.05m/10\u2019","kg":8.93},{"id":"c112","desc":"Corner Plank 0.60m (Triangular)","kg":7.3},{"id":"c113","desc":"Corner Plank 0.84m","kg":7.77},{"id":"c114","desc":"Corner Plank 1.065m","kg":9.51},{"id":"c115","desc":"Corner Plank 1.34m","kg":11.26},{"id":"c116","desc":"Corner Plank 1.57m","kg":13.0},{"id":"c117","desc":"Corner Plank 1.82m","kg":14.75},{"id":"c118","desc":"Corner Plank with Ledger 1.82m x 1.82m","kg":10.16},{"id":"c119","desc":"Laminated Plank 2\u2019 (0.6m)","kg":3.42},{"id":"c120","desc":"Laminated Plank 3\u2019 (0.9m)","kg":5.13},{"id":"c121","desc":"Laminated Plank 4\u2019 (1.2m)","kg":6.84},{"id":"c122","desc":"Laminated Plank 5\u2019 (1.5m)","kg":8.55},{"id":"c123","desc":"Laminated Plank 6\u2019 (1.8m)","kg":10.26},{"id":"c124","desc":"Laminated Plank 7\u2019 (2.1m)","kg":11.97},{"id":"c125","desc":"Laminated Plank 8\u2019 (2.4m)","kg":13.68},{"id":"c126","desc":"Laminated Plank 9\u2019 (2.7m)","kg":15.39},{"id":"c127","desc":"Laminated Plank 10\u2019 (3.0m)","kg":17.1},{"id":"c128","desc":"Laminated Plank 12\u2019 (3.6m)","kg":20.52},{"id":"c129","desc":"Soleboards - Hardwood 500mm","kg":2.65},{"id":"c130","desc":"Ply Sheet 2400mm x 2400mm","kg":2.0}]},{"category":"Stairs/Ladders","items":[{"id":"c131","desc":"Steel Ladder AS 1892 - 3.0m","kg":18.4},{"id":"c132","desc":"Steel Ladder AS 1892 - 3.6m","kg":21.7},{"id":"c133","desc":"Steel Ladder AS 1892 - 4.2m","kg":25.9},{"id":"c134","desc":"Steel Ladder AS 1892 - 4.8m","kg":29.8},{"id":"c135","desc":"Steel Ladder AS 1892 - 5.4m","kg":33.6},{"id":"c136","desc":"Ladder Hook Clamp/Clip, 23mm Nut (AU)","kg":0.96},{"id":"c137","desc":"Steel Ladder AS 1892 - 2.4m","kg":14.5},{"id":"c138","desc":"Steel Ladder AS 1892 - 6.0m","kg":36.6},{"id":"c139","desc":"Fiber Glass Ladder 2.4m/ 8\u2019","kg":9.0},{"id":"c140","desc":"Fiber Glass Ladder 3.0m/10\u2019","kg":10.0},{"id":"c141","desc":"Fiber Glass Ladder 3.6m/12\u2019","kg":11.0},{"id":"c142","desc":"Fiber Glass Ladder 4.2m/14\u2019","kg":12.5},{"id":"c143","desc":"Fiber Glass Ladder 4.8m/16\u2019","kg":14.5},{"id":"c144","desc":"Fiber Glass Ladder 5.4m/18\u2019","kg":16.5},{"id":"c145","desc":"Fiber Glass Ladder 6.0M/20\u2019","kg":18.0},{"id":"c146","desc":"Ladder Beam 3.35m/11\u2019, 4.0mm","kg":42.05},{"id":"c147","desc":"Ladder Beam 4.88m/16\u2019, 4.0mm","kg":60.9},{"id":"c148","desc":"Ladder Beam 6.39m/21\u2019, 4.0mm","kg":79.63}]},{"category":"Tubes","items":[{"id":"c149","desc":"Steel Tube w/OUT Fittings 300mm/ 1\u2019 (3.2mm)","kg":1.03},{"id":"c150","desc":"Steel Tube w/OUT Fittings 600mm/ 2\u2019 (3.2mm)","kg":2.03},{"id":"c151","desc":"Steel Tube w/OUT Fittings 900mm/ 3\u2019 (3.2mm)","kg":3.02},{"id":"c152","desc":"Steel Tube w/OUT Fittings 1200mm/ 4\u2019 (3.2mm)","kg":4.12},{"id":"c153","desc":"Steel Tube w/OUT Fittings 1500mm/ 5\u2019 (3.2mm)","kg":5.17},{"id":"c154","desc":"Steel Tube w/OUT Fittings 1800mm/ 6\u2019 (3.2mm)","kg":6.3},{"id":"c155","desc":"Steel Tube w/OUT Fittings 2100mm/ 7\u2019 (3.2mm)","kg":7.25},{"id":"c156","desc":"Steel Tube w/OUT Fittings 2400mm/ 8\u2019 (3.2mm)","kg":8.05},{"id":"c157","desc":"Steel Tube w/OUT Fittings 2700mm/ 9\u2019 (3.2mm)","kg":8.9},{"id":"c158","desc":"Steel Tube w/OUT Fittings 3000mm/10\u2019 (3.2mm)","kg":10.04},{"id":"c159","desc":"Steel Tube w/OUT Fittings 3300mm/11\u2019 (3.2mm)","kg":11.54},{"id":"c160","desc":"Steel Tube w/OUT Fittings 3600mm/12\u2019 (3.2mm)","kg":12.62},{"id":"c161","desc":"Steel Tube w/OUT Fittings 3900mm/13\u2019 (3.2mm)","kg":13.51},{"id":"c162","desc":"Steel Tube w/OUT Fittings 4200mm/14\u2019 (3.2mm)","kg":14.65},{"id":"c163","desc":"Steel Tube w/OUT Fittings 4500mm/15\u2019 (3.2mm)","kg":15.41},{"id":"c164","desc":"Steel Tube w/OUT Fittings 4800mm/16\u2019 (3.2mm)","kg":16.3},{"id":"c165","desc":"Steel Tube w/OUT Fittings 5100mm/17\u2019 (3.2mm)","kg":17.9},{"id":"c166","desc":"Steel Tube w/OUT Fittings 5400mm/18\u2019 (3.2mm)","kg":18.42},{"id":"c167","desc":"Steel Tube w/OUT Fittings 5700mm/19\u2019 (3.2mm)","kg":21.28},{"id":"c168","desc":"Steel Tube w/OUT Fittings 6000mm/20\u2019 (3.2mm)","kg":20.41},{"id":"c169","desc":"External Tube Joiner, 23mm Nut (AU)","kg":1.07},{"id":"c170","desc":"Internal Tube Joiner, 23mm Nut (AU)","kg":0.72}]},{"category":"Ties/Couplers","items":[{"id":"c171","desc":"Girder Spigot Adapter Clamp 2\", 23mm Nut (AU)","kg":3.45},{"id":"c172","desc":"Adj Clamp Brace 5\u2019, 23mm Nut (AU)","kg":7.19},{"id":"c173","desc":"Adj Clamp Brace 7\u2019, 23mm Nut (AU)","kg":9.64},{"id":"c174","desc":"Adj Clamp Brace 8\u2019, 23mm Nut (AU)","kg":10.38},{"id":"c175","desc":"Adj Clamp Brace 10\u2019, 23mm Nut (AU)","kg":11.61},{"id":"c176","desc":"BEAM Clamp Swivel 2\", 23mm Nut (AU)","kg":1.71},{"id":"c177","desc":"T-BOLT Right Angle Clamp 2x2, 23mm Nut (AU) (DOUBLE)","kg":1.25},{"id":"c178","desc":"T-BOLT Swivel Clamp 2x2, 23mm Nut (AU)","kg":1.24},{"id":"c179","desc":"Putlog Clamp, 23mm Nut (AU)","kg":0.66},{"id":"c180","desc":"BEAM Clamp Rigid 2\", 23mm Nut (AU)","kg":1.65},{"id":"c181","desc":"RA Adapter Clamp 2\"- Bolt, 23mm Nut (AU)","kg":1.56},{"id":"c182","desc":"Swivel Adapter Clamp 2\"-Bolt, 23mm Nut (AU)","kg":1.6},{"id":"c183","desc":"Spigot Adapter Clamp-Bolt, 23mm Nut (AU) (DONKEY)","kg":1.86}]},{"category":"Base Jacks/Plates","items":[{"id":"c184","desc":"Screwjack/Basejack 600mm","kg":3.87},{"id":"c185","desc":"Swiveljack 780mm","kg":6.02},{"id":"c186","desc":"Base Plate--System 2\"","kg":1.07},{"id":"c187","desc":"Jack Retainer - Lifting","kg":3.0},{"id":"c188","desc":"Base Plate--Edge Protection","kg":2.9},{"id":"c189","desc":"Console Bracket O-Type 1.065m/3\u20196\"","kg":12.55},{"id":"c190","desc":"Console Bracket O-Type 1.15m/3\u201910\"","kg":12.82},{"id":"c191","desc":"Universal Base Plate","kg":2.15}]},{"category":"Spigots/Pins","items":[{"id":"c192","desc":"U-Head 150mm x 231mm Pin & Clip","kg":3.67}]},{"category":"Guardrails","items":[{"id":"c193","desc":"Guard Rail Standard (CRAZY LEG) 1.63m","kg":8.32}]},{"category":"Other","items":[{"id":"c194","desc":"Starter/Base Collar","kg":2.43},{"id":"c195","desc":"Leg Lock (Suspended Scaffold)","kg":3.66},{"id":"c196","desc":"Davit arm","kg":10.21},{"id":"c197","desc":"Adapter for 0.3m/12\" Caster","kg":4.24},{"id":"c198","desc":"Lifting Guide","kg":4.77},{"id":"c199","desc":"Lifting Lug - AUS","kg":6.9},{"id":"c200","desc":"Staunchion 1.5m","kg":6.24},{"id":"c201","desc":"Caster 0.2m/ 8\" - HD Ring","kg":6.0},{"id":"c202","desc":"Caster 0.3m/12\"","kg":16.01},{"id":"c203","desc":"Telescopic Plan Brace - Short 23mm Nut (AU)","kg":10.85},{"id":"c204","desc":"Telescopic Plan Brace - Long, 23mm Nut (AU)","kg":13.75},{"id":"c205","desc":"SideBracket/Hop Up O-Type 0.576/1\u20199\"","kg":5.15},{"id":"c206","desc":"SideBracket/Hop-Up O-Type 0.60m/1\u201911\"","kg":7.1},{"id":"c207","desc":"SideBracket/Hop-Up O-Type 0.84m/2\u2019 8-5/8\"","kg":8.2},{"id":"c208","desc":"Sidebracket/Hop-Up O-Type 1.065m/3\u20196\"","kg":12.55},{"id":"c209","desc":"Sidebracket/Hop-Up O-Type 1.15m/3\u201910\"","kg":12.82},{"id":"c210","desc":"Mills Hook, 23mm Nut (AU)","kg":0.56},{"id":"c211","desc":"Corner Filler .576m/1\u20199\"","kg":15.08},{"id":"c212","desc":"Corner Filler 0.60m/1\u20191\"","kg":11.37},{"id":"c213","desc":"Adjustable Swing Gate, 23mm Nut (AU) 2\"","kg":8.2},{"id":"c214","desc":"Access Barrier 830mm x 600mm","kg":3.5},{"id":"c215","desc":"Universal Screw 860mm","kg":7.71},{"id":"c216","desc":"U-Head 150mm x 170mm","kg":2.81},{"id":"c217","desc":"U-Head 210mm x 200mm x 70mm","kg":9.0},{"id":"c218","desc":"Impalement Prevention Device (WOK)","kg":1.05},{"id":"c219","desc":"Magic Star","kg":0.97}]}];
+
+// Flat lookup: componentId -> {desc, kg, category}
+const SCF_LOOKUP = {};
+SCF_COMPONENTS.forEach(cat => cat.items.forEach(it => {
+  SCF_LOOKUP[it.id] = { desc: it.desc, kg: it.kg, category: cat.category };
+}));
+
+const SCF = {
+  loaded: false,
+  loading: false,
+  err: null,
+  pending: [],
+  active: [],
+  dismantled: [],
+  tab: 'active',
+  search: '',
+  openDetail: null,
+  editMode: false,
+  editQty: {}
+};
+
+function scfLoad() {
+  const u = workerUrl();
+  if (!u) { SCF.err = 'Sync URL not configured'; scfRender(); return; }
+  SCF.loading = true; SCF.err = null;
+  if (ACTIVE === 'scaffold') scfRender();
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify({action:'scaffold_list'}) })
+    .then(r => r.json())
+    .then(j => {
+      SCF.loading = false;
+      if (!j.ok) throw new Error(j.error || 'Load failed');
+      SCF.pending    = j.pending    || [];
+      SCF.active     = j.active     || [];
+      SCF.dismantled = j.dismantled || [];
+      SCF.loaded = true;
+      if (ACTIVE === 'scaffold') scfRender();
+      if (ACTIVE === 'hours' && typeof hrRender === 'function') hrRender();
+    })
+    .catch(e => {
+      SCF.loading = false;
+      SCF.err = e.message;
+      if (ACTIVE === 'scaffold') scfRender();
+    });
+}
+
+function render_scaffold(stage, tabCfg) {
+  if (!SCF.loaded && !SCF.loading && !SCF.err) scfLoad();
+  scfRender();
+}
+
+function scfRender() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  const tabs = [
+    { id:'pending',    label:'Pending Approval', col:'#e65100' },
+    { id:'active',     label:'In Service',       col:'#2e7d32' },
+    { id:'dismantled', label:'Dismantled',       col:'#607d8b' }
+  ];
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h">
+        <span class="accent" style="--accent:var(--t-scaffold)"></span>
+        <h2>Scaffold Register</h2>
+        <span class="meta-pill" style="margin-left:10px">${SCF.pending.length} pending · ${SCF.active.length} in service · ${SCF.dismantled.length} dismantled</span>
+        <div style="flex:1"></div>
+        <input type="text" placeholder="Search tag / location / scaffolder..." value="${escHtml(SCF.search)}" oninput="SCF.search=this.value;scfRenderBody()" style="padding:6px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;width:220px">
+        <button class="btn-ghost" style="margin-left:6px" onclick="scfLoad()">↻ Refresh</button>
+        <button class="btn-ghost" style="margin-left:6px" onclick="scfExportCsv()">⬇ CSV</button>
+      </div>
+      <div style="display:flex;border-bottom:1px solid var(--line);background:var(--surface-2)">
+        ${tabs.map(t => {
+          const n = SCF[t.id].length;
+          const on = SCF.tab === t.id;
+          return `<button onclick="SCF.tab='${t.id}';scfRender()" style="padding:9px 16px;border:0;border-right:1px solid var(--line);background:${on?'#fff':'transparent'};color:${on?t.col:'var(--mute)'};font-weight:700;font-size:12px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;border-bottom:${on?'3px solid '+t.col:'3px solid transparent'};transition:all .15s">${t.label} <span style="background:${t.col};color:#fff;padding:1px 7px;border-radius:10px;font-size:10px;margin-left:4px">${n}</span></button>`;
+        }).join('')}
+      </div>
+      <div id="scf-body" style="padding:14px"></div>
+    </div>
+  `;
+  scfRenderBody();
+  if (SCF.openDetail) scfRenderDetail();
+}
+
+function scfRenderBody() {
+  const wrap = document.getElementById('scf-body');
+  if (!wrap) return;
+  if (SCF.err) {
+    wrap.innerHTML = `<div style="padding:30px;text-align:center"><div style="font-size:36px">⚠</div><p style="font-weight:700;color:var(--err);margin:10px 0 4px">${escHtml(SCF.err)}</p><button class="btn" onclick="scfLoad()">Try again</button></div>`;
+    return;
+  }
+  if (SCF.loading && !SCF.loaded) {
+    wrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--mute)"><div style="font-size:30px">⟳</div><p>Loading scaffold register...</p></div>';
+    return;
+  }
+
+  let list = SCF[SCF.tab] || [];
+  const s = (SCF.search || '').toLowerCase().trim();
+  if (s) {
+    list = list.filter(x =>
+      (x.tag||'').toLowerCase().indexOf(s) >= 0 ||
+      (x.location||'').toLowerCase().indexOf(s) >= 0 ||
+      (x.erectedBy||'').toLowerCase().indexOf(s) >= 0
+    );
+  }
+
+  if (!list.length) {
+    const emptyMsg = SCF.tab === 'pending' ? 'No scaffolds awaiting approval' : SCF.tab === 'active' ? 'No scaffolds in service' : 'No dismantled scaffolds';
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--mute)"><div style="font-size:34px">🏗</div><p style="margin:10px 0 0;font-weight:600">${emptyMsg}</p>${s?'<p style="font-size:11px;margin-top:6px">...matching "'+escHtml(s)+'"</p>':''}</div>`;
+    return;
+  }
+
+  wrap.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px">' + list.map(scfCardHtml).join('') + '</div>';
+}
+
+function scfCardHtml(s) {
+  const tabCfg = { pending:{col:'#e65100',bg:'#fff3e0'}, active:{col:'#2e7d32',bg:'#e8f5e9'}, dismantled:{col:'#607d8b',bg:'#eceff1'} }[SCF.tab];
+  // Find linked HR job if any (for Active scaffolds)
+  const linkedJob = SCF.tab === 'active' && typeof HR !== 'undefined' && HR.rows
+    ? HR.rows.find(r => r.scaffoldId === s.id) : null;
+  const linkBadge = linkedJob
+    ? `<span style="background:var(--t-hours);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px" title="Linked to HR job ${escHtml(linkedJob.order||'')}">🔗 ${escHtml(linkedJob.order||linkedJob.desc||'HR')}</span>`
+    : '';
+  return `<div onclick="scfOpenDetail('${s.id}')" style="border:1px solid var(--line);border-radius:var(--r-md);background:#fff;cursor:pointer;overflow:hidden;transition:box-shadow .15s;box-shadow:var(--shadow-sm)" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.12)'" onmouseout="this.style.boxShadow='var(--shadow-sm)'">
+    <div style="background:#1a1a1a;color:#fff;padding:9px 12px;display:flex;align-items:center;gap:8px">
+      <span style="font-weight:800;font-size:14px;flex:1">${escHtml(s.tag||'(no tag)')}</span>
+      <span style="background:${tabCfg.col};font-size:10px;padding:2px 8px;border-radius:3px;font-weight:800;letter-spacing:.5px">${SCF.tab.toUpperCase()}</span>
+    </div>
+    <div style="padding:10px 12px">
+      <div style="font-weight:700;font-size:13px;color:#1a1a1a;margin-bottom:4px">${escHtml(s.location||'(no location)')}</div>
+      <div style="font-size:11px;color:var(--mute);margin-bottom:8px">Erected by <b style="color:#333">${escHtml(s.erectedBy||'—')}</b> on ${fdDisplay(s.dateErected)}</div>
+      ${s.dismantledAt ? '<div style="font-size:11px;color:var(--mute);margin-bottom:8px">Dismantled '+fdDisplay(s.dismantledAt.slice(0,10))+'</div>' : ''}
+      ${linkBadge ? '<div style="margin-bottom:8px">'+linkBadge+'</div>' : ''}
+      <div style="display:flex;gap:12px;font-size:11px;padding-top:8px;border-top:1px solid var(--line);color:var(--mute)">
+        <span><b style="color:#1a1a1a">${s.totalItems||0}</b> items</span>
+        <span><b style="color:#1a1a1a">${((s.totalWeightKg||0)).toFixed(1)}</b> kg</span>
+        <span><b style="color:#1a1a1a">${((s.totalWeightKg||0)/1000).toFixed(2)}</b> t</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function scfOpenDetail(id) {
+  const scaffold = SCF[SCF.tab].find(x => x.id === id);
+  if (!scaffold) return;
+  SCF.openDetail = { tab: SCF.tab, scaffold };
+  SCF.editMode = false;
+  SCF.editQty = Object.assign({}, scaffold.quantities || {});
+  scfRenderDetail();
+}
+
+function scfCloseDetail() {
+  SCF.openDetail = null;
+  SCF.editMode = false;
+  SCF.editQty = {};
+  const m = document.getElementById('scf-detail-modal'); if (m) m.remove();
+}
+
+function scfRenderDetail() {
+  if (!SCF.openDetail) return;
+  const { tab, scaffold } = SCF.openDetail;
+  // Find linked HR job if any
+  const linkedJob = tab === 'active' && typeof HR !== 'undefined' && HR.rows
+    ? HR.rows.find(r => r.scaffoldId === scaffold.id) : null;
+  const qtys = SCF.editMode ? SCF.editQty : (scaffold.quantities || {});
+  const byCat = {};
+  Object.keys(qtys).forEach(cid => {
+    const q = Number(qtys[cid]) || 0;
+    if (!SCF.editMode && q <= 0) return;
+    const comp = SCF_LOOKUP[cid]; if (!comp) return;
+    if (!byCat[comp.category]) byCat[comp.category] = [];
+    byCat[comp.category].push({ id: cid, desc: comp.desc, kg: comp.kg, qty: q });
+  });
+
+  let totalItems = 0, totalKg = 0;
+  Object.values(qtys).forEach(q => { const n = Number(q)||0; if (n > 0) totalItems += n; });
+  Object.keys(qtys).forEach(cid => { const comp = SCF_LOOKUP[cid]; if (comp) { const n = Number(qtys[cid])||0; if (n > 0) totalKg += n * comp.kg; } });
+
+  const actions = scfDetailActions(tab);
+
+  let modal = document.getElementById('scf-detail-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'scf-detail-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+    modal.onclick = (e) => { if (e.target === modal) scfCloseDetail(); };
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:var(--r-md);max-width:860px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="background:#1a1a1a;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <h3 style="margin:0;font-size:16px;font-weight:800">${escHtml(scaffold.tag||'(no tag)')}</h3>
+        <span style="background:${tab==='pending'?'#e65100':tab==='active'?'#2e7d32':'#607d8b'};font-size:10px;padding:2px 8px;border-radius:3px;font-weight:800;letter-spacing:.5px">${tab.toUpperCase()}</span>
+        ${SCF.editMode?'<span style="background:#1565c0;color:#fff;font-size:10px;padding:2px 8px;border-radius:3px;font-weight:800;letter-spacing:.5px">EDITING</span>':''}
+        <div style="flex:1"></div>
+        <button onclick="scfCloseDetail()" style="background:transparent;border:0;color:#fff;font-size:22px;cursor:pointer;padding:0 6px">×</button>
+      </div>
+      <div style="overflow-y:auto;flex:1">
+        <div style="padding:14px;background:#fafafa;border-bottom:1px solid var(--line)">
+          <table style="width:100%;font-size:12px"><tbody>
+            <tr><td style="padding:3px 0;color:var(--mute);width:120px">Location</td><td>${escHtml(scaffold.location||'—')}</td></tr>
+            <tr><td style="padding:3px 0;color:var(--mute)">Erected by</td><td><b>${escHtml(scaffold.erectedBy||'—')}</b></td></tr>
+            <tr><td style="padding:3px 0;color:var(--mute)">Date erected</td><td>${fdDisplay(scaffold.dateErected)}</td></tr>
+            ${scaffold.notes?'<tr><td style="padding:3px 0;color:var(--mute)">Notes</td><td>'+escHtml(scaffold.notes)+'</td></tr>':''}
+            ${scaffold.submittedAt?'<tr><td style="padding:3px 0;color:var(--mute)">Submitted</td><td style="font-size:11px;color:var(--mute)">'+scfFmtDateTime(scaffold.submittedAt)+'</td></tr>':''}
+            ${scaffold.approvedAt?'<tr><td style="padding:3px 0;color:var(--mute)">Approved</td><td style="font-size:11px;color:#2e7d32">'+scfFmtDateTime(scaffold.approvedAt)+'</td></tr>':''}
+            ${scaffold.dismantledAt?'<tr><td style="padding:3px 0;color:var(--mute)">Dismantled</td><td style="font-size:11px;color:#c62828">'+scfFmtDateTime(scaffold.dismantledAt)+'</td></tr>':''}
+          </tbody></table>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:22px;font-size:13px;flex-wrap:wrap">
+            <div><b style="color:var(--t-scaffold);font-size:20px">${totalItems}</b> <span style="color:var(--mute);font-size:11px">items</span></div>
+            <div><b style="color:var(--t-scaffold);font-size:20px">${totalKg.toFixed(1)}</b> <span style="color:var(--mute);font-size:11px">kg</span></div>
+            <div><b style="color:var(--t-scaffold);font-size:20px">${(totalKg/1000).toFixed(2)}</b> <span style="color:var(--mute);font-size:11px">tonnes</span></div>
+          </div>
+        </div>
+
+        ${linkedJob ? `<div style="padding:12px 14px;background:#e3f2fd;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+          <span style="background:var(--t-hours);color:#fff;font-size:11px;font-weight:800;padding:3px 9px;border-radius:3px;letter-spacing:.5px">🔗 LINKED HR JOB</span>
+          <span style="font-size:12.5px;color:#1a1a1a"><b>${escHtml(linkedJob.order||'')}</b> — ${escHtml(linkedJob.desc||linkedJob.short||'')}</span>
+          <div style="flex:1"></div>
+          <span style="font-size:11px;color:var(--mute)">Tick <b>Dis</b> on that HR row at week's end to auto-dismantle</span>
+        </div>` : ''}
+
+        <div style="padding:14px">
+          ${scfComponentsHtml(byCat)}
+        </div>
+      </div>
+      <div style="padding:12px 16px;background:var(--surface-2);border-top:1px solid var(--line);display:flex;gap:8px;align-items:center">
+        ${actions}
+      </div>
+    </div>
+  `;
+}
+
+function scfComponentsHtml(byCat) {
+  if (!Object.keys(byCat).length && !SCF.editMode) {
+    return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No components recorded for this scaffold.</div>';
+  }
+  if (SCF.editMode) {
+    let html = '<p style="font-size:11px;color:var(--mute);margin:0 0 10px">Set quantity for each component. 0 = remove.</p>';
+    SCF_COMPONENTS.forEach(cat => {
+      html += '<div style="background:#1a1a1a;color:#fff;font-size:11px;font-weight:700;padding:6px 12px;letter-spacing:.4px;text-transform:uppercase;margin-top:12px">'+escHtml(cat.category)+'</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
+      cat.items.forEach(it => {
+        const q = SCF.editQty[it.id] || 0;
+        html += `<tr style="border-bottom:1px solid var(--line)">
+          <td style="padding:5px 10px">${escHtml(it.desc)}<br><span style="font-size:10px;color:var(--mute)">${it.kg.toFixed(2)} kg each</span></td>
+          <td style="padding:5px 10px;text-align:right;width:110px"><input type="number" min="0" value="${q}" onchange="SCF.editQty['${it.id}']=parseInt(this.value||0);scfRenderDetail()" style="width:80px;padding:4px 7px;border:1px solid var(--line);border-radius:3px;font-size:12px;text-align:right"></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    });
+    return html;
+  }
+  let html = '';
+  SCF_COMPONENTS.forEach(cat => {
+    if (!byCat[cat.category]) return;
+    html += '<div style="background:#1a1a1a;color:#fff;font-size:11px;font-weight:700;padding:6px 12px;letter-spacing:.4px;text-transform:uppercase;margin-top:10px">'+escHtml(cat.category)+'</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
+    byCat[cat.category].forEach(c => {
+      html += '<tr style="border-bottom:1px solid var(--line)">';
+      html += '<td style="padding:6px 10px">'+escHtml(c.desc)+'<br><span style="font-size:10px;color:var(--mute)">'+c.kg.toFixed(2)+' kg each</span></td>';
+      html += '<td style="padding:6px 10px;text-align:right;white-space:nowrap;width:110px"><b style="color:var(--t-scaffold);font-size:13px">× '+c.qty+'</b><br><span style="font-size:10px;color:var(--mute)">'+(c.qty * c.kg).toFixed(2)+' kg</span></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  });
+  return html;
+}
+
+function scfDetailActions(tab) {
+  if (SCF.editMode) {
+    return `<button class="btn-ghost" onclick="SCF.editMode=false;SCF.editQty=Object.assign({},SCF.openDetail.scaffold.quantities||{});scfRenderDetail()">Cancel</button>
+      <div style="flex:1"></div>
+      <button class="btn" style="background:#2e7d32" onclick="scfSaveEdit()">💾 Save changes</button>`;
+  }
+  let html = `<button class="btn-ghost" onclick="scfPrintDetail()">🖨 Print</button><div style="flex:1"></div>`;
+  if (tab === 'pending') {
+    html += `<button class="btn-ghost" style="color:var(--err)" onclick="scfAction('reject')">Reject</button>
+      <button class="btn" style="background:#2e7d32" onclick="scfAction('approve')">✓ Approve</button>`;
+  } else if (tab === 'active') {
+    html += `<button class="btn-ghost" style="color:#1565c0" onclick="SCF.editMode=true;scfRenderDetail()">✎ Edit</button>
+      <button class="btn" style="background:#c62828" onclick="scfOpenDismantle()">Mark dismantled</button>`;
+  } else if (tab === 'dismantled') {
+    html += `<button class="btn-ghost" style="color:#1565c0" onclick="SCF.editMode=true;scfRenderDetail()">✎ Edit</button>
+      <button class="btn" style="background:#2e7d32" onclick="scfAction('restore')">↩ Restore to Active</button>
+      <button class="btn-ghost" style="color:var(--err)" onclick="scfConfirmDelete()">🗑 Delete</button>`;
+  }
+  return html;
+}
+
+function scfAction(action) {
+  if (!SCF.openDetail) return;
+  const scaff = SCF.openDetail.scaffold;
+  const msgs = {
+    approve: 'Approve '+scaff.tag+' and move to In Service register?',
+    reject:  'Permanently delete the pending submission for '+scaff.tag+'?',
+    restore: 'Restore '+scaff.tag+' to In Service?'
+  };
+  if (!confirm(msgs[action])) return;
+  scfSendAction(action, {});
+}
+
+function scfOpenDismantle() {
+  const scaff = SCF.openDetail && SCF.openDetail.scaffold;
+  if (!scaff) return;
+  const date = prompt('Dismantle date (YYYY-MM-DD):', new Date().toISOString().slice(0,10));
+  if (!date) return;
+  const nd = new Date(date+'T00:00:00');
+  if (isNaN(nd)) { alert('Invalid date.'); return; }
+  const team = prompt('Dismantled by (team / scaffolder):', '');
+  if (team === null) return;
+  scfSendAction('dismantle', { dismantledAt: nd.toISOString(), dismantledBy: team });
+}
+
+function scfConfirmDelete() {
+  if (!SCF.openDetail) return;
+  const scaff = SCF.openDetail.scaffold;
+  if (!confirm('Permanently delete '+scaff.tag+'? This cannot be undone.')) return;
+  scfSendAction('delete', {});
+}
+
+function scfSaveEdit() {
+  if (!SCF.openDetail) return;
+  const scaff = SCF.openDetail.scaffold;
+  const u = workerUrl(); if (!u) { alert('Not connected.'); return; }
+  const cleaned = {};
+  Object.keys(SCF.editQty).forEach(k => { const q = Number(SCF.editQty[k])||0; if (q > 0) cleaned[k] = q; });
+  const payload = { action: 'scaffold_action', subAction: 'edit', id: scaff.id, fromTab: SCF.openDetail.tab, quantities: cleaned };
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
+    .then(r => r.json())
+    .then(j => {
+      if (!j.ok) throw new Error(j.error || 'Save failed');
+      SCF.editMode = false;
+      scfCloseDetail();
+      scfLoad();
+    })
+    .catch(e => alert('Save failed: ' + e.message));
+}
+
+function scfSendAction(action, extra) {
+  if (!SCF.openDetail) return;
+  const scaff = SCF.openDetail.scaffold;
+  const u = workerUrl(); if (!u) { alert('Not connected.'); return; }
+  const payload = Object.assign({ action: 'scaffold_action', subAction: action, id: scaff.id, fromTab: SCF.openDetail.tab }, extra||{});
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
+    .then(r => r.json())
+    .then(j => {
+      if (!j.ok) throw new Error(j.error || 'Failed');
+      scfCloseDetail();
+      scfLoad();
+    })
+    .catch(e => alert('Action failed: ' + e.message));
+}
+
+function scfFmtDateTime(s) {
+  if (!s) return '—';
+  const d = new Date(s); if (isNaN(d)) return String(s);
+  return d.toLocaleString('en-AU', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function scfPrintDetail() {
+  if (!SCF.openDetail) return;
+  const { scaffold } = SCF.openDetail;
+  const qtys = scaffold.quantities || {};
+  const byCat = {};
+  let totalItems = 0, totalKg = 0;
+  Object.keys(qtys).forEach(cid => {
+    const q = Number(qtys[cid])||0;
+    if (q <= 0) return;
+    const comp = SCF_LOOKUP[cid]; if (!comp) return;
+    if (!byCat[comp.category]) byCat[comp.category] = [];
+    byCat[comp.category].push({ desc: comp.desc, kg: comp.kg, qty: q });
+    totalItems += q; totalKg += q * comp.kg;
+  });
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked.'); return; }
+  let compHtml = '';
+  SCF_COMPONENTS.forEach(cat => {
+    if (!byCat[cat.category]) return;
+    compHtml += '<h3 style="background:#1a1a1a;color:#fff;padding:5px 10px;font-size:12px;margin:14px 0 0">'+cat.category+'</h3>';
+    compHtml += '<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
+    byCat[cat.category].forEach(c => {
+      compHtml += '<tr style="border-bottom:1px solid #e5e5e5"><td style="padding:4px 10px">'+c.desc+'</td><td style="padding:4px 10px;text-align:right"><b>× '+c.qty+'</b></td><td style="padding:4px 10px;text-align:right">'+(c.qty*c.kg).toFixed(2)+' kg</td></tr>';
+    });
+    compHtml += '</tbody></table>';
+  });
+  const docHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Scaffold '+(scaffold.tag||'')+'</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:20px auto;color:#1a1a1a}table{width:100%}@media print{body{margin:0}}</style></head><body>' +
+    '<h1 style="color:#c8102e;margin:0 0 4px">KAEFER Scaffold Register</h1>' +
+    '<h2 style="margin:0 0 16px;color:#1a1a1a">'+(scaffold.tag||'')+' — '+(scaffold.location||'')+'</h2>' +
+    '<table style="font-size:12px;margin-bottom:14px"><tbody>' +
+    '<tr><td style="color:#777;padding:2px 10px 2px 0">Erected by</td><td><b>'+(scaffold.erectedBy||'—')+'</b></td></tr>' +
+    '<tr><td style="color:#777;padding:2px 10px 2px 0">Date erected</td><td>'+fdDisplay(scaffold.dateErected)+'</td></tr>' +
+    '<tr><td style="color:#777;padding:2px 10px 2px 0">Total items</td><td><b>'+totalItems+'</b></td></tr>' +
+    '<tr><td style="color:#777;padding:2px 10px 2px 0">Total weight</td><td><b>'+totalKg.toFixed(2)+' kg ('+(totalKg/1000).toFixed(3)+' t)</b></td></tr>' +
+    '</tbody></table>' + compHtml + '</body></html>';
+  w.document.write(docHtml);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+}
+
+function scfExportCsv() {
+  const list = SCF[SCF.tab] || [];
+  if (!list.length) { alert('Nothing to export.'); return; }
+  const header = ['Tag','Location','Erected By','Date Erected','Status','Items','Weight (kg)','Weight (t)','Notes'];
+  const rows = list.map(s => [
+    s.tag||'', s.location||'', s.erectedBy||'', s.dateErected||'',
+    SCF.tab, s.totalItems||0, (s.totalWeightKg||0).toFixed(2),
+    ((s.totalWeightKg||0)/1000).toFixed(3), (s.notes||'').replace(/[\r\n]+/g,' ')
+  ]);
+  const csv = [header, ...rows].map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'scaffold-register-'+SCF.tab+'-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+}
+
+
 /* Background sync every 60s while attendance is visible */
 setInterval(() => {
   if (ACTIVE !== 'attendance') return;
@@ -3289,6 +3769,7 @@ function renderStage() {
   if (t.id === 'rr')         { render_rr(stage, t); return; }
   if (t.id === 'inspections'){ render_inspections(stage, t); return; }
   if (t.id === 'hours')      { render_hours(stage, t); return; }
+  if (t.id === 'scaffold')   { render_scaffold(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

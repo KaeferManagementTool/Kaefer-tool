@@ -1777,7 +1777,8 @@ function render_offsite(stage, tabCfg) {
         <div class="field"><label>To</label><input type="date" id="off-to"></div>
         <div class="field"><label>Search</label><input type="text" id="off-filter" placeholder="Name / reason / WO" oninput="offRender()"></div>
         <div class="spacer"></div>
-        <button class="btn-ghost" onclick="offExport()">📥 CSV</button>
+        <button class="btn-ghost" onclick="offOpenBulkPaste()" title="Backfill many entries at once from Excel">📚 Bulk paste</button>
+        <button class="btn-ghost" style="margin-left:4px" onclick="offExport()">📥 CSV</button>
       </div>
       <div class="att-status" id="off-status">Stored locally in your browser (shared sync coming in a later update)</div>
       <div style="overflow-x:auto">
@@ -1881,6 +1882,193 @@ function offExport() {
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = 'offsite_register.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ---- Offsite bulk paste ---- */
+let OFF_BULK_HTML = '';
+let OFF_BULK_IS_TEXT = false;
+
+function offOpenBulkPaste() {
+  let ml = document.getElementById('off-bulk-paste-ml');
+  if (!ml) {
+    ml = document.createElement('div');
+    ml.id = 'off-bulk-paste-ml';
+    ml.className = 'ml';
+    ml.innerHTML = `
+      <div class="box" style="max-width:1000px">
+        <div class="mh" style="--accent:var(--t-offsite)">
+          <h3>📚 Bulk paste — Offsite entries</h3>
+          <button class="x" onclick="offCloseBulkPaste()">×</button>
+        </div>
+        <div class="mb">
+          <div style="padding:11px 13px;background:#e0f2f1;border:1px solid #80cbc4;border-radius:var(--r-sm);font-size:12px;color:#004d40;margin-bottom:10px;line-height:1.5">
+            <b style="color:#00695c">Backfill offsite entries from Excel in one go.</b><br>
+            Expected columns in this order: <b>Date | Person | Out | In | Reason | Work Order | RTAY Rep</b>.<br>
+            A Day column between Date and Person is fine (skipped automatically). Date formats: <b>DD/MM/YYYY</b>, <b>DD-Mon-YY</b>, or <b>YYYY-MM-DD</b>. Header row optional. Rows with the same Date + Name + Reason as something already in the register are skipped.
+          </div>
+          <div id="off-bulk-area" contenteditable="true" style="min-height:220px;max-height:45vh;overflow:auto;border:2px dashed var(--line);border-radius:var(--r-md);padding:10px;background:var(--surface-2);font-size:11px"></div>
+          <div id="off-bulk-status" style="margin-top:8px;font-size:12px;color:var(--mute);font-weight:600"></div>
+        </div>
+        <div class="mf">
+          <button class="btn-ghost" onclick="offCloseBulkPaste()">Cancel</button>
+          <button class="btn-prim" style="--accent:var(--t-offsite)" onclick="offBulkParse()">▶ Parse all entries</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ml);
+  }
+  OFF_BULK_HTML = '';
+  OFF_BULK_IS_TEXT = false;
+  const area = document.getElementById('off-bulk-area');
+  area.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--mute);font-size:13px"><div style="font-size:38px;margin-bottom:12px">📥</div><b style="color:#333">Click inside this box and press Ctrl+V (Cmd+V) to paste.</b><br><br><span style="font-size:11.5px">Large pastes are captured instantly without rendering the HTML.</span></div>';
+  const statusEl = document.getElementById('off-bulk-status');
+  statusEl.textContent = '';
+  if (!area._offPasteHooked) {
+    area._offPasteHooked = true;
+    area.addEventListener('paste', (ev) => {
+      ev.preventDefault();
+      const cb = ev.clipboardData || window.clipboardData;
+      if (!cb) { alert('Clipboard access blocked by your browser.'); return; }
+      const html = cb.getData('text/html') || '';
+      const text = cb.getData('text/plain') || '';
+      if (html) { OFF_BULK_HTML = html; OFF_BULK_IS_TEXT = false; }
+      else      { OFF_BULK_HTML = text; OFF_BULK_IS_TEXT = true; }
+      if (!OFF_BULK_HTML) { alert('Nothing on the clipboard.'); return; }
+      const trCount = OFF_BULK_IS_TEXT ? text.split('\n').filter(l=>l.trim()).length : (OFF_BULK_HTML.match(/<tr[\s>]/gi) || []).length;
+      const sizeKb = (OFF_BULK_HTML.length / 1024).toFixed(1);
+      area.innerHTML = `<div style="padding:28px 20px;text-align:center">
+        <div style="font-size:48px;color:#00695c;line-height:1">✓</div>
+        <div style="font-size:14px;font-weight:800;margin-top:8px;color:#1a1a1a">Paste captured</div>
+        <div style="font-size:12px;color:var(--mute);margin-top:4px">${sizeKb} KB · <b style="color:#333">${trCount}</b> rows detected</div>
+        <div style="margin-top:14px"><button class="btn-ghost" onclick="offOpenBulkPaste()">↺ Clear &amp; re-paste</button></div>
+      </div>`;
+      statusEl.innerHTML = '<span style="color:#00695c">✓ Ready — hit <b>Parse all entries</b></span>';
+    });
+    area.addEventListener('drop', (ev) => { ev.preventDefault(); alert('Drag & drop isn\'t supported — copy from Excel and Ctrl+V.'); });
+    area.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey) return;
+      if (['Tab','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(ev.key)) return;
+      ev.preventDefault();
+    });
+  }
+  ml.classList.add('on');
+  setTimeout(() => area.focus(), 60);
+}
+
+function offCloseBulkPaste() {
+  const ml = document.getElementById('off-bulk-paste-ml');
+  if (ml) ml.classList.remove('on');
+  OFF_BULK_HTML = '';
+  OFF_BULK_IS_TEXT = false;
+}
+
+function offParseDate(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  // DD/MM/YYYY or DD-MM-YYYY (or 2-digit year)
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    const yr = m[3].length === 2 ? '20'+m[3] : m[3];
+    return yr + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
+  }
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  // DD-Mon-YY / DD Mon YY / DD/Mon/YYYY etc.
+  m = s.match(/^(\d{1,2})[\s\-\/]+([A-Za-z]{3,})[\s\-\/]+(\d{2,4})$/);
+  if (m) {
+    const months = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+    const mo = months[m[2].slice(0,3).toLowerCase()];
+    if (mo) {
+      const yr = m[3].length === 2 ? '20'+m[3] : m[3];
+      return yr + '-' + String(mo).padStart(2,'0') + '-' + m[1].padStart(2,'0');
+    }
+  }
+  return '';
+}
+
+function offBulkParse() {
+  const status = document.getElementById('off-bulk-status');
+  const payload = OFF_BULK_HTML;
+  if (!payload || !payload.trim()) { alert('Paste something first — click in the box and press Ctrl+V.'); return; }
+  status.innerHTML = '<span style="color:var(--mute)">⟳ Parsing...</span>';
+  setTimeout(() => offBulkParseWorker(payload, OFF_BULK_IS_TEXT), 50);
+}
+
+function offBulkParseWorker(payload, isText) {
+  const status = document.getElementById('off-bulk-status');
+  const t0 = Date.now();
+  let rows = [];
+  if (!isText && /<tr[\s>]/i.test(payload)) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(payload, 'text/html');
+    const trs = Array.from(doc.querySelectorAll('tr'));
+    rows = trs.map(tr => Array.from(tr.querySelectorAll('td, th')).map(c => c.textContent.trim()));
+  } else {
+    rows = payload.split(/\r?\n/).map(line => line.split('\t').map(c => c.trim())).filter(r => r.length && r.some(c => c));
+  }
+  if (!rows.length) { status.innerHTML = '<span style="color:var(--err)">⚠ No rows detected in paste.</span>'; return; }
+
+  const DAY_NAMES = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday','mon','tue','wed','thu','fri','sat','sun'];
+  const peopleByName = {};
+  if (typeof ATT2 !== 'undefined' && ATT2.persons) {
+    ATT2.persons.forEach(p => { peopleByName[(p.name||'').toLowerCase().trim()] = p.id; });
+  }
+  const existingKeys = new Set(OFF.items.map(o => (o.date||'')+'|'+((o.name||'').toLowerCase().trim())+'|'+((o.reason||'').toLowerCase().trim())));
+
+  const entries = [];
+  const skipped = [];
+  rows.forEach((cells, i) => {
+    if (!cells.length) return;
+    // Date detection in first ~3 cells
+    let dateIdx = -1, date = '';
+    for (let j = 0; j < Math.min(3, cells.length); j++) {
+      const d = offParseDate(cells[j]);
+      if (d) { date = d; dateIdx = j; break; }
+    }
+    if (!date) {
+      // Header row (strings like "Date", "Name") is expected to fail — skip quietly on row 1
+      if (i === 0) return;
+      skipped.push('row '+(i+1)+': no date');
+      return;
+    }
+    let pos = dateIdx + 1;
+    if (cells[pos] && DAY_NAMES.includes(cells[pos].toLowerCase())) pos++;
+    const name   = (cells[pos++] || '').trim();
+    const outT   = (cells[pos++] || '').trim();
+    const inT    = (cells[pos++] || '').trim();
+    const reason = (cells[pos++] || '').trim();
+    const wo     = (cells[pos++] || '').trim();
+    const rep    = (cells[pos++] || '').trim();
+    if (!name)   { skipped.push('row '+(i+1)+': no name'); return; }
+    if (!reason) { skipped.push('row '+(i+1)+': no reason'); return; }
+    const key = date+'|'+name.toLowerCase()+'|'+reason.toLowerCase();
+    if (existingKeys.has(key)) { skipped.push('row '+(i+1)+': duplicate'); return; }
+    existingKeys.add(key);
+    entries.push({
+      id: Date.now() + i,
+      person_id: peopleByName[name.toLowerCase()] || '',
+      name, date,
+      out:  outT || 'Multiple',
+      in:   inT || 'Multiple',
+      reason, wo, rep
+    });
+  });
+
+  const parseMs = Date.now() - t0;
+  if (!entries.length) {
+    status.innerHTML = '<span style="color:var(--err)">⚠ No valid entries parsed from '+rows.length+' rows. '+(skipped.length?'First issue: '+skipped[0]:'')+'</span>';
+    return;
+  }
+  status.innerHTML = '<span style="color:#00695c">✓ Parsed in '+parseMs+'ms — '+entries.length+' entries ready'+(skipped.length?' ('+skipped.length+' skipped)':'')+'</span>';
+  const msg = 'Found ' + entries.length + ' valid entries to add.\n' +
+    (skipped.length ? skipped.length + ' row(s) skipped (header / duplicates / missing data).\n' : '') +
+    '\nAdd them to the Offsite Register?';
+  if (!confirm(msg)) { status.textContent = ''; return; }
+  OFF.items = entries.concat(OFF.items);
+  offSave();
+  offCloseBulkPaste();
+  alert('✓ Added '+entries.length+' entries'+(skipped.length?' ('+skipped.length+' skipped)':'')+'.');
+  if (ACTIVE === 'offsite') offRender();
 }
 
 /* ============================================================
@@ -2799,14 +2987,54 @@ function hrOpenPaste() {
 }
 function hrClosePaste() { document.getElementById('hr-paste-ml').classList.remove('on'); }
 
+let HR_BULK_HTML = '';  // captured paste, kept out of the DOM to avoid rendering megabytes
+
 function hrOpenBulkPaste() {
   const ml = document.getElementById('hr-bulk-paste-ml');
-  document.getElementById('hr-bulk-area').innerHTML = '';
-  document.getElementById('hr-bulk-status').textContent = '';
+  HR_BULK_HTML = '';
+  const area = document.getElementById('hr-bulk-area');
+  area.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--mute);font-size:13px"><div style="font-size:38px;margin-bottom:12px">📥</div><b style="color:#333">Click inside this box and press Ctrl+V (Cmd+V) to paste.</b><br><br><span style="font-size:11.5px">Big pastes (a year of data) are captured instantly — the box won\'t show the raw HTML to keep the browser snappy.</span></div>';
+  const statusEl = document.getElementById('hr-bulk-status');
+  statusEl.textContent = '';
+  // Attach the paste interceptor exactly once (survives subsequent opens)
+  if (!area._hrPasteHooked) {
+    area._hrPasteHooked = true;
+    area.addEventListener('paste', (ev) => {
+      ev.preventDefault();
+      const cb = ev.clipboardData || window.clipboardData;
+      if (!cb) { alert('Clipboard access blocked by your browser.'); return; }
+      const html  = cb.getData('text/html')  || '';
+      const text  = cb.getData('text/plain') || '';
+      HR_BULK_HTML = html || text || '';
+      if (!HR_BULK_HTML) { alert('Nothing on the clipboard to paste.'); return; }
+      // Quick peek: count TR tags without parsing the whole thing yet
+      const trMatches = HR_BULK_HTML.match(/<tr[\s>]/gi) || [];
+      const weekMatches = HR_BULK_HTML.match(/WEEK\s*\d+/gi) || [];
+      const sizeKb = (HR_BULK_HTML.length / 1024).toFixed(1);
+      area.innerHTML = `<div style="padding:28px 20px;text-align:center">
+        <div style="font-size:48px;color:#2e7d32;line-height:1">✓</div>
+        <div style="font-size:14px;font-weight:800;margin-top:8px;color:#1a1a1a">Paste captured</div>
+        <div style="font-size:12px;color:var(--mute);margin-top:4px">${sizeKb} KB · <b style="color:#333">${trMatches.length}</b> rows detected · <b style="color:#333">${weekMatches.length}</b> WEEK markers</div>
+        <div style="margin-top:14px"><button class="btn-ghost" onclick="hrOpenBulkPaste()">↺ Clear &amp; re-paste</button></div>
+      </div>`;
+      statusEl.innerHTML = '<span style="color:#2e7d32">✓ Ready — hit <b>Parse all weeks</b></span>';
+    });
+    area.addEventListener('drop', (ev) => { ev.preventDefault(); alert('Drag & drop isn\'t supported here — copy from Excel and paste with Ctrl+V.'); });
+    // Catch typing — prevent people from editing the box directly
+    area.addEventListener('keydown', (ev) => {
+      // Allow Ctrl/Cmd+V, Ctrl+A, arrows, tab, escape
+      if (ev.ctrlKey || ev.metaKey) return;
+      if (['Tab','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(ev.key)) return;
+      ev.preventDefault();
+    });
+  }
   ml.classList.add('on');
-  setTimeout(() => document.getElementById('hr-bulk-area').focus(), 60);
+  setTimeout(() => area.focus(), 60);
 }
-function hrCloseBulkPaste() { document.getElementById('hr-bulk-paste-ml').classList.remove('on'); }
+function hrCloseBulkPaste() {
+  document.getElementById('hr-bulk-paste-ml').classList.remove('on');
+  HR_BULK_HTML = '';
+}
 
 // Parse a single <tr>'s cells into an HR row, or null if it's not a job row.
 // Shared between hrParsePaste and hrBulkParse so the two stay in sync.
@@ -2854,41 +3082,49 @@ function hrParseRowFromCells(cells, mode, idSeed) {
 }
 
 function hrBulkParse() {
-  const area = document.getElementById('hr-bulk-area');
   const status = document.getElementById('hr-bulk-status');
-  const html = area.innerHTML;
-  if (!html.trim()) { alert('Paste something first.'); return; }
-  status.textContent = 'Parsing...';
+  const html = HR_BULK_HTML;
+  if (!html || !html.trim()) { alert('Paste something first — click in the box and press Ctrl+V.'); return; }
+  status.innerHTML = '<span style="color:var(--mute)">⟳ Parsing...</span>';
+  // Yield to the browser so the status renders before we start the sync work
+  setTimeout(() => hrBulkParseWorker(html), 50);
+}
 
+function hrBulkParseWorker(html) {
+  const status = document.getElementById('hr-bulk-status');
+  const t0 = Date.now();
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   const trs = Array.from(doc.querySelectorAll('tr'));
-  if (!trs.length) { alert('No table rows detected. Make sure you copied directly from Excel so the HTML comes through.'); return; }
+  if (!trs.length) {
+    status.innerHTML = '<span style="color:var(--err)">⚠ No <tr> rows found in paste. Make sure you copied directly from Excel.</span>';
+    return;
+  }
 
   const weeks = [];
   let currentWeek = null;
   let mode = 'planned';
+  const seed = Date.now();
 
-  trs.forEach((tr, i) => {
+  for (let i = 0; i < trs.length; i++) {
+    const tr = trs[i];
     const cells = Array.from(tr.querySelectorAll('td, th'));
     const text = cells.map(c => c.textContent.trim()).join(' ').trim();
-    if (!text) return;
+    if (!text) continue;
     const up = text.toUpperCase();
     if (/^WEEK\s*\d+/.test(up)) {
       if (currentWeek) weeks.push(currentWeek);
       currentWeek = { label: text.replace(/\s+/g,' ').trim(), rows: [] };
       mode = 'planned';
-      return;
+      continue;
     }
-    if (/BREAK IN WORK/.test(up)) { mode = 'unplanned'; return; }
-    if (!currentWeek) {
-      // Rows before any WEEK header — attach them to an "unlabelled" bucket
-      currentWeek = { label: '(no week header)', rows: [] };
-    }
-    const row = hrParseRowFromCells(cells, mode, Date.now()+'_'+weeks.length+'_'+i);
+    if (/BREAK IN WORK/.test(up)) { mode = 'unplanned'; continue; }
+    if (!currentWeek) currentWeek = { label: '(no week header)', rows: [] };
+    const row = hrParseRowFromCells(cells, mode, seed + '_' + weeks.length + '_' + i);
     if (row) currentWeek.rows.push(row);
-  });
+  }
   if (currentWeek) weeks.push(currentWeek);
+  const parseMs = Date.now() - t0;
 
   const nonEmpty = weeks.filter(w => w.rows.length > 0);
   if (!nonEmpty.length) {
@@ -2914,6 +3150,7 @@ function hrBulkParse() {
   const toArchive = earlierWeeks.filter(w => !existingLabels.has((w.label||'').trim().toUpperCase()));
   const skipped = earlierWeeks.length - toArchive.length;
 
+  status.innerHTML = '<span style="color:#2e7d32">✓ Parsed in ' + parseMs + 'ms — ' + nonEmpty.length + ' weeks, ' + totalRows + ' rows</span>';
   const confirmMsg = `Found ${nonEmpty.length} week(s), ${totalRows} rows total.\n\n` +
     `• Current week will become: "${latest.label}" (${latest.rows.length} rows)\n` +
     `• Archive will gain: ${toArchive.length} week(s)` + (skipped ? ` (${skipped} skipped — already archived)` : '') +

@@ -3323,12 +3323,33 @@ function ccvCounts(seg) {
   return { ccc, ccfv, red };
 }
 
+function ccvMigrateSegment(seg) {
+  // Convert legacy count-only data (ccc/ccfv/red/notes/dl) into the inspections array
+  if (!seg) return { inspections: [] };
+  if (Array.isArray(seg.inspections) && seg.inspections.length) return { inspections: seg.inspections };
+  const out = { inspections: [] };
+  const ccc = parseInt(seg.ccc||0, 10), ccfv = parseInt(seg.ccfv||0, 10), red = parseInt(seg.red||0, 10);
+  if (!(ccc > 0 || ccfv > 0)) return out;
+  const date = seg.dl || seg.date_logged || '';
+  const notes = seg.notes || '';
+  // v1's split: reds first eat CCFVs, then CCCs
+  const redOnCCFV = ccfv > 0 ? Math.min(red, ccfv) : 0;
+  const redOnCCC  = red - redOnCCFV;
+  for (let k = 0; k < Math.max(0, ccc - redOnCCC); k++)  out.inspections.push({ type:'CCC',  result:'green', notes:'',    date });
+  for (let k = 0; k < redOnCCC;  k++)                    out.inspections.push({ type:'CCC',  result:'red',   notes,         date });
+  for (let k = 0; k < Math.max(0, ccfv - redOnCCFV); k++) out.inspections.push({ type:'CCFV', result:'green', notes:'',    date });
+  for (let k = 0; k < redOnCCFV; k++)                    out.inspections.push({ type:'CCFV', result:'red',   notes,         date });
+  return out;
+}
+
 function ccvLoad() {
   const u = workerUrl();
   if (!u) { CCV.err = 'Sync URL not configured'; ccvRender(); return; }
   CCV.loading = true; CCV.err = null;
   if (ACTIVE === 'ccv') ccvRender();
-  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify({action:'load_ccv', month: CCV.mon, year: CCV.yr}) })
+  // v1 uses GET with query params for load_ccv — matches the deployed Apps Script
+  const url = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'action=load_ccv&month=' + CCV.mon + '&year=' + CCV.yr + '&t=' + Date.now();
+  fetch(url, { redirect:'follow' })
     .then(r => r.json())
     .then(j => {
       CCV.loading = false;
@@ -3338,11 +3359,11 @@ function ccvLoad() {
       Object.keys(payload).forEach(k => {
         const i = parseInt(k, 10);
         if (i >= 0 && i < 12) {
-          const seg = payload[i] || payload[k];
-          CCV.data[i] = { inspections: Array.isArray(seg.inspections) ? seg.inspections : [] };
+          CCV.data[i] = ccvMigrateSegment(payload[k]);
         }
       });
       CCV.loaded = true;
+      try { localStorage.setItem('kaefer_v2_ccv_'+CCV.yr+'_'+CCV.mon, JSON.stringify(CCV.data)); } catch(e) {}
       if (ACTIVE === 'ccv') ccvRender();
     })
     .catch(e => {
@@ -3351,7 +3372,7 @@ function ccvLoad() {
       // Fall back to localStorage cache for offline
       try {
         const cached = JSON.parse(localStorage.getItem('kaefer_v2_ccv_'+CCV.yr+'_'+CCV.mon) || 'null');
-        if (cached && Array.isArray(cached)) { CCV.data = cached; CCV.loaded = true; }
+        if (cached && Array.isArray(cached)) { CCV.data = cached.map(ccvMigrateSegment); CCV.loaded = true; }
         else CCV.data = ccvEmptyData();
       } catch(ex) { CCV.data = ccvEmptyData(); }
       if (ACTIVE === 'ccv') ccvRender();
@@ -3405,7 +3426,7 @@ function ccvRender() {
           <button class="btn-ghost" style="margin-left:6px" onclick="CCV.mon=new Date().getMonth();CCV.yr=new Date().getFullYear();CCV.loaded=false;ccvLoad()">This month</button>
         </div>
         <div style="flex:1"></div>
-        <span style="font-size:11px;color:var(--mute);margin-right:8px">${CCV.loading?'⟳ syncing…':CCV.err?'<span style="color:var(--err)">⚠ '+escHtml(CCV.err)+'</span>':CCV.loaded?'✓ synced':''}</span>
+        <span style="font-size:11px;color:var(--mute);margin-right:8px" title="${CCV.err?escHtml(CCV.err):''}">${CCV.loading?'⟳ syncing…':CCV.err?'<span style="color:var(--err);font-weight:700">⚠ '+escHtml(CCV.err.slice(0,80))+'</span>':CCV.loaded?'✓ synced · '+CCV.data.reduce((n,s)=>n+(s.inspections||[]).length,0)+' entries':''}</span>
         <button class="btn-ghost" onclick="ccvLoad()">↻ Refresh</button>
         <button class="btn-ghost" style="margin-left:6px" onclick="ccvExportCsv()">⬇ CSV</button>
       </div>

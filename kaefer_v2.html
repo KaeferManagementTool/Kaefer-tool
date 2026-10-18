@@ -3325,6 +3325,8 @@ function rptRender() {
         <button class="btn-ghost" onclick="rptSetPeriod('week')">This week</button>
         <button class="btn-ghost" style="margin-left:4px" onclick="rptSetPeriod('lastWeek')">Last week</button>
         <button class="btn-ghost" style="margin-left:4px" onclick="rptSetPeriod('month')">This month</button>
+        <button class="btn-ghost" style="margin-left:4px" onclick="rptSetPeriod('quarter')">Last quarter</button>
+        <button class="btn-ghost" style="margin-left:4px" onclick="rptSetPeriod('ytd')">YTD</button>
         <div style="margin-left:10px;display:flex;gap:4px;align-items:center">
           <label style="font-size:11px;color:var(--mute);font-weight:700">From</label>
           <input type="date" value="${REPORTS.from}" onchange="REPORTS.from=this.value;rptRender()" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px">
@@ -3338,7 +3340,7 @@ function rptRender() {
       <div style="display:grid;grid-template-columns:260px 1fr;gap:0;min-height:600px">
         <!-- Report type sidebar -->
         <div style="background:var(--surface-2);border-right:1px solid var(--line);padding:10px">
-          ${reportTypes.map(r => `<button onclick="REPORTS.type='${r.id}';rptRender()" style="display:block;width:100%;text-align:left;padding:11px 13px;margin-bottom:6px;background:${REPORTS.type===r.id?'#fff':'transparent'};border:1px solid ${REPORTS.type===r.id?'var(--t-reports)':'transparent'};border-radius:var(--r-sm);cursor:pointer;transition:all .15s">
+          ${reportTypes.map(r => `<button onclick="rptPickType('${r.id}')" style="display:block;width:100%;text-align:left;padding:11px 13px;margin-bottom:6px;background:${REPORTS.type===r.id?'#fff':'transparent'};border:1px solid ${REPORTS.type===r.id?'var(--t-reports)':'transparent'};border-radius:var(--r-sm);cursor:pointer;transition:all .15s"
             <div style="font-weight:800;font-size:12.5px;color:${REPORTS.type===r.id?'var(--t-reports)':'#1a1a1a'};margin-bottom:3px">${r.label}</div>
             <div style="font-size:10.5px;color:var(--mute);line-height:1.4">${r.desc}</div>
           </button>`).join('')}
@@ -3360,6 +3362,20 @@ function rptRender() {
   `;
 }
 
+function rptPickType(id) {
+  const wasPlanned = REPORTS.type === 'planned';
+  REPORTS.type = id;
+  // Auto-widen to a quarter when switching into Planned, if currently on a short range
+  if (id === 'planned' && !wasPlanned) {
+    const d1 = new Date(REPORTS.from+'T00:00:00'), d2 = new Date(REPORTS.to+'T00:00:00');
+    const dayDiff = Math.round((d2 - d1) / 86400000);
+    if (dayDiff < 60) rptSetPeriod('quarter');
+    else rptRender();
+  } else {
+    rptRender();
+  }
+}
+
 function rptSetPeriod(mode) {
   const now = new Date();
   if (mode === 'week') {
@@ -3379,6 +3395,16 @@ function rptSetPeriod(mode) {
     const last  = new Date(now.getFullYear(), now.getMonth()+1, 0);
     REPORTS.from = first.toISOString().slice(0,10);
     REPORTS.to   = last.toISOString().slice(0,10);
+  } else if (mode === 'quarter') {
+    // Last 3 complete months (not counting current)
+    const first = new Date(now.getFullYear(), now.getMonth()-3, 1);
+    const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+    REPORTS.from = first.toISOString().slice(0,10);
+    REPORTS.to   = last.toISOString().slice(0,10);
+  } else if (mode === 'ytd') {
+    const first = new Date(now.getFullYear(), 0, 1);
+    REPORTS.from = first.toISOString().slice(0,10);
+    REPORTS.to   = now.toISOString().slice(0,10);
   }
   rptRender();
 }
@@ -3646,47 +3672,178 @@ function rptWeekly(from, to) {
   return html;
 }
 
-// ------ Planned vs Unplanned ------
+// ------ Planned vs Unplanned (quarterly dashboard style) ------
+function rptMonthKeysInRange(from, to) {
+  const out = [];
+  if (!from || !to) return out;
+  const d = new Date(from+'T00:00:00');
+  const end = new Date(to+'T00:00:00');
+  if (isNaN(d) || isNaN(end) || end < d) return out;
+  d.setDate(1);
+  while (d <= end) {
+    out.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
+    d.setMonth(d.getMonth()+1);
+  }
+  return out;
+}
+
+function rptMonthLabel(key) {
+  const [y, m] = key.split('-');
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return names[parseInt(m,10)-1] + ' ' + y;
+}
+
+function rptMetricsForMonth(monthKey) {
+  const rows = rptAllHrRows().filter(r => r.date && r.date.slice(0,7) === monthKey);
+  // De-dup on id
+  const seen = new Set();
+  const unique = rows.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+  const planned   = unique.filter(r =>  r.planned);
+  const unplanned = unique.filter(r => !r.planned);
+  const isComplete = r => r.status === 'green';
+  const isCancelled= r => r.status === 'grey';
+  const sumHrs = list => list.reduce((n,r) => n + (parseFloat(r.hours)||0), 0);
+  const plannedHrs       = sumHrs(planned);
+  const executedPlanned  = sumHrs(planned.filter(isComplete));
+  const unplannedHrs     = sumHrs(unplanned);                           // break-in work (usually done)
+  const executedUnplan   = sumHrs(unplanned.filter(isComplete));
+  const actual           = executedPlanned + executedUnplan;            // what actually happened
+  const rescheduled      = sumHrs(planned.filter(r => !isComplete(r) && !isCancelled(r)));
+  const pctUnplanned     = actual > 0 ? Math.round((executedUnplan / actual) * 100) : 0;
+  return {
+    plannedHrs, executedPlanned, actual, rescheduled, unplannedHrs: executedUnplan, pctUnplanned,
+    rawUnplanned: unplannedHrs,  // including not-completed break-ins
+    counts: { planned: planned.length, unplanned: unplanned.length }
+  };
+}
+
+function rptChartSvg(perMonth) {
+  // Grouped bar chart: 4 series per month
+  const SERIES = [
+    { key:'plannedHrs',      label:'Planned',   col:'#1565c0' },
+    { key:'executedPlanned', label:'Executed',  col:'#2e7d32' },
+    { key:'actual',          label:'Actual',    col:'#607d8b' },
+    { key:'unplannedHrs',    label:'Unplanned', col:'#c62828' }
+  ];
+  const months = perMonth.map(x => x.key);
+  if (!months.length) return '<p style="color:#607d8b;font-style:italic;padding:20px;text-align:center">No data in the selected period.</p>';
+
+  const maxVal = Math.max(1, ...perMonth.flatMap(m => SERIES.map(s => m[s.key])));
+  // Nice-round the y max
+  const niceMax = (() => {
+    const mag = Math.pow(10, Math.floor(Math.log10(maxVal)));
+    const n = maxVal / mag;
+    const r = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+    return r * mag;
+  })();
+
+  const PADL = 50, PADR = 20, PADT = 24, PADB = 56;
+  const GROUP_W = 180;           // width per month group
+  const chartH = 320;
+  const chartW = Math.max(680, PADL + PADR + GROUP_W * months.length);
+  const plotW  = chartW - PADL - PADR;
+  const plotH  = chartH - PADT - PADB;
+  const groupSpan = plotW / months.length;
+  const barW = Math.min(28, (groupSpan - 20) / SERIES.length);
+
+  const yToPx = v => PADT + plotH - (v / niceMax) * plotH;
+  const kFmt = v => v >= 1000 ? (v/1000).toFixed(1).replace(/\.0$/,'')+'k' : String(Math.round(v));
+
+  // Y gridlines + labels (5 steps)
+  const gridHtml = [0,1,2,3,4].map(i => {
+    const v = niceMax * (4 - i) / 4;
+    const y = yToPx(v);
+    return `<line x1="${PADL}" y1="${y}" x2="${chartW-PADR}" y2="${y}" stroke="#e5e5e5" stroke-width="1"/>
+      <text x="${PADL-8}" y="${y+4}" text-anchor="end" font-size="10" fill="#90a4ae" font-family="system-ui,-apple-system,sans-serif">${kFmt(v)}</text>`;
+  }).join('');
+
+  // Bars per month
+  const barsHtml = perMonth.map((m, mi) => {
+    const groupX = PADL + groupSpan * mi + (groupSpan - barW * SERIES.length) / 2;
+    const bars = SERIES.map((s, si) => {
+      const v = m[s.key];
+      const barH = Math.max(1, (v / niceMax) * plotH);
+      const bx = groupX + si * barW;
+      const by = yToPx(v);
+      const label = v > 0 ? kFmt(v) : '';
+      return `<rect x="${bx}" y="${by}" width="${barW-2}" height="${barH}" fill="${s.col}" rx="1"/>
+        ${label ? `<text x="${bx + (barW-2)/2}" y="${by - 4}" text-anchor="middle" font-size="9.5" fill="#1a1a1a" font-weight="700" font-family="system-ui,-apple-system,sans-serif">${label}</text>` : ''}`;
+    }).join('');
+    const labelX = PADL + groupSpan * mi + groupSpan/2;
+    return bars + `<text x="${labelX}" y="${chartH - PADB + 18}" text-anchor="middle" font-size="11" fill="#37474f" font-weight="700" letter-spacing="0.5" font-family="system-ui,-apple-system,sans-serif">${rptMonthLabel(months[mi]).toUpperCase()}</text>`;
+  }).join('');
+
+  // Legend
+  const legendY = chartH - 14;
+  const legendHtml = SERIES.map((s, i) => {
+    const lx = PADL + 10 + i * 92;
+    return `<rect x="${lx}" y="${legendY-9}" width="12" height="12" fill="${s.col}" rx="2"/>
+      <text x="${lx + 17}" y="${legendY}" font-size="10.5" fill="#37474f" font-family="system-ui,-apple-system,sans-serif">${s.label}</text>`;
+  }).join('');
+
+  return `<div style="overflow-x:auto"><svg viewBox="0 0 ${chartW} ${chartH}" width="100%" style="display:block;min-width:${chartW}px;max-width:100%">
+    <rect x="0" y="0" width="${chartW}" height="${chartH}" fill="#fff"/>
+    ${gridHtml}
+    ${barsHtml}
+    ${legendHtml}
+  </svg></div>`;
+}
+
 function rptPlanned(from, to) {
-  const jobs = rptGatherJobs(from, to);
-  const plPct = jobs.all.length ? Math.round((jobs.planned.length / jobs.all.length) * 100) : 0;
-  const unPct = 100 - plPct;
-  const plHrsPct = jobs.totalHrs ? Math.round((jobs.plannedHrs / jobs.totalHrs) * 100) : 0;
-  const unHrsPct = 100 - plHrsPct;
+  const monthKeys = rptMonthKeysInRange(from, to);
+  if (!monthKeys.length) return '<p style="color:#607d8b;font-style:italic">Pick a valid date range.</p>';
+  const perMonth = monthKeys.map(k => Object.assign({ key: k }, rptMetricsForMonth(k)));
+
+  // Totals
+  const T = perMonth.reduce((a, m) => {
+    a.plannedHrs += m.plannedHrs; a.executedPlanned += m.executedPlanned;
+    a.actual += m.actual; a.rescheduled += m.rescheduled; a.unplannedHrs += m.unplannedHrs;
+    return a;
+  }, { plannedHrs:0, executedPlanned:0, actual:0, rescheduled:0, unplannedHrs:0 });
+  T.pctUnplanned = T.actual > 0 ? Math.round((T.unplannedHrs / T.actual) * 100) : 0;
+
+  const fmt = v => (Math.round(v*10)/10).toLocaleString('en-AU', { minimumFractionDigits: v % 1 ? 1 : 0, maximumFractionDigits: 1 });
 
   let html = '';
+
+  // 4 stat tiles — match the look of Steve's reference
   html += `<div class="stat-row">
-    <div class="stat"><div class="stat-lbl">Total jobs</div><div class="stat-val">${jobs.all.length}</div></div>
-    <div class="stat"><div class="stat-lbl">Planned</div><div class="stat-val" style="color:#2e7d32">${jobs.planned.length}</div></div>
-    <div class="stat"><div class="stat-lbl">Break-in</div><div class="stat-val" style="color:#c62828">${jobs.unplanned.length}</div></div>
-    <div class="stat"><div class="stat-lbl">Break-in %</div><div class="stat-val" style="color:${unPct>30?'#c62828':unPct>15?'#ef6c00':'#2e7d32'}">${unPct}%</div></div>
+    <div class="stat" style="border-left:4px solid #1565c0"><div class="stat-lbl" style="color:#1565c0">PLANNED HOURS</div><div class="stat-val" style="color:#1565c0">${fmt(T.plannedHrs)}</div></div>
+    <div class="stat" style="border-left:4px solid #2e7d32"><div class="stat-lbl" style="color:#2e7d32">EXECUTED PLANNED</div><div class="stat-val" style="color:#2e7d32">${fmt(T.executedPlanned)}</div></div>
+    <div class="stat" style="border-left:4px solid #c62828"><div class="stat-lbl" style="color:#c62828">UNPLANNED HOURS</div><div class="stat-val" style="color:#c62828">${fmt(T.unplannedHrs)}</div></div>
+    <div class="stat" style="border-left:4px solid #c62828"><div class="stat-lbl" style="color:#c62828">% UNPLANNED</div><div class="stat-val" style="color:#c62828">${T.pctUnplanned}%</div></div>
   </div>`;
 
-  html += '<h2>By job count</h2>';
-  html += `<div class="bar">
-    <div style="width:${plPct}%;background:#2e7d32">${plPct > 10 ? 'PLANNED '+plPct+'%' : ''}</div>
-    <div style="width:${unPct}%;background:#c62828">${unPct > 10 ? 'BREAK-IN '+unPct+'%' : ''}</div>
-  </div>`;
-  html += '<h3>By hours</h3>';
-  html += `<div class="bar">
-    <div style="width:${plHrsPct}%;background:#2e7d32">${plHrsPct > 10 ? 'PLANNED '+plHrsPct+'%' : ''}</div>
-    <div style="width:${unHrsPct}%;background:#c62828">${unHrsPct > 10 ? 'BREAK-IN '+unHrsPct+'%' : ''}</div>
-  </div>`;
-  html += `<table style="margin-top:14px"><thead><tr><th></th><th>Count</th><th>Hours</th><th>% Count</th><th>% Hours</th></tr></thead><tbody>
-    <tr><td><span class="pill pill-ok">PLANNED</span></td><td>${jobs.planned.length}</td><td>${jobs.plannedHrs.toFixed(1)}</td><td>${plPct}%</td><td>${plHrsPct}%</td></tr>
-    <tr><td><span class="pill pill-err">BREAK-IN</span></td><td>${jobs.unplanned.length}</td><td>${jobs.unplannedHrs.toFixed(1)}</td><td>${unPct}%</td><td>${unHrsPct}%</td></tr>
-    <tr style="font-weight:700;background:#fafafa"><td>TOTAL</td><td>${jobs.all.length}</td><td>${jobs.totalHrs.toFixed(1)}</td><td>100%</td><td>100%</td></tr>
-  </tbody></table>`;
+  // Chart
+  html += '<h2>Monthly breakdown</h2>';
+  html += `<div style="border:1px solid #e0e0e0;border-radius:4px;padding:10px;background:#fff">${rptChartSvg(perMonth)}</div>`;
 
-  if (jobs.unplanned.length) {
-    html += '<h2>Break-in work — full list</h2><table><thead><tr><th>Date</th><th>Order</th><th>Location</th><th>Description</th><th>Hours</th><th>Reason / notes</th></tr></thead><tbody>';
-    jobs.unplanned.sort((a,b)=>(a.date||'~').localeCompare(b.date||'~')).forEach(j => {
-      html += `<tr><td>${fdDisplay(j.date)}</td><td>${escHtml(j.order||'')}</td><td>${escHtml(j.loc||'')}</td><td>${escHtml(j.desc||j.short||'')}</td><td>${escHtml(j.hours||'')}</td><td style="color:#c62828">${escHtml(j.notes||'—')}</td></tr>`;
-    });
-    html += '</tbody></table>';
-  } else {
-    html += '<h2>Break-in work</h2><p style="color:#607d8b;font-style:italic">No break-in jobs in this period.</p>';
-  }
+  // Data table
+  html += '<h2>Data table</h2>';
+  html += `<table><thead><tr><th>PERIOD</th><th style="text-align:right">PLANNED</th><th style="text-align:right">EXECUTED</th><th style="text-align:right">ACTUAL</th><th style="text-align:right">RESCHEDULED</th><th style="text-align:right">UNPLANNED</th><th style="text-align:right">% UNPLANNED</th></tr></thead><tbody>`;
+  perMonth.forEach(m => {
+    const pctClass = m.pctUnplanned <= 15 ? 'pill-ok' : m.pctUnplanned <= 30 ? 'pill-warn' : 'pill-err';
+    html += `<tr>
+      <td style="font-weight:700">${rptMonthLabel(m.key)}</td>
+      <td style="text-align:right">${fmt(m.plannedHrs)}</td>
+      <td style="text-align:right">${fmt(m.executedPlanned)}</td>
+      <td style="text-align:right">${fmt(m.actual)}</td>
+      <td style="text-align:right">${m.rescheduled>0 ? fmt(m.rescheduled) : '—'}</td>
+      <td style="text-align:right;color:#c62828;font-weight:700">${fmt(m.unplannedHrs)}</td>
+      <td style="text-align:right"><span class="pill ${pctClass}">${m.pctUnplanned}%</span></td>
+    </tr>`;
+  });
+  html += `<tr style="font-weight:800;background:#1a1a1a;color:#fff">
+    <td style="color:#fff">TOTAL</td>
+    <td style="text-align:right">${fmt(T.plannedHrs)}</td>
+    <td style="text-align:right">${fmt(T.executedPlanned)}</td>
+    <td style="text-align:right">${fmt(T.actual)}</td>
+    <td style="text-align:right">${T.rescheduled>0 ? fmt(T.rescheduled) : '—'}</td>
+    <td style="text-align:right">${fmt(T.unplannedHrs)}</td>
+    <td style="text-align:right">${T.pctUnplanned}%</td>
+  </tr>`;
+  html += '</tbody></table>';
+
   return html;
 }
 
@@ -3767,14 +3924,27 @@ function rptBuildCsvRows(type, from, to) {
     ];
   }
   if (type === 'planned') {
-    const jobs = rptGatherJobs(from, to);
+    const monthKeys = rptMonthKeysInRange(from, to);
+    const perMonth = monthKeys.map(k => Object.assign({ key: k }, rptMetricsForMonth(k)));
     const rows = [
       ['Planned vs Unplanned', from, 'to', to],
       [],
-      ['Date','Order','Op','Location','Description','Short Text','Hours','Status','Notes']
+      ['Period','Planned','Executed','Actual','Rescheduled','Unplanned','% Unplanned']
     ];
+    perMonth.forEach(m => rows.push([
+      rptMonthLabel(m.key), m.plannedHrs.toFixed(1), m.executedPlanned.toFixed(1),
+      m.actual.toFixed(1), m.rescheduled > 0 ? m.rescheduled.toFixed(1) : '',
+      m.unplannedHrs.toFixed(1), m.pctUnplanned + '%'
+    ]));
+    const T = perMonth.reduce((a,m)=>{ a.p+=m.plannedHrs; a.e+=m.executedPlanned; a.a+=m.actual; a.r+=m.rescheduled; a.u+=m.unplannedHrs; return a; },{p:0,e:0,a:0,r:0,u:0});
+    const pct = T.a > 0 ? Math.round((T.u/T.a)*100) : 0;
+    rows.push(['TOTAL', T.p.toFixed(1), T.e.toFixed(1), T.a.toFixed(1), T.r>0?T.r.toFixed(1):'', T.u.toFixed(1), pct+'%']);
+    // Then raw rows below the summary
+    rows.push([]);
+    rows.push(['Date','Order','Op','Location','Description','Short Text','Hours','Status','Planned?','Notes']);
+    const jobs = rptGatherJobs(from, to);
     jobs.all.sort((a,b)=>(a.date||'~').localeCompare(b.date||'~')).forEach(j => {
-      rows.push([j.date||'', j.order||'', j.op||'', j.loc||'', j.desc||'', j.short||'', j.hours||'', j.planned?'PLANNED':'BREAK-IN', j.notes||'']);
+      rows.push([j.date||'', j.order||'', j.op||'', j.loc||'', j.desc||'', j.short||'', j.hours||'', j.status||'', j.planned?'PLANNED':'BREAK-IN', j.notes||'']);
     });
     return rows;
   }

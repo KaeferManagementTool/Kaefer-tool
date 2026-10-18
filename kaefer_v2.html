@@ -1747,6 +1747,10 @@ function offSave() { localStorage.setItem('kaefer_v2_offsite', JSON.stringify(OF
 
 function render_offsite(stage, tabCfg) {
   if (!OFF.loaded) offLoad();
+  // Load the Attendance 2 roster so the Person dropdown fills in
+  if (!ATT2.loaded && !ATT2.loading && typeof attReload === 'function') {
+    attReload(true).then(() => { if (ACTIVE === 'offsite') render_offsite(document.getElementById('stage'), tabCfg); });
+  }
   const today = new Date().toISOString().slice(0,10);
   const people = ATT2.loaded ? ATT2.persons.filter(p => !pIsArchived(p)).sort((a,b)=> a.name.localeCompare(b.name)) : [];
   stage.innerHTML = `
@@ -1756,14 +1760,13 @@ function render_offsite(stage, tabCfg) {
         <span class="sub">Who's off-site, when, why</span>
       </div>
       <div class="att-ctrls">
-        <div class="field" style="min-width:170px"><label>Person</label>
-          <select id="off-person">
-            <option value="">— Select —</option>
-            ${people.map(p=>`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`).join('')}
-            <option value="__other__">Other / Non-roster</option>
-          </select>
+        <div class="field" style="min-width:200px"><label>Person · ${people.length ? people.length + ' loaded' : (ATT2.loading ? 'loading…' : 'not loaded')}</label>
+          <input type="text" id="off-person-search" list="off-person-list" placeholder="Type to search, or pick..." autocomplete="off" style="min-width:180px">
+          <datalist id="off-person-list">
+            ${people.map(p=>`<option value="${escHtml(p.name)}">`).join('')}
+          </datalist>
         </div>
-        <div class="field" style="display:none" id="off-other-wrap"><label>Name</label><input type="text" id="off-other-name"></div>
+        <div class="field" style="display:none" id="off-other-wrap"><label>Name (if not on roster)</label><input type="text" id="off-other-name"></div>
         <div class="field"><label>Date</label><input type="date" id="off-date" value="${today}"></div>
         <div class="field"><label>Out</label><input type="text" id="off-out" placeholder="e.g. 08:00 or Multiple" style="width:110px"></div>
         <div class="field"><label>In</label><input type="text" id="off-in" placeholder="e.g. 14:00 or Multiple" style="width:110px"></div>
@@ -1791,9 +1794,6 @@ function render_offsite(stage, tabCfg) {
       </div>
     </div>
   `;
-  document.getElementById('off-person').onchange = e => {
-    document.getElementById('off-other-wrap').style.display = e.target.value === '__other__' ? '' : 'none';
-  };
   document.getElementById('off-from').onchange = offRender;
   document.getElementById('off-to').onchange = offRender;
   offRender();
@@ -1836,19 +1836,17 @@ function offRender() {
 }
 
 function offAdd() {
-  const sel = document.getElementById('off-person').value;
-  let name = '';
-  if (sel === '__other__') name = document.getElementById('off-other-name').value.trim();
-  else if (sel) {
-    const p = ATT2.persons.find(x => x.id === sel);
-    name = p ? p.name : '';
-  }
-  if (!name) { alert('Pick a person or enter a name.'); return; }
+  const typed = (document.getElementById('off-person-search').value || '').trim();
+  if (!typed) { alert('Enter or pick a person.'); return; }
+  // Resolve to a roster person by exact name (case-insensitive), else treat as off-roster
+  let name = typed, personId = '';
+  const match = (ATT2.persons || []).find(p => (p.name||'').toLowerCase() === typed.toLowerCase());
+  if (match) { name = match.name; personId = match.id; }
   const reason = document.getElementById('off-reason').value.trim();
   if (!reason) { alert('Enter a reason.'); return; }
   OFF.items.unshift({
     id: Date.now(),
-    person_id: sel === '__other__' ? '' : sel,
+    person_id: personId,
     name,
     date: document.getElementById('off-date').value,
     out:  document.getElementById('off-out').value.trim() || 'Multiple',
@@ -1859,9 +1857,9 @@ function offAdd() {
   });
   offSave();
   // reset
-  ['off-reason','off-wo','off-rep','off-out','off-in','off-other-name'].forEach(id => document.getElementById(id).value='');
-  document.getElementById('off-person').value = '';
-  document.getElementById('off-other-wrap').style.display = 'none';
+  ['off-person-search','off-reason','off-wo','off-rep','off-out','off-in'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
+  const otherWrap = document.getElementById('off-other-wrap'); if (otherWrap) otherWrap.style.display = 'none';
+  document.getElementById('off-person-search').focus();
   offRender();
 }
 function offDelete(id) {

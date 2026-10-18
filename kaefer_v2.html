@@ -4498,8 +4498,8 @@ const REGISTERS_SCHEMA = {
     expiryField: 'expiry',
     columns: [
       { id:'person',    label:'Person',   type:'person', required:true, width:180 },
-      { id:'ticket',    label:'Ticket / Training', type:'select', required:true, options:['SCF Advanced','SCF Intermediate','SCF Basic','EWP (≤11m)','EWP (>11m)','Forklift (LF)','Confined Space Entry','Gas Test Atmospheres','Working at Heights','Rescue from Heights','First Aid','CPR','Rigging (Basic)','Rigging (Intermediate)','Dogging','VOC Scaffold','VOC Other','White Card','Site Induction','Other'] },
-      { id:'issueDate', label:'Issued',    type:'date', required:true, width:120 },
+      { id:'ticket',    label:'Ticket / Training', type:'combo', required:true, width:200, options:['HRWL Scaffold Advanced','HRWL Scaffold Intermediate','HRWL Scaffold Basic','Scaffold Advanced CTO','Scaffold Intermediate CTO','Scaffold Basic CTO','Working at Heights Statement','Working at Heights CTO','Confined Space Entry','Confined Space CTO','HRWL Forklift','Forklift Operator Auth','HRWL EWP','EWP Operator Auth','HRWL Rigging Basic','Rigging Basic Auth','HRWL Dogging','Dogging Auth','Light Vehicle Auth','First Aid','CPR','Site Induction','GCI (General Construction Induction)','MSIC Card','Escape Hood','Biosecurity Induction','GPC / FL Induction','Material Handling','RMA Induction','RMA Light Vehicle','Cogen Induction','Permit Practical','PTW Theory','LBG Theory','LBG Practical','Government ID','Medical','Privacy Consent','Data Consent','Other'] },
+      { id:'issueDate', label:'Issued',    type:'date', width:120 },
       { id:'expiry',    label:'Expires',   type:'date', width:120 },
       { id:'issuer',    label:'Issued by', type:'text', width:140 },
       { id:'notes',     label:'Notes',     type:'text' }
@@ -4594,7 +4594,9 @@ function regRender() {
         <h2>Registers</h2>
         <span class="sub">Compliance records — one tab per register type</span>
         <div style="flex:1"></div>
-        <button class="btn-ghost" onclick="regExportCsv()">📥 CSV</button>
+        <button class="btn-ghost" onclick="regOpenBulkPaste()" title="Paste rows from Excel or CSV">📚 Bulk paste</button>
+        ${REG.activeType === 'ppe' ? '<button class="btn-ghost" style="margin-left:4px" onclick="regImportPpeV1()" title="Pull PPE entries from the v1 tool\'s localStorage">↙ Import PPE from v1</button>' : ''}
+        <button class="btn-ghost" style="margin-left:4px" onclick="regExportCsv()">📥 CSV</button>
       </div>
 
       <!-- Register sub-tab bar -->
@@ -4667,6 +4669,10 @@ function regRenderField(col, val, prefix) {
   if (col.type === 'select') {
     return `<div class="field"><label>${escHtml(col.label)}${required}</label><select id="${id}" style="${widthStyle};min-width:120px"><option value="">— Select —</option>${col.options.map(o=>`<option value="${escHtml(o)}" ${o===val?'selected':''}>${escHtml(o)}</option>`).join('')}</select></div>`;
   }
+  if (col.type === 'combo') {
+    const listId = 'reg-combo-' + col.id;
+    return `<div class="field"><label>${escHtml(col.label)}${required}</label><input type="text" id="${id}" list="${listId}" value="${escHtml(val||'')}" placeholder="Type or pick..." autocomplete="off" style="${widthStyle};min-width:180px"><datalist id="${listId}">${col.options.map(o=>`<option value="${escHtml(o)}">`).join('')}</datalist></div>`;
+  }
   if (col.type === 'person') {
     const people = (typeof ATT2 !== 'undefined' && ATT2.loaded) ? ATT2.persons.filter(p=>!pIsArchived(p)).sort((a,b)=>a.name.localeCompare(b.name)) : [];
     return `<div class="field"><label>${escHtml(col.label)}${required}</label>
@@ -4720,6 +4726,10 @@ function regRenderRow(x, schema) {
     }
     if (c.type === 'select') {
       return `<td><select onchange="regEditField('${x.id}','${c.id}',this.value);regRenderTable()" style="border:0;background:transparent;font-size:12px;padding:2px;font-weight:600"><option value="">—</option>${c.options.map(o=>`<option value="${escHtml(o)}" ${o===val?'selected':''}>${escHtml(o)}</option>`).join('')}</select></td>`;
+    }
+    if (c.type === 'combo') {
+      const listId = 'row-combo-' + c.id;
+      return `<td style="min-width:${c.width||160}px"><input type="text" value="${escHtml(val)}" list="${listId}" onchange="regEditField('${x.id}','${c.id}',this.value)" style="border:0;background:transparent;font-size:12px;padding:2px;font-weight:600;width:100%"><datalist id="${listId}">${c.options.map(o=>`<option value="${escHtml(o)}">`).join('')}</datalist></td>`;
     }
     const style = c.id === 'person' || c.id === 'driver' || c.id === 'issuedTo' ? 'font-weight:600' : '';
     return `<td contenteditable="true" oninput="regEditField('${x.id}','${c.id}',this.textContent)" style="${style};min-width:${c.width||100}px">${escHtml(val)}</td>`;
@@ -4795,6 +4805,296 @@ function regExportCsv() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
+/* ---- Registers bulk paste (per-register, header-smart) ---- */
+let REG_BULK_HTML = '';
+let REG_BULK_IS_TEXT = false;
+
+function regOpenBulkPaste() {
+  const schema = REGISTERS_SCHEMA[REG.activeType];
+  let ml = document.getElementById('reg-bulk-paste-ml');
+  if (!ml) {
+    ml = document.createElement('div');
+    ml.id = 'reg-bulk-paste-ml';
+    ml.className = 'ml';
+    document.body.appendChild(ml);
+  }
+  REG_BULK_HTML = ''; REG_BULK_IS_TEXT = false;
+  const colsList = schema.columns.map(c => '<b>'+escHtml(c.label)+'</b>'+(c.required?' <span style="color:#c62828">*</span>':'')).join(' · ');
+  ml.innerHTML = `
+    <div class="box" style="max-width:1000px">
+      <div class="mh" style="--accent:${schema.color}">
+        <h3>📚 Bulk paste — ${escHtml(schema.label)} Register</h3>
+        <button class="x" onclick="regCloseBulkPaste()">×</button>
+      </div>
+      <div class="mb">
+        <div style="padding:11px 13px;background:${schema.color}15;border:1px solid ${schema.color}40;border-radius:var(--r-sm);font-size:12px;color:#333;margin-bottom:10px;line-height:1.5">
+          <b style="color:${schema.color}">Backfill many ${escHtml(schema.label)} entries at once.</b><br>
+          <b>Columns we recognise</b> (header row required, order doesn't matter):<br>
+          ${colsList}<br>
+          Date formats: <b>DD/MM/YYYY</b>, <b>DD-Mon-YY</b>, or <b>YYYY-MM-DD</b>. Duplicates (same Person + key field + date) skipped.
+        </div>
+        <div id="reg-bulk-area" contenteditable="true" style="min-height:220px;max-height:45vh;overflow:auto;border:2px dashed var(--line);border-radius:var(--r-md);padding:10px;background:var(--surface-2);font-size:11px"></div>
+        <div id="reg-bulk-status" style="margin-top:8px;font-size:12px;color:var(--mute);font-weight:600"></div>
+      </div>
+      <div class="mf">
+        <button class="btn-ghost" onclick="regCloseBulkPaste()">Cancel</button>
+        <button class="btn-prim" style="--accent:${schema.color}" onclick="regBulkParse()">▶ Parse all entries</button>
+      </div>
+    </div>
+  `;
+  const area = document.getElementById('reg-bulk-area');
+  area.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--mute);font-size:13px"><div style="font-size:38px;margin-bottom:12px">📥</div><b style="color:#333">Click inside this box and press Ctrl+V (Cmd+V) to paste.</b><br><br><span style="font-size:11.5px">Large pastes captured instantly without rendering the HTML.</span></div>';
+  const statusEl = document.getElementById('reg-bulk-status');
+  if (!area._regPasteHooked) {
+    area._regPasteHooked = true;
+    area.addEventListener('paste', (ev) => {
+      ev.preventDefault();
+      const cb = ev.clipboardData || window.clipboardData;
+      if (!cb) { alert('Clipboard blocked.'); return; }
+      const html = cb.getData('text/html') || '';
+      const text = cb.getData('text/plain') || '';
+      if (html) { REG_BULK_HTML = html; REG_BULK_IS_TEXT = false; }
+      else      { REG_BULK_HTML = text; REG_BULK_IS_TEXT = true; }
+      if (!REG_BULK_HTML) { alert('Nothing on clipboard.'); return; }
+      const trCount = REG_BULK_IS_TEXT ? text.split('\n').filter(l=>l.trim()).length : (REG_BULK_HTML.match(/<tr[\s>]/gi) || []).length;
+      const sizeKb = (REG_BULK_HTML.length / 1024).toFixed(1);
+      area.innerHTML = `<div style="padding:28px 20px;text-align:center">
+        <div style="font-size:48px;color:${schema.color};line-height:1">✓</div>
+        <div style="font-size:14px;font-weight:800;margin-top:8px;color:#1a1a1a">Paste captured</div>
+        <div style="font-size:12px;color:var(--mute);margin-top:4px">${sizeKb} KB · <b style="color:#333">${trCount}</b> rows detected</div>
+      </div>`;
+      statusEl.innerHTML = '<span style="color:'+schema.color+'">✓ Ready — hit <b>Parse all entries</b></span>';
+    });
+    area.addEventListener('drop', (ev) => { ev.preventDefault(); alert('Drag & drop not supported — copy and Ctrl+V.'); });
+    area.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey) return;
+      if (['Tab','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(ev.key)) return;
+      ev.preventDefault();
+    });
+  }
+  ml.classList.add('on');
+  setTimeout(() => area.focus(), 60);
+}
+
+function regCloseBulkPaste() {
+  const ml = document.getElementById('reg-bulk-paste-ml');
+  if (ml) ml.classList.remove('on');
+  REG_BULK_HTML = ''; REG_BULK_IS_TEXT = false;
+}
+
+function regDetectHeaderMap(firstRow, schema) {
+  if (!firstRow || !firstRow.length) return null;
+  const low = firstRow.map(c => (c||'').toString().toLowerCase().trim());
+  if (low.some(v => offParseDate(v))) return null;
+  const map = {};
+  schema.columns.forEach(col => { map[col.id] = -1; });
+  const matchers = {
+    person:    /^(person|name|scaffolder|employee|who)$/,
+    item:      /^(item|ppe|description)$/,
+    size:      /^size$/,
+    issued:    /^(issued|issue date|start|from|date|in service from)$/,
+    expiry:    /^(expiry|expires|expire|exp|valid until|due|renewal|expires on)$/,
+    signedBy:  /^(signed by|signed|signoff|signatory|by)$/,
+    vehicle:   /^(vehicle|unit|asset)$/,
+    rego:      /^(rego|registration|plate)$/,
+    driver:    /^(driver|primary driver|operator)$/,
+    returned:  /^(returned|returned on|off hire|end|to|returned\/off-hire)$/,
+    inspection:/^(inspection|last inspection|insp|inspected)$/,
+    serviceDue:/^(service due|service|next service|due service)$/,
+    tool:      /^(tool|equipment|tool\/equipment|tool \/ equipment)$/,
+    assetId:   /^(asset id|asset|asset no|id|serial|serial no)$/,
+    issuedTo:  /^(issued to|holder|user)$/,
+    condition: /^condition$/,
+    ticket:    /^(ticket|training|course|cert|certification|licence|license|ticket\/training|ticket \/ training)$/,
+    issueDate: /^(issued|issue date|start|from|date)$/,
+    issuer:    /^(issuer|issued by|provider|trainer|rto|by)$/,
+    level:     /^(level|grade|tier)$/,
+    assessor:  /^(assessor|signed by|by)$/,
+    authDate:  /^(authorised|authorized|auth date|start|date)$/,
+    notes:     /^(notes|comments|remarks|note|role)$/
+  };
+  schema.columns.forEach(col => {
+    const m = matchers[col.id];
+    if (!m) return;
+    low.forEach((h, i) => {
+      if (map[col.id] < 0 && m.test(h)) map[col.id] = i;
+    });
+  });
+  const hasPerson = ['person','driver','issuedTo','vehicle','tool'].some(k => map[k] >= 0);
+  const hasDate = ['issued','issueDate','authDate','expiry','inspection'].some(k => map[k] >= 0);
+  if (!hasPerson || !hasDate) return null;
+  return map;
+}
+
+function regBulkParse() {
+  const status = document.getElementById('reg-bulk-status');
+  const payload = REG_BULK_HTML;
+  if (!payload || !payload.trim()) { alert('Paste something first.'); return; }
+  status.innerHTML = '<span style="color:var(--mute)">⟳ Parsing...</span>';
+  setTimeout(() => regBulkParseWorker(payload, REG_BULK_IS_TEXT), 50);
+}
+
+function regBulkParseWorker(payload, isText) {
+  const schema = REGISTERS_SCHEMA[REG.activeType];
+  const status = document.getElementById('reg-bulk-status');
+  const t0 = Date.now();
+  let rows = [];
+  if (!isText && /<tr[\s>]/i.test(payload)) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(payload, 'text/html');
+    const trs = Array.from(doc.querySelectorAll('tr'));
+    rows = trs.map(tr => Array.from(tr.querySelectorAll('td, th')).map(c => c.textContent.trim()));
+  } else {
+    const lines = payload.split(/\r?\n/).filter(l => l.trim());
+    const hasCommas = lines.length && lines[0].includes(',');
+    rows = lines.map(line => {
+      if (hasCommas) {
+        const out = []; let cur = ''; let inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQ) {
+            if (ch === '"' && line[i+1] === '"') { cur += '"'; i++; }
+            else if (ch === '"') { inQ = false; }
+            else cur += ch;
+          } else {
+            if (ch === ',') { out.push(cur.trim()); cur = ''; }
+            else if (ch === '"' && !cur) { inQ = true; }
+            else cur += ch;
+          }
+        }
+        out.push(cur.trim());
+        return out;
+      }
+      return line.split('\t').map(c => c.trim());
+    });
+  }
+  if (!rows.length) { status.innerHTML = '<span style="color:var(--err)">⚠ No rows detected.</span>'; return; }
+
+  const headerMap = regDetectHeaderMap(rows[0], schema);
+  if (!headerMap) {
+    status.innerHTML = '<span style="color:var(--err)">⚠ Header row not detected. Include a row like <b>' + schema.columns.map(c=>c.label).join(' | ') + '</b> at the top of your paste.</span>';
+    return;
+  }
+  const dataRows = rows.slice(1);
+
+  const peopleByName = {};
+  if (typeof ATT2 !== 'undefined' && ATT2.persons) {
+    ATT2.persons.forEach(p => { peopleByName[(p.name||'').toLowerCase().trim()] = p.id; });
+  }
+
+  const existing = REG.items[REG.activeType] || [];
+  const uniqCol = schema.columns.find(c => c.id === 'item' || c.id === 'ticket' || c.id === 'vehicle' || c.id === 'tool' || c.id === 'level');
+  const dedupKey = (row) => {
+    const pcol = schema.columns.find(c => c.type === 'person');
+    const pval = pcol ? (row[pcol.id] || '').toLowerCase().trim() : '';
+    const uval = uniqCol ? (row[uniqCol.id] || '').toLowerCase().trim() : '';
+    const dateVal = row.expiry || row.issued || row.issueDate || row.authDate || '';
+    return pval + '|' + uval + '|' + dateVal;
+  };
+  const existingKeys = new Set(existing.map(dedupKey));
+
+  const entries = [];
+  const skipped = [];
+  dataRows.forEach((cells, i) => {
+    const rowNum = i + 2;
+    if (!cells.length || !cells.some(c => c)) return;
+    const entry = { id: 'r_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2,5) };
+    let hasAnyData = false;
+    schema.columns.forEach(col => {
+      const idx = headerMap[col.id];
+      if (idx == null || idx < 0) { entry[col.id] = ''; return; }
+      const raw = (cells[idx] || '').trim();
+      if (col.type === 'date') entry[col.id] = raw ? (offParseDate(raw) || '') : '';
+      else entry[col.id] = raw;
+      if (raw) hasAnyData = true;
+    });
+    if (!hasAnyData) return;
+    const missing = schema.columns.filter(c => c.required && !entry[c.id]);
+    if (missing.length) { skipped.push('row '+rowNum+': missing '+missing.map(c=>c.label).join(', ')); return; }
+    const pcol = schema.columns.find(c => c.type === 'person');
+    if (pcol && peopleByName[(entry[pcol.id]||'').toLowerCase().trim()]) {
+      entry._personId = peopleByName[(entry[pcol.id]||'').toLowerCase().trim()];
+    }
+    const k = dedupKey(entry);
+    if (existingKeys.has(k)) { skipped.push('row '+rowNum+': duplicate'); return; }
+    existingKeys.add(k);
+    entries.push(entry);
+  });
+
+  const parseMs = Date.now() - t0;
+  if (!entries.length) {
+    status.innerHTML = '<span style="color:var(--err)">⚠ No valid entries parsed from '+dataRows.length+' rows. '+(skipped.length?'First issue: '+skipped[0]:'')+'</span>';
+    return;
+  }
+  const mapped = Object.entries(headerMap).filter(([k,v])=>v>=0).map(([k,v])=>k+'→col'+(v+1)).join(', ');
+  status.innerHTML = '<span style="color:'+schema.color+'">✓ Parsed in '+parseMs+'ms — '+entries.length+' entries ready'+(skipped.length?' ('+skipped.length+' skipped)':'')+'</span><br><span style="font-size:10.5px;color:var(--mute)">mapped: '+mapped+'</span>';
+  const msg = 'Found ' + entries.length + ' valid entries to add to the ' + schema.label + ' Register.\n' +
+    (skipped.length ? skipped.length + ' row(s) skipped.\n' : '') + '\nContinue?';
+  if (!confirm(msg)) { status.textContent = ''; return; }
+  REG.items[REG.activeType] = entries.concat(existing);
+  regSave(REG.activeType);
+  regCloseBulkPaste();
+  alert('✓ Added '+entries.length+' entries to '+schema.label+' Register'+(skipped.length?' ('+skipped.length+' skipped)':'')+'.');
+  regRender();
+}
+
+/* ---- Import PPE from v1 tool localStorage ---- */
+function regImportPpeV1() {
+  if (REG.activeType !== 'ppe') { alert('Switch to the PPE register tab first.'); return; }
+  let v1Raw;
+  try { v1Raw = JSON.parse(localStorage.getItem('kaefer_ppe3') || '[]'); }
+  catch (e) { alert('Could not read v1 PPE data: ' + e.message); return; }
+  if (!Array.isArray(v1Raw) || !v1Raw.length) {
+    alert('No PPE entries found in the v1 tool\'s localStorage.\n\nMake sure:\n• You\'re on the same browser/device as your v1 tool\n• v1 PPE data exists (open critical_control_wheel.html → PPE Register and check)');
+    return;
+  }
+  const existing = REG.items.ppe || [];
+  const existingKeys = new Set(existing.map(x => (x.person||'').toLowerCase()+'|'+(x.item||'').toLowerCase()+'|'+(x.size||'')+'|'+(x.issued||'')));
+  const peopleByName = {};
+  if (typeof ATT2 !== 'undefined' && ATT2.persons) {
+    ATT2.persons.forEach(p => { peopleByName[(p.name||'').toLowerCase().trim()] = p.id; });
+  }
+  const entries = [];
+  let skipped = 0;
+  v1Raw.forEach((v1, idx) => {
+    const date = v1.date || '';
+    const rawName = (v1.name || '').replace(/\s*\([^)]*\)/g, '').replace(/\s*-\s*.*/, '').trim();
+    const notes = [v1.status ? ('Status: '+v1.status) : '', v1._notes || '', v1._pos ? ('Role: '+v1._pos) : ''].filter(Boolean).join(' · ');
+    let items = [];
+    if (Array.isArray(v1._itemsStruct) && v1._itemsStruct.length) {
+      items = v1._itemsStruct.map(it => ({ desc: it.desc||'', size: it.size||'', qty: it.qty||'1' }));
+    } else if (v1.item) {
+      items = String(v1.item).split(/,\s*/).map(s => {
+        const m = s.match(/^(.+?)(?:\s*\(([^)]+)\))?(?:\s*x(\d+))?$/i);
+        return m ? { desc: (m[1]||'').trim(), size: (m[2]||'').trim(), qty: (m[3]||'1') } : { desc: s.trim(), size:'', qty:'1' };
+      });
+    }
+    if (!items.length) { skipped++; return; }
+    items.forEach((it, i2) => {
+      if (!it.desc) return;
+      const k = rawName.toLowerCase()+'|'+it.desc.toLowerCase()+'|'+(it.size||'')+'|'+date;
+      if (existingKeys.has(k)) { skipped++; return; }
+      existingKeys.add(k);
+      entries.push({
+        id: 'r_v1_'+Date.now()+'_'+idx+'_'+i2,
+        person: rawName,
+        item:   it.desc,
+        size:   it.size || '',
+        issued: date,
+        expiry: '',
+        signedBy: '',
+        notes:  notes,
+        _personId: peopleByName[rawName.toLowerCase()] || ''
+      });
+    });
+  });
+  if (!entries.length) { alert('No entries to import — all look like duplicates of what\'s already here.'); return; }
+  if (!confirm('Found ' + v1Raw.length + ' PPE records in v1 → expanded to ' + entries.length + ' individual item entries' + (skipped?' ('+skipped+' skipped as duplicates or empty)':'') + '.\n\nImport them all into the v2 PPE register?')) return;
+  REG.items.ppe = entries.concat(existing);
+  regSave('ppe');
+  alert('✓ Imported ' + entries.length + ' PPE entries from v1.');
+  regRender();
+}
 
 /* ============================================================
    CCV WHEEL — Critical Control Verification

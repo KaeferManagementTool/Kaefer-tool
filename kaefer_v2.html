@@ -3396,9 +3396,9 @@ function rptSetPeriod(mode) {
     REPORTS.from = first.toISOString().slice(0,10);
     REPORTS.to   = last.toISOString().slice(0,10);
   } else if (mode === 'quarter') {
-    // Last 3 complete months (not counting current)
-    const first = new Date(now.getFullYear(), now.getMonth()-3, 1);
-    const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+    // Last 3 months INCLUDING current (e.g. Aug-Sep-Oct when run in Oct)
+    const first = new Date(now.getFullYear(), now.getMonth()-2, 1);
+    const last  = new Date(now.getFullYear(), now.getMonth()+1, 0);
     REPORTS.from = first.toISOString().slice(0,10);
     REPORTS.to   = last.toISOString().slice(0,10);
   } else if (mode === 'ytd') {
@@ -3700,19 +3700,20 @@ function rptMetricsForMonth(monthKey) {
   const unique = rows.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
   const planned   = unique.filter(r =>  r.planned);
   const unplanned = unique.filter(r => !r.planned);
-  const isComplete = r => r.status === 'green';
-  const isCancelled= r => r.status === 'grey';
+  // "Executed" = status is green/complete OR hours have been entered (any row with hours > 0 counts)
+  const isCancelled = r => r.status === 'grey';
+  const isExecuted  = r => r.status === 'green' || (parseFloat(r.hours)||0) > 0;
   const sumHrs = list => list.reduce((n,r) => n + (parseFloat(r.hours)||0), 0);
   const plannedHrs       = sumHrs(planned);
-  const executedPlanned  = sumHrs(planned.filter(isComplete));
-  const unplannedHrs     = sumHrs(unplanned);                           // break-in work (usually done)
-  const executedUnplan   = sumHrs(unplanned.filter(isComplete));
+  const executedPlanned  = sumHrs(planned.filter(isExecuted));
+  const executedUnplan   = sumHrs(unplanned.filter(isExecuted));
+  const unplannedHrs     = sumHrs(unplanned);                           // raw break-in work regardless of status
   const actual           = executedPlanned + executedUnplan;            // what actually happened
-  const rescheduled      = sumHrs(planned.filter(r => !isComplete(r) && !isCancelled(r)));
+  const rescheduled      = sumHrs(planned.filter(r => !isExecuted(r) && !isCancelled(r)));
   const pctUnplanned     = actual > 0 ? Math.round((executedUnplan / actual) * 100) : 0;
   return {
     plannedHrs, executedPlanned, actual, rescheduled, unplannedHrs: executedUnplan, pctUnplanned,
-    rawUnplanned: unplannedHrs,  // including not-completed break-ins
+    rawUnplanned: unplannedHrs,
     counts: { planned: planned.length, unplanned: unplanned.length }
   };
 }
@@ -3802,9 +3803,28 @@ function rptPlanned(from, to) {
   }, { plannedHrs:0, executedPlanned:0, actual:0, rescheduled:0, unplannedHrs:0 });
   T.pctUnplanned = T.actual > 0 ? Math.round((T.unplannedHrs / T.actual) * 100) : 0;
 
+  // Diagnostics: what the report actually sees
+  const allRows = rptAllHrRows();
+  const rowsInRange = allRows.filter(r => r.date && rptInRange(r.date, from, to));
+  const totalRowsWithDates = allRows.filter(r => r.date).length;
+  const earliest = allRows.map(r=>r.date).filter(Boolean).sort()[0] || '';
+  const latest   = allRows.map(r=>r.date).filter(Boolean).sort().slice(-1)[0] || '';
+
   const fmt = v => (Math.round(v*10)/10).toLocaleString('en-AU', { minimumFractionDigits: v % 1 ? 1 : 0, maximumFractionDigits: 1 });
 
   let html = '';
+
+  // Empty-state banner if nothing in range
+  if (!rowsInRange.length) {
+    html += `<div style="padding:14px 16px;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;margin-bottom:14px">
+      <div style="font-weight:800;color:#e65100;margin-bottom:4px;font-size:13px">⚠ No Hours Register data in the selected date range</div>
+      <div style="font-size:12px;color:#5d4037;line-height:1.5">
+        Range: <b>${fdDisplay(from)} to ${fdDisplay(to)}</b> · Rows in range: <b>${rowsInRange.length}</b><br>
+        HR total with dates: <b>${totalRowsWithDates}</b>${earliest?' · Earliest: <b>'+fdDisplay(earliest)+'</b> · Latest: <b>'+fdDisplay(latest)+'</b>':''}
+        ${totalRowsWithDates===0 ? '<br><br>Open <b>Hours Register</b>, paste a week in from Excel, then come back.' : '<br><br>Try one of the quick-period buttons above, or set <b>From</b> to '+fdDisplay(earliest)+' to see all your data.'}
+      </div>
+    </div>`;
+  }
 
   // 4 stat tiles — match the look of Steve's reference
   html += `<div class="stat-row">

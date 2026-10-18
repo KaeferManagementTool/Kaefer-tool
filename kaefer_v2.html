@@ -3039,9 +3039,20 @@ function dmSaveFocus(val) {
 }
 
 function render_daily(stage, tabCfg) {
-  if (!ATT2.loaded) { attReload().then(() => { if (ACTIVE === 'daily') render_daily(stage, tabCfg); }); }
+  // Load supporting data; show a loading state until attendance arrives (one-shot, no recursion)
   if (!HR.loaded)   hrLoad();
   if (!OFF.loaded)  offLoad();
+  if (!ATT2.loaded) {
+    stage.innerHTML = '<div class="card"><div class="card-h"><span class="accent" style="--accent:'+KAEFER_RED+'"></span><h2>Daily Meeting</h2></div><div style="padding:40px;text-align:center;color:var(--mute)"><div style="font-size:30px">⟳</div><p style="margin:10px 0 0">Loading attendance data...</p><p style="font-size:11px;margin-top:14px">If this stays here, open the <b>Attendance</b> tab once to sync, then come back.</p></div></div>';
+    if (!ATT2.loading && !DAILY._attAttempted) {
+      DAILY._attAttempted = true;
+      attReload().finally(() => {
+        if (ACTIVE === 'daily') render_daily(document.getElementById('stage'), tabCfg);
+      });
+    }
+    return;
+  }
+  DAILY._attAttempted = false; // reset so a later open with cleared data retries
 
   const dateKey = DAILY.date;
   const dow = new Date(dateKey+'T00:00:00').getDay();

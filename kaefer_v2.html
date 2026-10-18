@@ -2603,7 +2603,7 @@ function hrRender() {
   const tb = document.getElementById('hr-tbody');
   if (!tb) return;
   // Opportunistically load the Scaffold Register so the dropdowns populate
-  if (typeof SCF !== 'undefined' && !SCF.loaded && !SCF.loading && !SCF.err && workerUrl()) scfLoad();
+  if (typeof SCF !== 'undefined' && !SCF.loaded && !SCF.loading) scfLoad();
   if (!HR.rows.length) {
     tb.innerHTML = '<tr><td colspan="18" style="padding:34px;text-align:center;color:var(--mute)">No jobs loaded. Click <b>Paste from Excel</b> at the top to drop in this week\'s register.</td></tr>';
     return;
@@ -2670,7 +2670,8 @@ function renderHrRow(r, colours, colMap) {
 function hrScaffoldPicker(r) {
   if (typeof SCF === 'undefined') return '<span style="font-size:10px;color:var(--mute);font-style:italic">—</span>';
   if (SCF.loading && !SCF.loaded) return '<span style="font-size:10px;color:var(--mute);font-style:italic">loading…</span>';
-  if (!SCF.loaded) return '<span style="font-size:10px;color:var(--mute);font-style:italic">— not loaded —</span>';
+  if (SCF.err) return `<span style="font-size:10px;color:var(--err);font-style:italic;cursor:pointer" title="${escHtml(SCF.err)} — click to retry" onclick="scfLoad()">⚠ error</span>`;
+  if (!SCF.loaded) return '<span style="font-size:10px;color:var(--mute);font-style:italic">—</span>';
   const list = SCF.active || [];
   const sel = r.scaffoldId || '';
   // Also offer dismantled scaffolds if the row is already linked to one (so we can see the tag)
@@ -2678,6 +2679,9 @@ function hrScaffoldPicker(r) {
   if (sel && !list.find(s => s.id === sel)) {
     const dis = (SCF.dismantled || []).find(s => s.id === sel);
     if (dis) dismantledOpt = `<option value="${dis.id}" selected>${escHtml(dis.tag||'(dismantled)')} ✓</option>`;
+  }
+  if (!list.length && !dismantledOpt) {
+    return '<span style="font-size:10px;color:var(--mute);font-style:italic" title="No scaffolds in the register yet. They appear here once scaffolders submit a gear list and you approve it.">— no scaffolds yet —</span>';
   }
   return `<select onchange="hrEditField('${r.id}','scaffoldId',this.value);hrRender()" style="padding:2px 4px;border:1px solid var(--line);border-radius:3px;font-size:10px;max-width:110px;background:#fff">
     <option value="">— none —</option>
@@ -2704,7 +2708,7 @@ function hrToggleDismantleDone(id) {
   if (isNaN(nd)) { alert('Invalid date.'); return; }
   const team = prompt('Dismantled by (team / scaffolder):', '');
   if (team === null) return;
-  const u = workerUrl(); if (!u) { alert('Not connected.'); return; }
+  const u = SCF_WORKER_URL;
   const payload = { action:'scaffold_action', subAction:'dismantle', id: scaff.id, fromTab:'active', dismantledAt: nd.toISOString(), dismantledBy: team };
   fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
     .then(res => res.json())
@@ -3283,9 +3287,10 @@ const SCF = {
   editQty: {}
 };
 
+const SCF_WORKER_URL = 'https://kaefer-forms.s-middleton.workers.dev';
+
 function scfLoad() {
-  const u = workerUrl();
-  if (!u) { SCF.err = 'Sync URL not configured'; scfRender(); return; }
+  const u = SCF_WORKER_URL;
   SCF.loading = true; SCF.err = null;
   if (ACTIVE === 'scaffold') scfRender();
   fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify({action:'scaffold_list'}) })
@@ -3586,7 +3591,7 @@ function scfConfirmDelete() {
 function scfSaveEdit() {
   if (!SCF.openDetail) return;
   const scaff = SCF.openDetail.scaffold;
-  const u = workerUrl(); if (!u) { alert('Not connected.'); return; }
+  const u = SCF_WORKER_URL;
   const cleaned = {};
   Object.keys(SCF.editQty).forEach(k => { const q = Number(SCF.editQty[k])||0; if (q > 0) cleaned[k] = q; });
   const payload = { action: 'scaffold_action', subAction: 'edit', id: scaff.id, fromTab: SCF.openDetail.tab, quantities: cleaned };
@@ -3604,7 +3609,7 @@ function scfSaveEdit() {
 function scfSendAction(action, extra) {
   if (!SCF.openDetail) return;
   const scaff = SCF.openDetail.scaffold;
-  const u = workerUrl(); if (!u) { alert('Not connected.'); return; }
+  const u = SCF_WORKER_URL;
   const payload = Object.assign({ action: 'scaffold_action', subAction: action, id: scaff.id, fromTab: SCF.openDetail.tab }, extra||{});
   fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
     .then(r => r.json())

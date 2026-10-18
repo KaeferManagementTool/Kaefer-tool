@@ -803,6 +803,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
   </div>
 </div>
 
+<div class="ml" id="hr-bulk-paste-ml">
+  <div class="box" style="max-width:1000px">
+    <div class="mh" style="--accent:var(--t-hours)">
+      <h3>📚 Bulk paste — historical weeks</h3>
+      <button class="x" onclick="hrCloseBulkPaste()">×</button>
+    </div>
+    <div class="mb">
+      <div style="padding:11px 13px;background:#fff3e0;border:1px solid #ffcc80;border-radius:var(--r-sm);font-size:12px;color:#5d4037;margin-bottom:10px;line-height:1.5">
+        <b style="color:#e65100">Use this to backfill a year (or more) of weeks in one go.</b><br>
+        Open your Excel hours register, select every row from the earliest week to the latest (including every <b>WEEK XX</b> and <b>BREAK IN WORK</b> separator between them), copy, and paste here. The tool detects each week automatically.<br>
+        · The latest week becomes the <b>current week</b>.<br>
+        · Every earlier week goes into the <b>archive</b> (searchable, viewable, exportable).<br>
+        · Weeks with labels you already have archived are <b>skipped</b> to avoid duplicates.
+      </div>
+      <div id="hr-bulk-area" contenteditable="true" style="min-height:260px;max-height:50vh;overflow:auto;border:2px dashed var(--line);border-radius:var(--r-md);padding:10px;background:var(--surface-2);font-size:11px"></div>
+      <div id="hr-bulk-status" style="margin-top:8px;font-size:12px;color:var(--mute);font-weight:600"></div>
+    </div>
+    <div class="mf">
+      <button class="btn-ghost" onclick="hrCloseBulkPaste()">Cancel</button>
+      <button class="btn-prim" style="--accent:var(--t-hours)" onclick="hrBulkParse()">▶ Parse all weeks</button>
+    </div>
+  </div>
+</div>
+
 <!-- Hours Register: Colours modal -->
 <div class="ml" id="hr-colours-ml">
   <div class="box">
@@ -2391,6 +2415,7 @@ function render_hours(stage, tabCfg) {
           <button id="hr-mode-arch" onclick="hrSetMode('archive')"  style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--mute)">Archive (${archive.length})</button>
         </div>
         <button class="btn-ghost" style="margin-left:12px" onclick="hrOpenPaste()">📋 Paste from Excel</button>
+        <button class="btn-ghost" style="margin-left:4px" onclick="hrOpenBulkPaste()" title="Backfill a year of history — paste multiple weeks in one go">📚 Bulk paste (year)</button>
         <button class="btn-ghost" onclick="hrOpenColours()" style="margin-left:6px">🎨 Colours</button>
         <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy incomplete</button>
       </div>
@@ -2773,6 +2798,139 @@ function hrOpenPaste() {
   setTimeout(() => document.getElementById('hr-paste-area').focus(), 60);
 }
 function hrClosePaste() { document.getElementById('hr-paste-ml').classList.remove('on'); }
+
+function hrOpenBulkPaste() {
+  const ml = document.getElementById('hr-bulk-paste-ml');
+  document.getElementById('hr-bulk-area').innerHTML = '';
+  document.getElementById('hr-bulk-status').textContent = '';
+  ml.classList.add('on');
+  setTimeout(() => document.getElementById('hr-bulk-area').focus(), 60);
+}
+function hrCloseBulkPaste() { document.getElementById('hr-bulk-paste-ml').classList.remove('on'); }
+
+// Parse a single <tr>'s cells into an HR row, or null if it's not a job row.
+// Shared between hrParsePaste and hrBulkParse so the two stay in sync.
+function hrParseRowFromCells(cells, mode, idSeed) {
+  const vals = cells.map(c => c.textContent.trim());
+  if (vals.length < 4) return null;
+  let date = '';
+  for (const v of vals.slice(0, 3)) {
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(v)) {
+      const p = v.split(/[\/\-]/);
+      const yr = p[2].length === 2 ? '20'+p[2] : p[2];
+      date = yr + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
+      break;
+    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(v)) { date = v.slice(0,10); break; }
+  }
+  const orderIdx = vals.findIndex(v => /^\d{6,}$/.test(v));
+  const order = orderIdx >= 0 ? vals[orderIdx] : '';
+  if (!date && !order) return null;
+  const desc  = vals[orderIdx+3] || vals[5] || '';
+  const short = vals[orderIdx+4] || vals[6] || '';
+  const hoursVal = vals[orderIdx+5] || vals[7] || '';
+  if (!order && !desc.trim() && !short.trim() && !hoursVal.trim()) return null;
+  let colour = 'orange';
+  for (const c of cells) {
+    const style = (c.getAttribute('style') || '') + ' ' + (c.getAttribute('bgcolor') || '');
+    const m = style.match(/background[^:]*:\s*(rgb\([^)]+\)|#[0-9a-f]{3,6})/i);
+    const bg = m ? m[1] : (c.getAttribute('bgcolor') || '');
+    if (bg) { const d = detectColourBucket(bg); if (d) { colour = d; break; } }
+  }
+  return {
+    id: 'hr_' + (idSeed || Date.now()) + '_' + Math.random().toString(36).slice(2,8),
+    date, order,
+    planner: vals[1] || '',
+    op: vals[orderIdx+1] || vals[3] || '',
+    loc: vals[orderIdx+2] || vals[4] || '',
+    desc, short, hours: hoursVal,
+    notes: vals[orderIdx+6] || vals[8] || '',
+    status: colour,
+    hoursStatus: 'orange',
+    day: '',
+    percent: '', erect: '', dismantle: '', modify: '',
+    planned: (mode === 'planned')
+  };
+}
+
+function hrBulkParse() {
+  const area = document.getElementById('hr-bulk-area');
+  const status = document.getElementById('hr-bulk-status');
+  const html = area.innerHTML;
+  if (!html.trim()) { alert('Paste something first.'); return; }
+  status.textContent = 'Parsing...';
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const trs = Array.from(doc.querySelectorAll('tr'));
+  if (!trs.length) { alert('No table rows detected. Make sure you copied directly from Excel so the HTML comes through.'); return; }
+
+  const weeks = [];
+  let currentWeek = null;
+  let mode = 'planned';
+
+  trs.forEach((tr, i) => {
+    const cells = Array.from(tr.querySelectorAll('td, th'));
+    const text = cells.map(c => c.textContent.trim()).join(' ').trim();
+    if (!text) return;
+    const up = text.toUpperCase();
+    if (/^WEEK\s*\d+/.test(up)) {
+      if (currentWeek) weeks.push(currentWeek);
+      currentWeek = { label: text.replace(/\s+/g,' ').trim(), rows: [] };
+      mode = 'planned';
+      return;
+    }
+    if (/BREAK IN WORK/.test(up)) { mode = 'unplanned'; return; }
+    if (!currentWeek) {
+      // Rows before any WEEK header — attach them to an "unlabelled" bucket
+      currentWeek = { label: '(no week header)', rows: [] };
+    }
+    const row = hrParseRowFromCells(cells, mode, Date.now()+'_'+weeks.length+'_'+i);
+    if (row) currentWeek.rows.push(row);
+  });
+  if (currentWeek) weeks.push(currentWeek);
+
+  const nonEmpty = weeks.filter(w => w.rows.length > 0);
+  if (!nonEmpty.length) {
+    status.innerHTML = '<span style="color:var(--err)">⚠ No weeks detected. Did your paste include the WEEK XX separator rows?</span>';
+    return;
+  }
+
+  // Sort chronologically by each week's earliest date
+  nonEmpty.forEach(w => {
+    const dates = w.rows.map(r => r.date).filter(Boolean).sort();
+    w.earliestDate = dates[0] || '';
+    w.archivedAt = (w.earliestDate ? new Date(w.earliestDate+'T00:00:00').toISOString() : new Date().toISOString());
+  });
+  nonEmpty.sort((a,b) => (a.earliestDate||'~').localeCompare(b.earliestDate||'~'));
+
+  const totalRows = nonEmpty.reduce((n,w) => n + w.rows.length, 0);
+  const latest = nonEmpty[nonEmpty.length-1];
+  const earlierWeeks = nonEmpty.slice(0, -1).reverse(); // newest first for archive
+
+  // Dedupe against existing archive by label
+  const existingArch = hrGetArchive();
+  const existingLabels = new Set(existingArch.map(a => (a.label||'').trim().toUpperCase()));
+  const toArchive = earlierWeeks.filter(w => !existingLabels.has((w.label||'').trim().toUpperCase()));
+  const skipped = earlierWeeks.length - toArchive.length;
+
+  const confirmMsg = `Found ${nonEmpty.length} week(s), ${totalRows} rows total.\n\n` +
+    `• Current week will become: "${latest.label}" (${latest.rows.length} rows)\n` +
+    `• Archive will gain: ${toArchive.length} week(s)` + (skipped ? ` (${skipped} skipped — already archived)` : '') +
+    `\n\nThis will REPLACE your current week. Continue?`;
+  if (!confirm(confirmMsg)) { status.textContent = ''; return; }
+
+  // Apply
+  const newArchive = toArchive.concat(existingArch);
+  hrSetArchive(newArchive);
+  HR.rows = latest.rows;
+  HR.weekLabel = latest.label;
+  hrSave();
+
+  hrCloseBulkPaste();
+  alert('✓ Imported ' + nonEmpty.length + ' week(s), ' + totalRows + ' rows.\n\nCurrent week: "' + latest.label + '"\nArchived: ' + toArchive.length + (skipped ? ' (' + skipped + ' skipped as duplicates)' : ''));
+  render_hours(document.getElementById('stage'), null);
+}
 
 function hrParsePaste() {
   const area = document.getElementById('hr-paste-area');

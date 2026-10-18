@@ -36,6 +36,7 @@
   --t-registers: #00838f;
   --t-rr: #ad1457;
   --t-scaffold: #283593;
+  --t-ccv: #cc0000;
   --t-reports: #455a64;
 
   /* Status */
@@ -894,7 +895,7 @@ const TABS = [
     desc:'Recognition log with Smart Choices tags, Edit on each row, "In Portal" tick to track what\'s been pushed to KAEFER\'s portal.' },
   { id:'scaffold',    label:'Scaffold Register', accent:'var(--t-scaffold)',    phase:3, status:'in build',
     desc:'Scaffold inventory, erect / dismantle status, inspections due.' },
-  { id:'ccv',         label:'CCV Wheel',         accent:'var(--t-rr)',          phase:3, status:'coming',
+  { id:'ccv',         label:'CCV Wheel',         accent:'var(--t-ccv)',         phase:3, status:'in build',
     desc:'Critical control verification wheel. Keep the visualisation, standardise entry.' },
   { id:'reports',     label:'Reporting',         accent:'var(--t-reports)',     phase:4, status:'coming',
     desc:'Planned vs Unplanned (from Hours Register), Quarterly, CRM. Read-only aggregations.' }
@@ -3274,6 +3275,499 @@ function dailyToggleBigScreen() {
 }
 
 /* ============================================================
+   CCV WHEEL — Critical Control Verification
+============================================================ */
+const CCV_HAZARDS = [
+  { full:'Vehicle impact on person',           lines:['Vehicle','impact','on person'] },
+  { full:'Vehicle collision or rollover',      lines:['Vehicle','collision /','rollover'] },
+  { full:'Contact with electricity',           lines:['Contact','with','electricity'] },
+  { full:'Confined spaces',                    lines:['Confined','spaces'] },
+  { full:'Entanglement and crushing',          lines:['Entanglement','& crushing'] },
+  { full:'Exposure to hazardous substances',   lines:['Hazardous','substances'] },
+  { full:'Fall from height',                   lines:['Fall from','height'] },
+  { full:'Falling objects',                    lines:['Falling','objects'] },
+  { full:'Lifting operations',                 lines:['Lifting','operations'] },
+  { full:'Exposure to thermal substances',     lines:['Thermal','substances'] },
+  { full:'Rope failure',                       lines:['Rope','failure'] },
+  { full:'Uncontrolled release of energy',     lines:['Uncontrolled','energy','release'] }
+];
+const CCV_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const CCV_MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+const CCV = {
+  loaded: false,
+  loading: false,
+  err: null,
+  mon: new Date().getMonth(),
+  yr:  new Date().getFullYear(),
+  data: [],       // 12 segments: {inspections:[{type,result,notes,date}]}
+  selectedIdx: null,
+  modalOpen: false,
+  inspType: '',   // 'CCC' or 'CCFV'
+  inspResult: '', // 'green' or 'red'
+  attempt: 0
+};
+
+function ccvEmptyData() {
+  return CCV_HAZARDS.map(() => ({ inspections: [] }));
+}
+
+function ccvCounts(seg) {
+  const inspections = (seg && seg.inspections) || [];
+  let ccc=0, ccfv=0, red=0;
+  inspections.forEach(it => {
+    if (it.type === 'CCC') ccc++;
+    else if (it.type === 'CCFV') ccfv++;
+    if (it.result === 'red') red++;
+  });
+  return { ccc, ccfv, red };
+}
+
+function ccvLoad() {
+  const u = workerUrl();
+  if (!u) { CCV.err = 'Sync URL not configured'; ccvRender(); return; }
+  CCV.loading = true; CCV.err = null;
+  if (ACTIVE === 'ccv') ccvRender();
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify({action:'load_ccv', month: CCV.mon, year: CCV.yr}) })
+    .then(r => r.json())
+    .then(j => {
+      CCV.loading = false;
+      if (!j.ok) throw new Error(j.error || 'Load failed');
+      CCV.data = ccvEmptyData();
+      const payload = j.data || {};
+      Object.keys(payload).forEach(k => {
+        const i = parseInt(k, 10);
+        if (i >= 0 && i < 12) {
+          const seg = payload[i] || payload[k];
+          CCV.data[i] = { inspections: Array.isArray(seg.inspections) ? seg.inspections : [] };
+        }
+      });
+      CCV.loaded = true;
+      if (ACTIVE === 'ccv') ccvRender();
+    })
+    .catch(e => {
+      CCV.loading = false;
+      CCV.err = e.message;
+      // Fall back to localStorage cache for offline
+      try {
+        const cached = JSON.parse(localStorage.getItem('kaefer_v2_ccv_'+CCV.yr+'_'+CCV.mon) || 'null');
+        if (cached && Array.isArray(cached)) { CCV.data = cached; CCV.loaded = true; }
+        else CCV.data = ccvEmptyData();
+      } catch(ex) { CCV.data = ccvEmptyData(); }
+      if (ACTIVE === 'ccv') ccvRender();
+    });
+}
+
+function ccvSave() {
+  // Local cache always
+  try { localStorage.setItem('kaefer_v2_ccv_'+CCV.yr+'_'+CCV.mon, JSON.stringify(CCV.data)); } catch(e) {}
+  const u = workerUrl();
+  if (!u) return;
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify({action:'save_ccv', month: CCV.mon, year: CCV.yr, data: CCV.data}) })
+    .catch(e => console.warn('CCV save failed:', e.message));
+}
+
+function ccvNavMonth(delta) {
+  let m = CCV.mon + delta, y = CCV.yr;
+  if (m < 0) { m = 11; y--; }
+  if (m > 11){ m = 0;  y++; }
+  CCV.mon = m; CCV.yr = y;
+  CCV.loaded = false;
+  CCV.data = ccvEmptyData();
+  ccvLoad();
+}
+
+function render_ccv(stage, tabCfg) {
+  if (!CCV.loaded && !CCV.loading && !CCV.err) ccvLoad();
+  if (!CCV.data.length) CCV.data = ccvEmptyData();
+  ccvRender();
+}
+
+function ccvRender() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  const totals = CCV.data.reduce((acc, seg) => {
+    const c = ccvCounts(seg);
+    acc.ccc += c.ccc; acc.ccfv += c.ccfv; acc.red += c.red;
+    return acc;
+  }, { ccc:0, ccfv:0, red:0 });
+  const notInPlace = CCV.data.map((seg, i) => ({ seg, i })).filter(x => ccvCounts(x.seg).red > 0);
+
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h">
+        <span class="accent" style="--accent:var(--t-ccv)"></span>
+        <h2>CCV Wheel</h2>
+        <div style="display:flex;align-items:center;gap:4px;margin-left:14px">
+          <button class="btn-ghost" onclick="ccvNavMonth(-1)" title="Previous month">◀</button>
+          <div style="min-width:150px;text-align:center;padding:6px 12px;background:var(--t-ccv);color:#fff;border-radius:var(--r-sm);font-weight:800;font-size:13px;letter-spacing:.5px">${CCV_MONTHS[CCV.mon]} ${CCV.yr}</div>
+          <button class="btn-ghost" onclick="ccvNavMonth(1)" title="Next month">▶</button>
+          <button class="btn-ghost" style="margin-left:6px" onclick="CCV.mon=new Date().getMonth();CCV.yr=new Date().getFullYear();CCV.loaded=false;ccvLoad()">This month</button>
+        </div>
+        <div style="flex:1"></div>
+        <span style="font-size:11px;color:var(--mute);margin-right:8px">${CCV.loading?'⟳ syncing…':CCV.err?'<span style="color:var(--err)">⚠ '+escHtml(CCV.err)+'</span>':CCV.loaded?'✓ synced':''}</span>
+        <button class="btn-ghost" onclick="ccvLoad()">↻ Refresh</button>
+        <button class="btn-ghost" style="margin-left:6px" onclick="ccvExportCsv()">⬇ CSV</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,560px) 1fr;gap:14px;padding:14px;align-items:start">
+        <!-- Wheel + stats column -->
+        <div>
+          <div style="position:relative;background:linear-gradient(135deg,#fafafa,#f0f0f0);border:1px solid var(--line);border-radius:var(--r-md);padding:14px;text-align:center">
+            <canvas id="ccv-canvas" width="520" height="520" style="max-width:100%;height:auto;cursor:pointer"></canvas>
+            <div style="position:absolute;top:14px;left:14px;font-size:10px;color:var(--mute);background:#fff;padding:3px 8px;border-radius:var(--r-sm);border:1px solid var(--line);font-weight:700;letter-spacing:.5px;text-transform:uppercase">Click a segment</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
+            <div style="padding:11px 14px;background:#fff;border:1px solid var(--line);border-top:4px solid #37474f;border-radius:var(--r-sm);text-align:center">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase">CCCs</div>
+              <div style="font-size:26px;font-weight:900;color:#37474f;margin-top:2px">${totals.ccc}</div>
+            </div>
+            <div style="padding:11px 14px;background:#fff;border:1px solid var(--line);border-top:4px solid #607d8b;border-radius:var(--r-sm);text-align:center">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase">CCFVs</div>
+              <div style="font-size:26px;font-weight:900;color:#607d8b;margin-top:2px">${totals.ccfv}</div>
+            </div>
+            <div style="padding:11px 14px;background:#fff;border:1px solid var(--line);border-top:4px solid var(--t-ccv);border-radius:var(--r-sm);text-align:center">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase">Not in Place</div>
+              <div style="font-size:26px;font-weight:900;color:var(--t-ccv);margin-top:2px">${totals.red}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right side: hazard table + red alerts -->
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#fff">
+            <div style="background:#1a1a1a;color:#fff;padding:8px 12px;font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase">Hazard Summary</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead><tr style="background:#f5f5f5;color:#555;font-size:10.5px;letter-spacing:.3px">
+                <th style="padding:7px 10px;text-align:left">HAZARD</th>
+                <th style="padding:7px 8px;text-align:center;width:50px">CCC</th>
+                <th style="padding:7px 8px;text-align:center;width:60px">CCFV</th>
+                <th style="padding:7px 8px;text-align:center;width:80px">NOT IN PLACE</th>
+                <th style="padding:7px 10px;text-align:left;width:120px">STATUS</th>
+              </tr></thead>
+              <tbody>${CCV_HAZARDS.map((h, i) => {
+                const c = ccvCounts(CCV.data[i]);
+                const has = c.ccc + c.ccfv > 0;
+                const statusHtml = !has
+                  ? '<span style="background:#eceff1;color:#607d8b;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.3px">NO DATA</span>'
+                  : c.red > 0
+                    ? '<span style="background:var(--t-ccv);color:#fff;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:800;letter-spacing:.3px">NOT IN PLACE</span>'
+                    : '<span style="background:#2e7d32;color:#fff;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:800;letter-spacing:.3px">IN PLACE</span>';
+                return `<tr style="border-top:1px solid var(--line);cursor:pointer" onclick="ccvOpenModal(${i})" onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background=''">
+                  <td style="padding:7px 10px;font-weight:600">${escHtml(h.full)}</td>
+                  <td style="padding:7px 8px;text-align:center">${c.ccc || '—'}</td>
+                  <td style="padding:7px 8px;text-align:center">${c.ccfv || '—'}</td>
+                  <td style="padding:7px 8px;text-align:center;color:${c.red>0?'var(--t-ccv)':'inherit'};font-weight:${c.red>0?'800':'400'}">${c.red || '—'}</td>
+                  <td style="padding:7px 10px">${statusHtml}</td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+          </div>
+
+          <div style="border:${notInPlace.length?'2px':'1px'} solid ${notInPlace.length?'var(--t-ccv)':'var(--line)'};border-radius:var(--r-md);overflow:hidden;background:#fff">
+            <div style="background:${notInPlace.length?'var(--t-ccv)':'#1a1a1a'};color:#fff;padding:8px 12px;font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;gap:8px">
+              <span>⚠ Not In Place — Action Needed</span>
+              <span style="background:rgba(255,255,255,.25);padding:2px 8px;border-radius:10px;font-size:11px">${notInPlace.reduce((n,x)=>n+ccvCounts(x.seg).red,0)}</span>
+            </div>
+            ${notInPlace.length ? ccvRedListHtml(notInPlace) : '<div style="padding:20px;text-align:center;color:var(--mute);font-size:12px">No controls flagged "not in place" this month. Nice work.</div>'}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Draw wheel after DOM is ready
+  requestAnimationFrame(ccvDrawWheel);
+  ccvAttachCanvasHandler();
+}
+
+function ccvRedListHtml(notInPlace) {
+  const rows = [];
+  notInPlace.forEach(({seg, i}) => {
+    (seg.inspections || []).forEach((it, ii) => {
+      if (it.result === 'red') rows.push({hz: CCV_HAZARDS[i].full, type: it.type, notes: it.notes || '', date: it.date || '', segIdx: i, inspIdx: ii });
+    });
+  });
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:#f5f5f5;color:#555;font-size:10.5px"><th style="padding:7px 10px;text-align:left">HAZARD</th><th style="padding:7px 8px;text-align:left;width:60px">TYPE</th><th style="padding:7px 10px;text-align:left">NOTES</th><th style="padding:7px 10px;text-align:left;width:90px">DATE</th><th style="padding:7px 6px;width:40px"></th></tr></thead>
+    <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--line)">
+      <td style="padding:6px 10px;font-weight:700;vertical-align:top">${escHtml(r.hz)}</td>
+      <td style="padding:6px 8px;font-size:11px;color:var(--mute);font-weight:700;vertical-align:top">${escHtml(r.type||'—')}</td>
+      <td style="padding:6px 10px;font-size:11.5px;vertical-align:top;color:#555">${r.notes ? escHtml(r.notes) : '<i style="color:#bbb">No note</i>'}</td>
+      <td style="padding:6px 10px;font-size:11px;color:var(--mute);white-space:nowrap;vertical-align:top">${fdDisplay(r.date)}</td>
+      <td style="padding:6px 6px;text-align:center;vertical-align:top"><button onclick="event.stopPropagation();ccvDeleteInsp(${r.segIdx},${r.inspIdx})" style="background:none;border:0;color:var(--err);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px" title="Delete this entry">×</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// ============================================================
+// Canvas wheel drawing
+// ============================================================
+const CCV_CX = 260, CCV_CY = 260, CCV_RO = 220, CCV_RI = 157, CCV_RH = 52;
+const CCV_N = 12, CCV_SLICE = (2*Math.PI)/CCV_N, CCV_OFFSET = -Math.PI/2;
+
+function ccvDrawWheel() {
+  const cv = document.getElementById('ccv-canvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,520,520);
+
+  for (let i = 0; i < CCV_N; i++) {
+    const s = CCV_OFFSET + i * CCV_SLICE;
+    const e = s + CCV_SLICE;
+    const mid = (s + e) / 2;
+    const seg = CCV.data[i] || { inspections: [] };
+    const counts = ccvCounts(seg);
+    const hasRed = counts.red > 0;
+    const hasData = counts.ccc + counts.ccfv > 0;
+
+    // Outer wedge (CCC ring) — tint by status
+    const outerFill = !hasData ? '#cfd8dc' : hasRed ? '#ffcdd2' : '#c8e6c9';
+    ctx.beginPath();
+    ctx.moveTo(CCV_CX + CCV_RI*Math.cos(s), CCV_CY + CCV_RI*Math.sin(s));
+    ctx.arc(CCV_CX, CCV_CY, CCV_RO, s, e);
+    ctx.arc(CCV_CX, CCV_CY, CCV_RI, e, s, true);
+    ctx.closePath();
+    ctx.fillStyle = outerFill; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
+
+    // Inner wedge (CCFV ring) — lighter version
+    const innerFill = !hasData ? '#eceff1' : hasRed ? '#ffebee' : '#e8f5e9';
+    ctx.beginPath();
+    ctx.moveTo(CCV_CX + CCV_RH*Math.cos(s), CCV_CY + CCV_RH*Math.sin(s));
+    ctx.arc(CCV_CX, CCV_CY, CCV_RI, s, e);
+    ctx.arc(CCV_CX, CCV_CY, CCV_RH, e, s, true);
+    ctx.closePath();
+    ctx.fillStyle = innerFill; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+
+    // Bubbles — CCC in outer ring, CCFV in inner ring
+    const cccInsp = (seg.inspections||[]).filter(it => it.type === 'CCC');
+    const ccfvInsp = (seg.inspections||[]).filter(it => it.type === 'CCFV');
+    ccvDrawBubbles(ctx, cccInsp, mid, (CCV_RI + CCV_RO)/2, CCV_RO - CCV_RI);
+    ccvDrawBubbles(ctx, ccfvInsp, mid, (CCV_RH + CCV_RI)/2, CCV_RI - CCV_RH);
+
+    // Hazard label outside the wheel
+    const lr = CCV_RO + 20;
+    const lx = CCV_CX + lr*Math.cos(mid);
+    const ly = CCV_CY + lr*Math.sin(mid);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = 'bold 9.5px system-ui,-apple-system,Segoe UI,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const lines = CCV_HAZARDS[i].lines;
+    for (let li = 0; li < lines.length; li++) {
+      ctx.fillText(lines[li], lx, ly + (li - (lines.length-1)/2) * 11);
+    }
+  }
+
+  // Centre circle — month/year
+  ctx.beginPath();
+  ctx.arc(CCV_CX, CCV_CY, CCV_RH, 0, 2*Math.PI);
+  ctx.fillStyle = '#cc0000'; ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px system-ui,-apple-system,Segoe UI,sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(CCV_MONTHS_SHORT[CCV.mon], CCV_CX, CCV_CY - 8);
+  ctx.font = 'bold 11px system-ui,-apple-system,Segoe UI,sans-serif';
+  ctx.fillText(String(CCV.yr), CCV_CX, CCV_CY + 8);
+}
+
+function ccvDrawBubbles(ctx, inspections, midAngle, radius, radialThickness) {
+  if (!inspections.length) return;
+  const n = inspections.length;
+  const BR = n <= 4 ? 5 : n <= 8 ? 4 : n <= 12 ? 3 : 2.5;
+  let maxPerRow = Math.floor((CCV_SLICE * radius * 0.7) / (BR * 2.4));
+  if (maxPerRow < 1) maxPerRow = 1;
+  let rows = Math.ceil(n / maxPerRow);
+  if (rows > 2) rows = 2;
+  const perRow = Math.ceil(n / rows);
+  const spacing = BR * 2.3;
+
+  let idx = 0;
+  for (let r = 0; r < rows; r++) {
+    const rowCount = Math.min(perRow, n - idx);
+    const rowRadius = radius + (r - (rows-1)/2) * spacing;
+    const totalArc = (rowCount - 1) * spacing;
+    const startOff = -totalArc / (2 * rowRadius);
+    for (let b = 0; b < rowCount; b++) {
+      const a = midAngle + startOff + (b * spacing / rowRadius);
+      const bx = CCV_CX + rowRadius * Math.cos(a);
+      const by = CCV_CY + rowRadius * Math.sin(a);
+      const insp = inspections[idx++];
+      ctx.beginPath();
+      ctx.arc(bx, by, BR, 0, 2*Math.PI);
+      ctx.fillStyle = insp.result === 'red' ? '#c62828' : '#2e7d32';
+      ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+  }
+}
+
+function ccvAttachCanvasHandler() {
+  const cv = document.getElementById('ccv-canvas');
+  if (!cv || cv._ccvHandlerAttached) return;
+  cv._ccvHandlerAttached = true;
+  cv.addEventListener('click', (ev) => {
+    const r = cv.getBoundingClientRect();
+    const sx = 520 / r.width, sy = 520 / r.height;
+    const x = (ev.clientX - r.left) * sx - CCV_CX;
+    const y = (ev.clientY - r.top) * sy - CCV_CY;
+    const dist = Math.sqrt(x*x + y*y);
+    if (dist < CCV_RH || dist > CCV_RO) return;
+    let a = Math.atan2(y, x) - CCV_OFFSET;
+    if (a < 0) a += 2*Math.PI;
+    const idx = Math.floor(a / CCV_SLICE) % CCV_N;
+    ccvOpenModal(idx);
+  });
+}
+
+// ============================================================
+// Hazard modal
+// ============================================================
+function ccvOpenModal(idx) {
+  CCV.selectedIdx = idx;
+  CCV.inspType = ''; CCV.inspResult = '';
+  CCV.modalOpen = true;
+  ccvRenderModal();
+}
+
+function ccvCloseModal() {
+  CCV.modalOpen = false;
+  CCV.selectedIdx = null;
+  CCV.inspType = ''; CCV.inspResult = '';
+  const m = document.getElementById('ccv-modal'); if (m) m.remove();
+}
+
+function ccvRenderModal() {
+  if (!CCV.modalOpen || CCV.selectedIdx == null) return;
+  const idx = CCV.selectedIdx;
+  const hz = CCV_HAZARDS[idx];
+  const seg = CCV.data[idx] || { inspections: [] };
+  const inspections = (seg.inspections || []).slice().reverse(); // newest first
+  const counts = ccvCounts(seg);
+
+  let modal = document.getElementById('ccv-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'ccv-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+    modal.onclick = (e) => { if (e.target === modal) ccvCloseModal(); };
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:var(--r-md);max-width:620px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="background:var(--t-ccv);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;font-weight:800;letter-spacing:.5px;padding:3px 8px;background:rgba(0,0,0,.25);border-radius:3px">${CCV_MONTHS_SHORT[CCV.mon]} ${CCV.yr}</span>
+        <h3 style="margin:0;font-size:16px;font-weight:800">${escHtml(hz.full)}</h3>
+        <div style="flex:1"></div>
+        <button onclick="ccvCloseModal()" style="background:transparent;border:0;color:#fff;font-size:22px;cursor:pointer;padding:0 6px">×</button>
+      </div>
+      <div style="overflow-y:auto;flex:1">
+        <!-- Add new inspection form -->
+        <div style="padding:14px;background:#fafafa;border-bottom:1px solid var(--line)">
+          <div style="font-weight:800;font-size:11px;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;margin-bottom:8px">Log an inspection</div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <div style="flex:1">
+              <div style="font-size:10px;color:var(--mute);margin-bottom:4px;font-weight:700">TYPE</div>
+              <div style="display:flex;gap:6px">
+                ${['CCC','CCFV'].map(t => `<button onclick="CCV.inspType='${t}';ccvRenderModal()" style="flex:1;padding:8px;border:2px solid ${CCV.inspType===t?'#1a1a1a':'var(--line)'};background:${CCV.inspType===t?'#1a1a1a':'#fff'};color:${CCV.inspType===t?'#fff':'#1a1a1a'};font-weight:700;font-size:12px;border-radius:var(--r-sm);cursor:pointer">${t}</button>`).join('')}
+              </div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:10px;color:var(--mute);margin-bottom:4px;font-weight:700">RESULT</div>
+              <div style="display:flex;gap:6px">
+                <button onclick="CCV.inspResult='green';ccvRenderModal()" style="flex:1;padding:8px;border:2px solid ${CCV.inspResult==='green'?'#2e7d32':'var(--line)'};background:${CCV.inspResult==='green'?'#2e7d32':'#fff'};color:${CCV.inspResult==='green'?'#fff':'#2e7d32'};font-weight:700;font-size:12px;border-radius:var(--r-sm);cursor:pointer">✓ IN PLACE</button>
+                <button onclick="CCV.inspResult='red';ccvRenderModal()" style="flex:1;padding:8px;border:2px solid ${CCV.inspResult==='red'?'var(--t-ccv)':'var(--line)'};background:${CCV.inspResult==='red'?'var(--t-ccv)':'#fff'};color:${CCV.inspResult==='red'?'#fff':'var(--t-ccv)'};font-weight:700;font-size:12px;border-radius:var(--r-sm);cursor:pointer">✗ NOT IN PLACE</button>
+              </div>
+            </div>
+          </div>
+          ${CCV.inspResult === 'red' ? `<div style="margin-bottom:10px">
+            <div style="font-size:10px;color:var(--mute);margin-bottom:4px;font-weight:700">NOTES (required for not-in-place)</div>
+            <textarea id="ccv-insp-notes" rows="2" placeholder="What was found? What action is needed?" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;font-family:inherit;resize:vertical;min-height:50px"></textarea>
+          </div>` : ''}
+          <button onclick="ccvAddInspection()" ${(!CCV.inspType || !CCV.inspResult)?'disabled':''} style="width:100%;padding:9px;background:${(!CCV.inspType || !CCV.inspResult)?'#ccc':'var(--t-ccv)'};color:#fff;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:${(!CCV.inspType || !CCV.inspResult)?'not-allowed':'pointer'};letter-spacing:.5px;text-transform:uppercase">+ Add inspection</button>
+        </div>
+
+        <!-- Existing inspections list -->
+        <div style="padding:14px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div style="font-weight:800;font-size:11px;letter-spacing:.5px;color:var(--mute);text-transform:uppercase">This month (${inspections.length})</div>
+            <div style="flex:1"></div>
+            <span style="font-size:11px;color:var(--mute)">CCC: <b>${counts.ccc}</b> · CCFV: <b>${counts.ccfv}</b> · Red: <b style="color:var(--t-ccv)">${counts.red}</b></span>
+          </div>
+          ${inspections.length ? inspections.map((it, revIdx) => {
+            const origIdx = seg.inspections.length - 1 - revIdx;
+            const col = it.result === 'red' ? 'var(--t-ccv)' : '#2e7d32';
+            const bg = it.result === 'red' ? '#fff5f5' : '#f1f8f3';
+            const brd = it.result === 'red' ? '#ffcdd2' : '#c8e6c9';
+            const icon = it.result === 'red' ? '✗' : '✓';
+            return `<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;background:${bg};border:1px solid ${brd};border-radius:var(--r-sm);padding:7px 10px">
+              <span style="background:${col};color:#fff;font-weight:700;font-size:10px;padding:3px 7px;border-radius:3px;min-width:52px;text-align:center;letter-spacing:.3px">${icon} ${escHtml(it.type||'')}</span>
+              <div style="flex:1;font-size:11.5px;color:#1a1a1a">
+                ${it.notes ? '<div>'+escHtml(it.notes)+'</div>' : (it.result === 'red' ? '<i style="color:#bbb">No note</i>' : '')}
+                <div style="font-size:10px;color:var(--mute);margin-top:${it.notes||it.result==='red'?'2':'0'}px">${fdDisplay(it.date)}</div>
+              </div>
+              <button onclick="ccvDeleteInsp(${idx},${origIdx})" style="background:none;border:0;color:var(--err);cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Delete">×</button>
+            </div>`;
+          }).join('') : '<div style="padding:16px;text-align:center;color:var(--mute);font-size:12px;font-style:italic;background:#fafafa;border-radius:var(--r-sm)">No inspections logged for this hazard yet.</div>'}
+        </div>
+      </div>
+      <div style="padding:10px 16px;background:var(--surface-2);border-top:1px solid var(--line);text-align:right">
+        <button class="btn-ghost" onclick="ccvCloseModal()">Close</button>
+      </div>
+    </div>
+  `;
+}
+
+function ccvAddInspection() {
+  if (CCV.selectedIdx == null) return;
+  if (!CCV.inspType || !CCV.inspResult) return;
+  const notes = CCV.inspResult === 'red' ? (document.getElementById('ccv-insp-notes')?.value || '').trim() : '';
+  const seg = CCV.data[CCV.selectedIdx];
+  if (!seg.inspections) seg.inspections = [];
+  seg.inspections.push({
+    type: CCV.inspType,
+    result: CCV.inspResult,
+    notes,
+    date: new Date().toISOString().slice(0,10)
+  });
+  CCV.inspType = ''; CCV.inspResult = '';
+  ccvSave();
+  ccvRender();
+  ccvRenderModal();
+}
+
+function ccvDeleteInsp(segIdx, inspIdx) {
+  if (!confirm('Delete this inspection entry?')) return;
+  const seg = CCV.data[segIdx];
+  if (!seg || !seg.inspections) return;
+  seg.inspections.splice(inspIdx, 1);
+  ccvSave();
+  ccvRender();
+  if (CCV.modalOpen && CCV.selectedIdx === segIdx) ccvRenderModal();
+}
+
+function ccvExportCsv() {
+  const rows = [['Hazard','Type','Result','Notes','Date']];
+  CCV.data.forEach((seg, i) => {
+    (seg.inspections || []).forEach(it => {
+      rows.push([CCV_HAZARDS[i].full, it.type||'', it.result||'', it.notes||'', it.date||'']);
+    });
+  });
+  if (rows.length === 1) { alert('No inspections to export.'); return; }
+  const csv = rows.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ccv-'+CCV.yr+'-'+String(CCV.mon+1).padStart(2,'0')+'.csv';
+  a.click();
+}
+
+
+/* ============================================================
    SCAFFOLD REGISTER
 ============================================================ */
 const SCF_COMPONENTS = [{"category":"Standards","items":[{"id":"c000","desc":"Standard 0.5m/1\u20198\" (1 Ring) - w/Spigot","kg":3.31},{"id":"c001","desc":"Standard 1.0m/3\u20193\" (2 Ring) - w/Spigot","kg":5.62},{"id":"c002","desc":"Standard 1.5m/4\u201911\" (3 Ring) - w/Spigot","kg":7.94},{"id":"c003","desc":"Standard 2.0m/6\u20196\" (4 Ring) - w/Spigot","kg":10.32},{"id":"c004","desc":"Standard 3.0m/9\u20199\"\u2019 (6 Ring) - w/Spigot","kg":14.99},{"id":"c005","desc":"Standard 0.5m/1\u201918\" (1 Ring) - Hanging Spigot","kg":2.24},{"id":"c006","desc":"Standard 1.0m/3\u20193\" (2 Ring) - Hanging Spigot","kg":6.78},{"id":"c007","desc":"Standard 1.5m/4\u201911\" (3 Ring) - Hanging Spigot","kg":8.76},{"id":"c008","desc":"Standard 2.0m/6\u20196\" (4 Ring) - Hanging Spigot","kg":11.0},{"id":"c009","desc":"Standard 2.5m/8\u20192\" (5 Ring) - Hanging Spigot","kg":13.9},{"id":"c010","desc":"Standard 3.0m/9\u20199\"\u2019 (6 Ring) - Hanging Spigot","kg":15.63},{"id":"c011","desc":"Standard 4.0m/13\u20191\" (8 Ring) - Hanging Spigot","kg":19.96},{"id":"c012","desc":"Standard 1.0m/3\u20193\" (2 Ring) - Handrail Standard","kg":4.79}]},{"category":"Ledgers","items":[{"id":"c013","desc":"Ledger O-Type 0.15m/6\"","kg":1.17},{"id":"c014","desc":"Ledger O-Type 0.35m/1\u20192\"","kg":2.0},{"id":"c015","desc":"Ledger O-Type 0.60m/1\u201911\"","kg":3.0},{"id":"c016","desc":"Ledger O-Type .65m/2\u20192\"","kg":3.07},{"id":"c017","desc":"Ledger O-Type 0.84m/2\u2019 8-5/8\"","kg":3.64},{"id":"c018","desc":"Ledger O-Type .88m/2\u201910 5/8\"","kg":4.0},{"id":"c019","desc":"Ledger O-Type 1.065m/3\u20196\"","kg":4.59},{"id":"c020","desc":"Ledger O-Type 1.15m/3\u201910\"","kg":4.86},{"id":"c021","desc":"Ledger O-Type 1.57m/5\u20192\"","kg":6.45},{"id":"c022","desc":"Ledger O-Type 1.82m/6\u2019","kg":7.25},{"id":"c023","desc":"Ledger O-Type 2.13m/7\u2019","kg":8.4},{"id":"c024","desc":"Ledger O-Type 2.43m/8\u2019","kg":9.52},{"id":"c025","desc":"Ledger O-Type 3.05m/10\u2019","kg":11.59},{"id":"c026","desc":"Ledger to Plank Transom O-Type 240mm - 1 Board","kg":3.38},{"id":"c027","desc":"Ledger to Plank Transom O-Type 480mm - 2 Board","kg":4.23},{"id":"c028","desc":"Ledger to Plank Transom O-Type 720mm - 3 Board","kg":5.07}]},{"category":"Truss Ledgers","items":[{"id":"c029","desc":"Truss Ledger O-Type 1.57m/5\u20192\"","kg":10.72},{"id":"c030","desc":"Truss Ledger O-Type 1.82m/6\u2019","kg":12.51},{"id":"c031","desc":"Truss Ledger O-Type 2.13m/7\u2019","kg":14.33},{"id":"c032","desc":"Truss Ledger O-Type 2.43m/8\u2019","kg":16.68},{"id":"c033","desc":"Truss Ledger O-Type 3.05m/10\u2019","kg":21.12}]},{"category":"Bay Braces","items":[{"id":"c034","desc":"Bay Brace 2.0 x 0.60m/1\u201911\" ORANGE","kg":5.16},{"id":"c035","desc":"Bay Brace 2.0 x 0.84m/2\u2019 8-5/8\" WHITE","kg":7.25},{"id":"c036","desc":"Bay Brace 2.0 x 0.88 m/2\u201910 5/8\" BLUE","kg":7.65},{"id":"c037","desc":"Bay Brace 2.0 x 1.065m/3\u20196\" YELLOW","kg":7.84},{"id":"c038","desc":"Bay Brace 2.0 x 1.15m/3\u201910\" PINK","kg":7.94},{"id":"c039","desc":"Bay Brace 2.0 x 1.57m/5\u20192\" RED","kg":8.54},{"id":"c040","desc":"Bay Brace 2.0 x 1.82m/6\u20190\" BLACK","kg":8.97},{"id":"c041","desc":"Bay Brace 2.0 x 2.13m/7\u20190\" BROWN","kg":9.52},{"id":"c042","desc":"Bay Brace 2.0 x 2.43m/8\u20190 GREEN","kg":10.14},{"id":"c043","desc":"Bay Brace 2.0 x 3.05m/10\u20190\" BLUE","kg":11.48},{"id":"c044","desc":"Bay Brace 1.5 x 2.57m/8\u20195\"","kg":9.2},{"id":"c045","desc":"Bay Brace 1.0 x 1.065 m/3\u20196\"","kg":5.25},{"id":"c046","desc":"Bay Brace 1.0 x 1.57m/5\u20192\"","kg":6.24}]},{"category":"Transoms","items":[{"id":"c047","desc":"Mid Transom .88/2\u201910 5/8\"","kg":4.5},{"id":"c048","desc":"Mid Transom 1.065m/3\u20196\"","kg":5.09},{"id":"c049","desc":"Mid Transom 1.15M/3\u201910\"","kg":5.45},{"id":"c050","desc":"Mid Transom 1.57m/5\u20192\"","kg":6.82},{"id":"c051","desc":"Mid Transom 1.82M/6\u2019","kg":7.8},{"id":"c052","desc":"Mid Transom 2.13M/7\u2019","kg":9.08},{"id":"c053","desc":"Mid Transom 2.43M/8\u2019","kg":10.1},{"id":"c054","desc":"Mid Transom 3.05M/10\u2019","kg":12.45},{"id":"c055","desc":"Vertical Mid Transom .5M Bolt, 23mm Nut (AU) (DOG BONE)","kg":3.36},{"id":"c056","desc":"Ladder Access Transom w/ Spigot .65m/2\u20192\"","kg":6.11},{"id":"c057","desc":"Plank to Plank Transom O-Type 240mm - 1 Board","kg":3.67},{"id":"c058","desc":"Plank to Plank Transom O-Type 480mm - 2 Board","kg":4.55},{"id":"c059","desc":"Plank to Plank Transom O-Type 720mm - 3 Board","kg":5.47}]},{"category":"Lattice/Aluminium Beams","items":[{"id":"c060","desc":"Lattice Girder 4.26m/14\u2019 - No Spigot","kg":47.09},{"id":"c061","desc":"Lattice Girder 5.17m/17\u2019 - No Spigot","kg":55.42},{"id":"c062","desc":"Lattice Girder 6.39m/21\u2019 - No Spigot","kg":68.62},{"id":"c063","desc":"Lattice Girder 8.52m/28\u2019 - No Spigot","kg":92.87},{"id":"c064","desc":"Lattice Beam Connector","kg":1.9},{"id":"c065","desc":"Lattice Beam Aluminum 4M - 750","kg":26.0},{"id":"c066","desc":"Lattice Beam Aluminum 6M - 750","kg":38.1},{"id":"c067","desc":"Aluminum Lattice Girder Beam - 4.26M (500mm)","kg":21.88},{"id":"c068","desc":"Aluminum Lattice Girder Beam - 6.39M (500mm)","kg":33.08},{"id":"c069","desc":"Aluminum Lattice Girder Beam - 8.52M (500mm)","kg":42.13},{"id":"c070","desc":"Aluminum Lattice Girder Beam Adapter","kg":5.34},{"id":"c071","desc":"Aluminum Lattice Girder Beam Joiner - 500mm","kg":12.19},{"id":"c072","desc":"Aluminum Beam 6 1/2\" x 6.14m/20\u2019","kg":37.2},{"id":"c073","desc":"Aluminum Beam 6 1/2\" x 8.52m/ 28\u2019","kg":52.08}]},{"category":"Decks/Planks/Boards","items":[{"id":"c074","desc":"Steel Plank 240mm - O-Type 0.60m/1\u201911\"","kg":5.57},{"id":"c075","desc":"Steel Plank 240mm - O-Type 0.84m/2\u20198 5/8\"","kg":6.99},{"id":"c076","desc":"Steel Plank 240mm - O-Type 0.88m/2\u201910 5/8\"","kg":7.01},{"id":"c077","desc":"Steel Plank 240mm- O-Type 1.065m/3\u20196\"","kg":8.15},{"id":"c078","desc":"Steel Plank 240mm - O-Type 1.15m/3\u201910\"","kg":8.63},{"id":"c079","desc":"Steel Plank 240mm- O-Type 1.57m/5\u20192\"","kg":10.98},{"id":"c080","desc":"Steel Plank 240mm - O-Type 1.82m/6\u2019","kg":12.48},{"id":"c081","desc":"Steel Plank 240mm - O-Type 2.13m/7\u2019","kg":14.33},{"id":"c082","desc":"Steel Plank 240mm - O-Type 2.43m/8\u2019","kg":15.98},{"id":"c083","desc":"Steel Plank 240mm - O-Type 3.05m/10\u2019","kg":19.57},{"id":"c084","desc":"Infill Plank .88m/2\u201910 5/8\"","kg":3.45},{"id":"c085","desc":"Infill Plank 1.065m/3\u20196\"","kg":4.31},{"id":"c086","desc":"Infill Plank 1.15m/3\u201910\"","kg":4.82},{"id":"c087","desc":"Infill Plank 1.57m/5\u20192\"","kg":6.58},{"id":"c088","desc":"Infill Plank 1.82m/6\u2019","kg":7.89},{"id":"c089","desc":"Infill Plank 2.13m/7\u2019","kg":9.19},{"id":"c090","desc":"Infill Plank 2.43m/8\u2019","kg":10.43},{"id":"c091","desc":"Infill Plank 3.05m/10\u2019","kg":13.29},{"id":"c092","desc":"Interlocking Toeboard .35m/1\u20192\"","kg":1.14},{"id":"c093","desc":"Interlocking Toeboard 0.60m/1\u201911\"","kg":2.4},{"id":"c094","desc":"Interlocking Toeboard 0.84m/2\u2019 8-5/8\"","kg":2.6},{"id":"c095","desc":"SideBracket/Hop-Up O-Type MK1 [non-spigot] 0.31m/1\u20190\" - 1 Board","kg":4.55},{"id":"c096","desc":"SideBracket/Hop-Up O-Type MK2 [spigot] 0.31m/1\u20190\" - 1 Board","kg":4.55},{"id":"c097","desc":"SideBracket/Hop-Up O-Type 0.65 m/2\u20192\" 2 Board","kg":7.2},{"id":"c098","desc":"SideBracket/Hop-Up O-Type 0.88 m/2\u201910 5/8\" 3 Board","kg":8.46},{"id":"c099","desc":"Step Down Bracket 0.27m/11\" 1 Board","kg":3.32},{"id":"c100","desc":"Toe Board Retaining Clamp, 23mm Nut (AU)","kg":0.74},{"id":"c101","desc":"Toe Board Clamp","kg":1.33},{"id":"c102","desc":"Toe Board Corner Clamp","kg":1.8},{"id":"c103","desc":"Scaffold Board Retaining Clamp","kg":0.76},{"id":"c104","desc":"Interlocking Toeboard .88m/2\u201910 5/8\"","kg":2.8},{"id":"c105","desc":"Interlocking Toeboard 1.065M/3\u20196\"","kg":3.3},{"id":"c106","desc":"Interlocking Toeboard 1.15m/3\u201910\"","kg":3.6},{"id":"c107","desc":"Interlocking Toeboard 1.57m/5\u20192\"","kg":4.75},{"id":"c108","desc":"Interlocking Toeboard 1.82m/6\u20190\"","kg":5.5},{"id":"c109","desc":"Interlocking Toeboard 2.13m/7\u20190\"","kg":6.33},{"id":"c110","desc":"Interlocking Toeboard 2.43m/8\u20190\"","kg":7.19},{"id":"c111","desc":"Interlocking Toeboard 3.05m/10\u2019","kg":8.93},{"id":"c112","desc":"Corner Plank 0.60m (Triangular)","kg":7.3},{"id":"c113","desc":"Corner Plank 0.84m","kg":7.77},{"id":"c114","desc":"Corner Plank 1.065m","kg":9.51},{"id":"c115","desc":"Corner Plank 1.34m","kg":11.26},{"id":"c116","desc":"Corner Plank 1.57m","kg":13.0},{"id":"c117","desc":"Corner Plank 1.82m","kg":14.75},{"id":"c118","desc":"Corner Plank with Ledger 1.82m x 1.82m","kg":10.16},{"id":"c119","desc":"Laminated Plank 2\u2019 (0.6m)","kg":3.42},{"id":"c120","desc":"Laminated Plank 3\u2019 (0.9m)","kg":5.13},{"id":"c121","desc":"Laminated Plank 4\u2019 (1.2m)","kg":6.84},{"id":"c122","desc":"Laminated Plank 5\u2019 (1.5m)","kg":8.55},{"id":"c123","desc":"Laminated Plank 6\u2019 (1.8m)","kg":10.26},{"id":"c124","desc":"Laminated Plank 7\u2019 (2.1m)","kg":11.97},{"id":"c125","desc":"Laminated Plank 8\u2019 (2.4m)","kg":13.68},{"id":"c126","desc":"Laminated Plank 9\u2019 (2.7m)","kg":15.39},{"id":"c127","desc":"Laminated Plank 10\u2019 (3.0m)","kg":17.1},{"id":"c128","desc":"Laminated Plank 12\u2019 (3.6m)","kg":20.52},{"id":"c129","desc":"Soleboards - Hardwood 500mm","kg":2.65},{"id":"c130","desc":"Ply Sheet 2400mm x 2400mm","kg":2.0}]},{"category":"Stairs/Ladders","items":[{"id":"c131","desc":"Steel Ladder AS 1892 - 3.0m","kg":18.4},{"id":"c132","desc":"Steel Ladder AS 1892 - 3.6m","kg":21.7},{"id":"c133","desc":"Steel Ladder AS 1892 - 4.2m","kg":25.9},{"id":"c134","desc":"Steel Ladder AS 1892 - 4.8m","kg":29.8},{"id":"c135","desc":"Steel Ladder AS 1892 - 5.4m","kg":33.6},{"id":"c136","desc":"Ladder Hook Clamp/Clip, 23mm Nut (AU)","kg":0.96},{"id":"c137","desc":"Steel Ladder AS 1892 - 2.4m","kg":14.5},{"id":"c138","desc":"Steel Ladder AS 1892 - 6.0m","kg":36.6},{"id":"c139","desc":"Fiber Glass Ladder 2.4m/ 8\u2019","kg":9.0},{"id":"c140","desc":"Fiber Glass Ladder 3.0m/10\u2019","kg":10.0},{"id":"c141","desc":"Fiber Glass Ladder 3.6m/12\u2019","kg":11.0},{"id":"c142","desc":"Fiber Glass Ladder 4.2m/14\u2019","kg":12.5},{"id":"c143","desc":"Fiber Glass Ladder 4.8m/16\u2019","kg":14.5},{"id":"c144","desc":"Fiber Glass Ladder 5.4m/18\u2019","kg":16.5},{"id":"c145","desc":"Fiber Glass Ladder 6.0M/20\u2019","kg":18.0},{"id":"c146","desc":"Ladder Beam 3.35m/11\u2019, 4.0mm","kg":42.05},{"id":"c147","desc":"Ladder Beam 4.88m/16\u2019, 4.0mm","kg":60.9},{"id":"c148","desc":"Ladder Beam 6.39m/21\u2019, 4.0mm","kg":79.63}]},{"category":"Tubes","items":[{"id":"c149","desc":"Steel Tube w/OUT Fittings 300mm/ 1\u2019 (3.2mm)","kg":1.03},{"id":"c150","desc":"Steel Tube w/OUT Fittings 600mm/ 2\u2019 (3.2mm)","kg":2.03},{"id":"c151","desc":"Steel Tube w/OUT Fittings 900mm/ 3\u2019 (3.2mm)","kg":3.02},{"id":"c152","desc":"Steel Tube w/OUT Fittings 1200mm/ 4\u2019 (3.2mm)","kg":4.12},{"id":"c153","desc":"Steel Tube w/OUT Fittings 1500mm/ 5\u2019 (3.2mm)","kg":5.17},{"id":"c154","desc":"Steel Tube w/OUT Fittings 1800mm/ 6\u2019 (3.2mm)","kg":6.3},{"id":"c155","desc":"Steel Tube w/OUT Fittings 2100mm/ 7\u2019 (3.2mm)","kg":7.25},{"id":"c156","desc":"Steel Tube w/OUT Fittings 2400mm/ 8\u2019 (3.2mm)","kg":8.05},{"id":"c157","desc":"Steel Tube w/OUT Fittings 2700mm/ 9\u2019 (3.2mm)","kg":8.9},{"id":"c158","desc":"Steel Tube w/OUT Fittings 3000mm/10\u2019 (3.2mm)","kg":10.04},{"id":"c159","desc":"Steel Tube w/OUT Fittings 3300mm/11\u2019 (3.2mm)","kg":11.54},{"id":"c160","desc":"Steel Tube w/OUT Fittings 3600mm/12\u2019 (3.2mm)","kg":12.62},{"id":"c161","desc":"Steel Tube w/OUT Fittings 3900mm/13\u2019 (3.2mm)","kg":13.51},{"id":"c162","desc":"Steel Tube w/OUT Fittings 4200mm/14\u2019 (3.2mm)","kg":14.65},{"id":"c163","desc":"Steel Tube w/OUT Fittings 4500mm/15\u2019 (3.2mm)","kg":15.41},{"id":"c164","desc":"Steel Tube w/OUT Fittings 4800mm/16\u2019 (3.2mm)","kg":16.3},{"id":"c165","desc":"Steel Tube w/OUT Fittings 5100mm/17\u2019 (3.2mm)","kg":17.9},{"id":"c166","desc":"Steel Tube w/OUT Fittings 5400mm/18\u2019 (3.2mm)","kg":18.42},{"id":"c167","desc":"Steel Tube w/OUT Fittings 5700mm/19\u2019 (3.2mm)","kg":21.28},{"id":"c168","desc":"Steel Tube w/OUT Fittings 6000mm/20\u2019 (3.2mm)","kg":20.41},{"id":"c169","desc":"External Tube Joiner, 23mm Nut (AU)","kg":1.07},{"id":"c170","desc":"Internal Tube Joiner, 23mm Nut (AU)","kg":0.72}]},{"category":"Ties/Couplers","items":[{"id":"c171","desc":"Girder Spigot Adapter Clamp 2\", 23mm Nut (AU)","kg":3.45},{"id":"c172","desc":"Adj Clamp Brace 5\u2019, 23mm Nut (AU)","kg":7.19},{"id":"c173","desc":"Adj Clamp Brace 7\u2019, 23mm Nut (AU)","kg":9.64},{"id":"c174","desc":"Adj Clamp Brace 8\u2019, 23mm Nut (AU)","kg":10.38},{"id":"c175","desc":"Adj Clamp Brace 10\u2019, 23mm Nut (AU)","kg":11.61},{"id":"c176","desc":"BEAM Clamp Swivel 2\", 23mm Nut (AU)","kg":1.71},{"id":"c177","desc":"T-BOLT Right Angle Clamp 2x2, 23mm Nut (AU) (DOUBLE)","kg":1.25},{"id":"c178","desc":"T-BOLT Swivel Clamp 2x2, 23mm Nut (AU)","kg":1.24},{"id":"c179","desc":"Putlog Clamp, 23mm Nut (AU)","kg":0.66},{"id":"c180","desc":"BEAM Clamp Rigid 2\", 23mm Nut (AU)","kg":1.65},{"id":"c181","desc":"RA Adapter Clamp 2\"- Bolt, 23mm Nut (AU)","kg":1.56},{"id":"c182","desc":"Swivel Adapter Clamp 2\"-Bolt, 23mm Nut (AU)","kg":1.6},{"id":"c183","desc":"Spigot Adapter Clamp-Bolt, 23mm Nut (AU) (DONKEY)","kg":1.86}]},{"category":"Base Jacks/Plates","items":[{"id":"c184","desc":"Screwjack/Basejack 600mm","kg":3.87},{"id":"c185","desc":"Swiveljack 780mm","kg":6.02},{"id":"c186","desc":"Base Plate--System 2\"","kg":1.07},{"id":"c187","desc":"Jack Retainer - Lifting","kg":3.0},{"id":"c188","desc":"Base Plate--Edge Protection","kg":2.9},{"id":"c189","desc":"Console Bracket O-Type 1.065m/3\u20196\"","kg":12.55},{"id":"c190","desc":"Console Bracket O-Type 1.15m/3\u201910\"","kg":12.82},{"id":"c191","desc":"Universal Base Plate","kg":2.15}]},{"category":"Spigots/Pins","items":[{"id":"c192","desc":"U-Head 150mm x 231mm Pin & Clip","kg":3.67}]},{"category":"Guardrails","items":[{"id":"c193","desc":"Guard Rail Standard (CRAZY LEG) 1.63m","kg":8.32}]},{"category":"Other","items":[{"id":"c194","desc":"Starter/Base Collar","kg":2.43},{"id":"c195","desc":"Leg Lock (Suspended Scaffold)","kg":3.66},{"id":"c196","desc":"Davit arm","kg":10.21},{"id":"c197","desc":"Adapter for 0.3m/12\" Caster","kg":4.24},{"id":"c198","desc":"Lifting Guide","kg":4.77},{"id":"c199","desc":"Lifting Lug - AUS","kg":6.9},{"id":"c200","desc":"Staunchion 1.5m","kg":6.24},{"id":"c201","desc":"Caster 0.2m/ 8\" - HD Ring","kg":6.0},{"id":"c202","desc":"Caster 0.3m/12\"","kg":16.01},{"id":"c203","desc":"Telescopic Plan Brace - Short 23mm Nut (AU)","kg":10.85},{"id":"c204","desc":"Telescopic Plan Brace - Long, 23mm Nut (AU)","kg":13.75},{"id":"c205","desc":"SideBracket/Hop Up O-Type 0.576/1\u20199\"","kg":5.15},{"id":"c206","desc":"SideBracket/Hop-Up O-Type 0.60m/1\u201911\"","kg":7.1},{"id":"c207","desc":"SideBracket/Hop-Up O-Type 0.84m/2\u2019 8-5/8\"","kg":8.2},{"id":"c208","desc":"Sidebracket/Hop-Up O-Type 1.065m/3\u20196\"","kg":12.55},{"id":"c209","desc":"Sidebracket/Hop-Up O-Type 1.15m/3\u201910\"","kg":12.82},{"id":"c210","desc":"Mills Hook, 23mm Nut (AU)","kg":0.56},{"id":"c211","desc":"Corner Filler .576m/1\u20199\"","kg":15.08},{"id":"c212","desc":"Corner Filler 0.60m/1\u20191\"","kg":11.37},{"id":"c213","desc":"Adjustable Swing Gate, 23mm Nut (AU) 2\"","kg":8.2},{"id":"c214","desc":"Access Barrier 830mm x 600mm","kg":3.5},{"id":"c215","desc":"Universal Screw 860mm","kg":7.71},{"id":"c216","desc":"U-Head 150mm x 170mm","kg":2.81},{"id":"c217","desc":"U-Head 210mm x 200mm x 70mm","kg":9.0},{"id":"c218","desc":"Impalement Prevention Device (WOK)","kg":1.05},{"id":"c219","desc":"Magic Star","kg":0.97}]}];
@@ -3786,6 +4280,7 @@ function renderStage() {
   if (t.id === 'inspections'){ render_inspections(stage, t); return; }
   if (t.id === 'hours')      { render_hours(stage, t); return; }
   if (t.id === 'scaffold')   { render_scaffold(stage, t); return; }
+  if (t.id === 'ccv')        { render_ccv(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">
       <h1>${t.label}</h1>

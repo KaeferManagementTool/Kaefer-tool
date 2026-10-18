@@ -913,8 +913,8 @@ const TABS = [
     desc:'Staff form submissions. Approve, reject, log.' },
   { id:'actions',     label:'Actions',           accent:'var(--t-actions)',     phase:2, status:'coming',
     desc:'Open and closed actions with owner, due date, status. Cleaned up status/priority taxonomy.' },
-  { id:'registers',   label:'Registers',         accent:'var(--t-registers)',   phase:3, status:'coming',
-    desc:'One unified registers framework powering PPE, Vehicle, Tool, Training, Breathalyser, Heights, Tool Users. Same UI, same sync, 7 configurations.' },
+  { id:'registers',   label:'Registers',         accent:'var(--t-registers)',   phase:3, status:'in build',
+    desc:'Unified registers framework — PPE, Vehicle, Tool, Training, Heights, Tool Users. Same engine, expiry tracking, CSV export.' },
   { id:'rr',          label:'R&R',               accent:'var(--t-rr)',          phase:3, status:'coming',
     desc:'Recognition log with Smart Choices tags, Edit on each row, "In Portal" tick to track what\'s been pushed to KAEFER\'s portal.' },
   { id:'scaffold',    label:'Scaffold Register', accent:'var(--t-scaffold)',    phase:3, status:'in build',
@@ -4444,6 +4444,359 @@ function rptBuildCsvRows(type, from, to) {
 
 
 /* ============================================================
+   REGISTERS FRAMEWORK — PPE, Vehicle, Tool, Training, Heights, Tool Users
+   One engine, six registers, each with its own column schema and expiry logic.
+============================================================ */
+const REGISTERS_SCHEMA = {
+  ppe: {
+    label: 'PPE', icon: '🦺', color: '#2e7d32',
+    description: 'PPE issued to each worker — hard hats, boots, gloves, harnesses, etc.',
+    expiryField: 'expiry',
+    columns: [
+      { id:'person',   label:'Person',    type:'person', required:true, width:180 },
+      { id:'item',     label:'Item',      type:'select', required:true, options:['Hard hat','Boots','Gloves','Hi-vis shirt','Hi-vis vest','Safety glasses','Hearing protection','Harness','Overalls','Wet weather gear','Gumboots','Other'] },
+      { id:'size',     label:'Size',      type:'text', width:80 },
+      { id:'issued',   label:'Issued',    type:'date', required:true, width:120 },
+      { id:'expiry',   label:'Expires',   type:'date', width:120 },
+      { id:'signedBy', label:'Signed by', type:'text', width:140 },
+      { id:'notes',    label:'Notes',     type:'text' }
+    ]
+  },
+  vehicle: {
+    label: 'Vehicle', icon: '🚗', color: '#1565c0',
+    description: 'Vehicles used on site — rego, driver, service and inspection dates.',
+    expiryField: 'serviceDue',
+    columns: [
+      { id:'vehicle',    label:'Vehicle',          type:'text', required:true, width:150 },
+      { id:'rego',       label:'Rego',             type:'text', width:100 },
+      { id:'driver',     label:'Primary driver',   type:'person', width:180 },
+      { id:'issued',     label:'In service from',  type:'date', required:true, width:120 },
+      { id:'returned',   label:'Returned/off-hire',type:'date', width:120 },
+      { id:'inspection', label:'Last inspection',  type:'date', width:130 },
+      { id:'serviceDue', label:'Service due',      type:'date', width:120 },
+      { id:'notes',      label:'Notes',            type:'text' }
+    ]
+  },
+  tool: {
+    label: 'Tool', icon: '🔧', color: '#5d4037',
+    description: 'Issued tools & equipment with asset IDs, condition and inspection dates.',
+    expiryField: 'inspection',
+    columns: [
+      { id:'tool',       label:'Tool / Equipment', type:'text',   required:true, width:180 },
+      { id:'assetId',    label:'Asset ID',         type:'text',   width:110 },
+      { id:'issuedTo',   label:'Issued to',        type:'person', width:180 },
+      { id:'issued',     label:'Issued',           type:'date',   required:true, width:120 },
+      { id:'returned',   label:'Returned',         type:'date',   width:120 },
+      { id:'inspection', label:'Last inspection',  type:'date',   width:130 },
+      { id:'condition',  label:'Condition',        type:'select', options:['New','Good','Serviceable','Damaged','Out of Service'] },
+      { id:'notes',      label:'Notes',            type:'text' }
+    ]
+  },
+  training: {
+    label: 'Training', icon: '🎓', color: '#6a1b9a',
+    description: 'Scaffolder tickets, VOCs and training records with expiry dates.',
+    expiryField: 'expiry',
+    columns: [
+      { id:'person',    label:'Person',   type:'person', required:true, width:180 },
+      { id:'ticket',    label:'Ticket / Training', type:'select', required:true, options:['SCF Advanced','SCF Intermediate','SCF Basic','EWP (≤11m)','EWP (>11m)','Forklift (LF)','Confined Space Entry','Gas Test Atmospheres','Working at Heights','Rescue from Heights','First Aid','CPR','Rigging (Basic)','Rigging (Intermediate)','Dogging','VOC Scaffold','VOC Other','White Card','Site Induction','Other'] },
+      { id:'issueDate', label:'Issued',    type:'date', required:true, width:120 },
+      { id:'expiry',    label:'Expires',   type:'date', width:120 },
+      { id:'issuer',    label:'Issued by', type:'text', width:140 },
+      { id:'notes',     label:'Notes',     type:'text' }
+    ]
+  },
+  heights: {
+    label: 'Heights', icon: '🪜', color: '#c62828',
+    description: 'Working at Heights authorisations by level — awareness, worker, rescue.',
+    expiryField: 'expiry',
+    columns: [
+      { id:'person',   label:'Person',    type:'person', required:true, width:180 },
+      { id:'level',    label:'Level',     type:'select', required:true, options:['Awareness','Working at Heights','Rescue from Heights'] },
+      { id:'issued',   label:'Issued',    type:'date', required:true, width:120 },
+      { id:'expiry',   label:'Expires',   type:'date', width:120 },
+      { id:'assessor', label:'Assessor',  type:'text', width:140 },
+      { id:'notes',    label:'Notes',     type:'text' }
+    ]
+  },
+  toolusers: {
+    label: 'Tool Users', icon: '⚙️', color: '#ef6c00',
+    description: 'Authorised users for specific power tools and equipment.',
+    expiryField: 'expiry',
+    columns: [
+      { id:'person',   label:'Person',    type:'person', required:true, width:180 },
+      { id:'tool',     label:'Tool',      type:'select', required:true, options:['Angle grinder','Drill (impact)','Chainsaw','Nail gun','Welder (MIG)','Welder (Stick)','Oxy torch','Hilti PAT tool','Ramset','Hilti coring','Other'] },
+      { id:'authDate', label:'Authorised',type:'date', required:true, width:120 },
+      { id:'expiry',   label:'Expires',   type:'date', width:120 },
+      { id:'assessor', label:'Assessor',  type:'text', width:140 },
+      { id:'notes',    label:'Notes',     type:'text' }
+    ]
+  }
+};
+
+const REG = {
+  activeType: 'ppe',
+  items: {},     // { ppe: [...], vehicle: [...], ... }
+  loaded: {},    // { ppe: true, ... }
+  filter: '',
+  expiringOnly: false
+};
+
+function regLoad(type) {
+  if (REG.loaded[type]) return;
+  try {
+    const raw = JSON.parse(localStorage.getItem('kaefer_v2_registers_'+type) || '[]');
+    REG.items[type] = Array.isArray(raw) ? raw : [];
+  } catch(e) { REG.items[type] = []; }
+  REG.loaded[type] = true;
+}
+function regSave(type) {
+  localStorage.setItem('kaefer_v2_registers_'+type, JSON.stringify(REG.items[type] || []));
+}
+
+function regExpiryStatus(entry, type) {
+  const schema = REGISTERS_SCHEMA[type];
+  if (!schema.expiryField) return null;
+  const dateStr = entry[schema.expiryField];
+  if (!dateStr) return null;
+  const d = new Date(dateStr+'T00:00:00');
+  if (isNaN(d)) return null;
+  const diff = Math.floor((d - Date.now()) / 86400000);
+  if (diff < 0)  return { label:'EXPIRED ('+Math.abs(diff)+'d ago)', color:'#c62828', days:diff, bg:'#ffebee' };
+  if (diff <= 7) return { label:'EXPIRES IN '+diff+'d',  color:'#c62828', days:diff, bg:'#ffebee' };
+  if (diff <= 30)return { label:'DUE IN '+diff+'d',      color:'#ef6c00', days:diff, bg:'#fff3e0' };
+  return { label:'OK ('+diff+'d)', color:'#2e7d32', days:diff, bg:'#e8f5e9' };
+}
+
+function render_registers(stage, tabCfg) {
+  regLoad(REG.activeType);
+  // Load ATT2 roster for the person-type fields
+  if (typeof ATT2 !== 'undefined' && !ATT2.loaded && !ATT2.loading && typeof attReload === 'function') {
+    attReload(true).then(() => { if (ACTIVE === 'registers') regRender(); });
+  }
+  regRender();
+}
+
+function regRender() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  const schema = REGISTERS_SCHEMA[REG.activeType];
+  const items = REG.items[REG.activeType] || [];
+  // Expiring soon = anything within 30 days OR expired
+  const expiringSoon = items.filter(x => {
+    const s = regExpiryStatus(x, REG.activeType);
+    return s && s.days <= 30;
+  });
+
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h">
+        <span class="accent" style="--accent:var(--t-registers)"></span>
+        <h2>Registers</h2>
+        <span class="sub">Compliance records — one tab per register type</span>
+        <div style="flex:1"></div>
+        <button class="btn-ghost" onclick="regExportCsv()">📥 CSV</button>
+      </div>
+
+      <!-- Register sub-tab bar -->
+      <div style="display:flex;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--surface-2)">
+        ${Object.entries(REGISTERS_SCHEMA).map(([id, s]) => {
+          const n = (REG.items[id] || []).length;
+          const dueCount = (REG.items[id] || []).filter(x => { const st = regExpiryStatus(x, id); return st && st.days <= 30; }).length;
+          const on = REG.activeType === id;
+          return `<button onclick="regPickType('${id}')" style="padding:10px 16px;border:0;border-right:1px solid var(--line);background:${on?'#fff':'transparent'};color:${on?s.color:'var(--mute)'};font-weight:700;font-size:12px;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;border-bottom:${on?'3px solid '+s.color:'3px solid transparent'};display:flex;align-items:center;gap:7px">
+            <span style="font-size:15px">${s.icon}</span>
+            <span>${s.label}</span>
+            ${n ? `<span style="background:${s.color};color:#fff;padding:1px 7px;border-radius:10px;font-size:10px">${n}</span>` : ''}
+            ${dueCount ? `<span style="background:#c62828;color:#fff;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:800" title="${dueCount} expiring/expired">⚠${dueCount}</span>` : ''}
+          </button>`;
+        }).join('')}
+      </div>
+
+      <!-- Register description + add form -->
+      <div style="padding:14px;background:${schema.color}15;border-bottom:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <span style="font-size:24px">${schema.icon}</span>
+          <div style="flex:1">
+            <div style="font-weight:800;font-size:14px;color:${schema.color}">${schema.label} Register</div>
+            <div style="font-size:11.5px;color:var(--mute);margin-top:2px">${schema.description}</div>
+          </div>
+          <div style="font-size:11px;color:var(--mute);text-align:right">
+            <div><b style="color:#333">${items.length}</b> entries</div>
+            ${expiringSoon.length ? `<div style="color:#c62828;font-weight:700;margin-top:2px">⚠ ${expiringSoon.length} expiring/expired</div>` : ''}
+          </div>
+        </div>
+        <div id="reg-add-form" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+          ${schema.columns.map(c => regRenderField(c, '', 'add')).join('')}
+          <button class="btn" style="background:${schema.color}" onclick="regAdd()">+ Add entry</button>
+        </div>
+      </div>
+
+      <!-- Filter row -->
+      <div class="att-ctrls" style="padding-top:12px">
+        <div class="field" style="flex:1 1 240px"><label>Search</label><input type="text" id="reg-filter" value="${escHtml(REG.filter)}" placeholder="Any field..." oninput="REG.filter=this.value;regRenderTable()"></div>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;margin-top:14px">
+          <input type="checkbox" ${REG.expiringOnly?'checked':''} onchange="REG.expiringOnly=this.checked;regRenderTable()"> Expiring / expired only
+        </label>
+        <div class="spacer"></div>
+        <div style="font-size:11px;color:var(--mute);margin-top:16px">Any cell is click-to-edit · dates stored as YYYY-MM-DD, shown DD/MM/YYYY</div>
+      </div>
+
+      <!-- Table -->
+      <div style="overflow-x:auto">
+        <table class="dm-table" id="reg-table">
+          <thead><tr>
+            ${schema.columns.map(c => `<th${c.width?' style="min-width:'+c.width+'px"':''}>${escHtml(c.label)}${c.required?' <span style="color:var(--err)">*</span>':''}</th>`).join('')}
+            ${schema.expiryField ? '<th style="min-width:140px">Status</th>' : ''}
+            <th>&nbsp;</th>
+          </tr></thead>
+          <tbody id="reg-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  regRenderTable();
+}
+
+function regRenderField(col, val, prefix) {
+  const id = prefix + '-' + col.id;
+  const required = col.required ? '*' : '';
+  const widthStyle = col.width ? ('width:'+col.width+'px') : (col.type === 'text' ? 'min-width:160px' : '');
+  if (col.type === 'date') {
+    return `<div class="field"><label>${escHtml(col.label)}${required}</label><input type="date" id="${id}" value="${escHtml(val||'')}" style="${widthStyle}"></div>`;
+  }
+  if (col.type === 'select') {
+    return `<div class="field"><label>${escHtml(col.label)}${required}</label><select id="${id}" style="${widthStyle};min-width:120px"><option value="">— Select —</option>${col.options.map(o=>`<option value="${escHtml(o)}" ${o===val?'selected':''}>${escHtml(o)}</option>`).join('')}</select></div>`;
+  }
+  if (col.type === 'person') {
+    const people = (typeof ATT2 !== 'undefined' && ATT2.loaded) ? ATT2.persons.filter(p=>!pIsArchived(p)).sort((a,b)=>a.name.localeCompare(b.name)) : [];
+    return `<div class="field"><label>${escHtml(col.label)}${required}</label>
+      <input type="text" id="${id}" list="reg-people-list" value="${escHtml(val||'')}" placeholder="Type to search..." autocomplete="off" style="${widthStyle};min-width:160px">
+      <datalist id="reg-people-list">${people.map(p=>`<option value="${escHtml(p.name)}">`).join('')}</datalist>
+    </div>`;
+  }
+  // Default text
+  return `<div class="field"><label>${escHtml(col.label)}${required}</label><input type="text" id="${id}" value="${escHtml(val||'')}" style="${widthStyle}"></div>`;
+}
+
+function regRenderTable() {
+  const schema = REGISTERS_SCHEMA[REG.activeType];
+  const tb = document.getElementById('reg-tbody');
+  if (!tb) return;
+  const filter = (REG.filter||'').toLowerCase().trim();
+  let items = (REG.items[REG.activeType] || []).slice();
+  if (filter) {
+    items = items.filter(x => {
+      return schema.columns.some(c => (x[c.id]||'').toString().toLowerCase().includes(filter));
+    });
+  }
+  if (REG.expiringOnly) {
+    items = items.filter(x => { const s = regExpiryStatus(x, REG.activeType); return s && s.days <= 30; });
+  }
+  // Sort: expired/expiring first, then by issue date desc
+  items.sort((a,b) => {
+    const sa = regExpiryStatus(a, REG.activeType);
+    const sb = regExpiryStatus(b, REG.activeType);
+    const aDue = sa && sa.days <= 30 ? 0 : 1;
+    const bDue = sb && sb.days <= 30 ? 0 : 1;
+    if (aDue !== bDue) return aDue - bDue;
+    if (sa && sb) return sa.days - sb.days;
+    // Fall back to date column (issued or similar)
+    const dateCol = schema.columns.find(c => c.type === 'date' && c.required);
+    const key = dateCol ? dateCol.id : 'issued';
+    return (b[key]||'').localeCompare(a[key]||'');
+  });
+  if (!items.length) {
+    tb.innerHTML = `<tr><td colspan="${schema.columns.length+2}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">${REG.filter||REG.expiringOnly?'No entries match the current filter.':'No entries yet. Add one above.'}</td></tr>`;
+    return;
+  }
+  tb.innerHTML = items.map(x => regRenderRow(x, schema)).join('');
+}
+
+function regRenderRow(x, schema) {
+  const cells = schema.columns.map(c => {
+    const val = x[c.id] || '';
+    if (c.type === 'date') {
+      return `<td style="white-space:nowrap;font-size:11px"><input type="date" value="${escHtml(val)}" onchange="regEditField('${x.id}','${c.id}',this.value);regRenderTable()" style="border:0;background:transparent;font-size:11px;width:120px;padding:2px 0"></td>`;
+    }
+    if (c.type === 'select') {
+      return `<td><select onchange="regEditField('${x.id}','${c.id}',this.value);regRenderTable()" style="border:0;background:transparent;font-size:12px;padding:2px;font-weight:600"><option value="">—</option>${c.options.map(o=>`<option value="${escHtml(o)}" ${o===val?'selected':''}>${escHtml(o)}</option>`).join('')}</select></td>`;
+    }
+    const style = c.id === 'person' || c.id === 'driver' || c.id === 'issuedTo' ? 'font-weight:600' : '';
+    return `<td contenteditable="true" oninput="regEditField('${x.id}','${c.id}',this.textContent)" style="${style};min-width:${c.width||100}px">${escHtml(val)}</td>`;
+  }).join('');
+  const status = regExpiryStatus(x, REG.activeType);
+  const statusCell = schema.expiryField ? `<td>${status ? `<span style="background:${status.color};color:#fff;font-size:10px;font-weight:800;padding:3px 8px;border-radius:3px;letter-spacing:.3px;white-space:nowrap">${status.label}</span>` : '<span style="color:var(--mute);font-size:10.5px;font-style:italic">no expiry set</span>'}</td>` : '';
+  return `<tr style="${status && status.days <= 0 ? 'background:#fff5f5' : status && status.days <= 7 ? 'background:#fff8f0' : ''}">${cells}${statusCell}<td><button class="edit-btn" onclick="regDelete('${x.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td></tr>`;
+}
+
+function regPickType(type) {
+  REG.activeType = type;
+  REG.filter = '';
+  REG.expiringOnly = false;
+  regLoad(type);
+  regRender();
+}
+
+function regAdd() {
+  const schema = REGISTERS_SCHEMA[REG.activeType];
+  const entry = { id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2,6) };
+  for (const col of schema.columns) {
+    const el = document.getElementById('add-'+col.id);
+    const v = el ? (el.value || '').trim() : '';
+    if (col.required && !v) { alert('Please fill in: '+col.label); el && el.focus(); return; }
+    entry[col.id] = v;
+  }
+  REG.items[REG.activeType] = REG.items[REG.activeType] || [];
+  REG.items[REG.activeType].unshift(entry);
+  regSave(REG.activeType);
+  // Clear the form
+  schema.columns.forEach(col => { const el = document.getElementById('add-'+col.id); if (el) el.value = ''; });
+  regRender();
+}
+
+function regEditField(id, field, val) {
+  const list = REG.items[REG.activeType] || [];
+  const row = list.find(x => x.id === id);
+  if (!row) return;
+  row[field] = (val || '').trim();
+  regSave(REG.activeType);
+}
+
+function regDelete(id) {
+  if (!confirm('Delete this entry?')) return;
+  REG.items[REG.activeType] = (REG.items[REG.activeType] || []).filter(x => x.id !== id);
+  regSave(REG.activeType);
+  regRender();
+}
+
+function regExportCsv() {
+  const schema = REGISTERS_SCHEMA[REG.activeType];
+  const items = REG.items[REG.activeType] || [];
+  if (!items.length) { alert('No entries to export.'); return; }
+  const header = schema.columns.map(c => c.label);
+  if (schema.expiryField) header.push('Status', 'Days to expiry');
+  const rows = [header];
+  items.forEach(x => {
+    const row = schema.columns.map(c => {
+      const v = x[c.id] || '';
+      return c.type === 'date' ? fdDisplay(v) : v;
+    });
+    if (schema.expiryField) {
+      const s = regExpiryStatus(x, REG.activeType);
+      row.push(s ? s.label.replace(/\s*\(.*?\)/,'') : '');
+      row.push(s ? s.days : '');
+    }
+    rows.push(row);
+  });
+  const csv = rows.map(r => r.map(v => { let s = String(v==null?'':v); if (/[,"\n]/.test(s)) s = '"'+s.replace(/"/g,'""')+'"'; return s; }).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = 'register-'+REG.activeType+'-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+
+/* ============================================================
    CCV WHEEL — Critical Control Verification
 ============================================================ */
 const CCV_HAZARDS = [
@@ -5471,6 +5824,7 @@ function renderStage() {
   if (t.id === 'hours')      { render_hours(stage, t); return; }
   if (t.id === 'scaffold')   { render_scaffold(stage, t); return; }
   if (t.id === 'ccv')        { render_ccv(stage, t); return; }
+  if (t.id === 'registers')  { render_registers(stage, t); return; }
   if (t.id === 'reports')    { render_reports(stage, t); return; }
   stage.innerHTML = `
     <div class="hero" style="background: linear-gradient(135deg, var(--charcoal), ${t.accent.replace('var(--t-','').replace(')','')}); background: linear-gradient(135deg, var(--charcoal), ${t.accent});">

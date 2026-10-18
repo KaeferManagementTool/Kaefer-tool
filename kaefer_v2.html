@@ -1928,8 +1928,9 @@ function offOpenBulkPaste() {
         <div class="mb">
           <div style="padding:11px 13px;background:#e0f2f1;border:1px solid #80cbc4;border-radius:var(--r-sm);font-size:12px;color:#004d40;margin-bottom:10px;line-height:1.5">
             <b style="color:#00695c">Backfill offsite entries from Excel in one go.</b><br>
-            Expected columns in this order: <b>Date | Person | Out | In | Reason | Work Order | RTAY Rep</b>.<br>
-            A Day column between Date and Person is fine (skipped automatically). Date formats: <b>DD/MM/YYYY</b>, <b>DD-Mon-YY</b>, or <b>YYYY-MM-DD</b>. Header row optional. Rows with the same Date + Name + Reason as something already in the register are skipped.
+            <b style="color:#004d40">Easiest: include your Excel header row in the copy.</b> Headers like <i>Date</i>, <i>Person</i>, <i>Reason</i>, <i>Work Order</i>, <i>RTAY Rep</i> get mapped automatically — column order doesn't matter.<br>
+            Without a header row, falls back to this fixed order: <b>Date | Person | Out | In | Reason | Work Order | RTAY Rep</b> (a Day column between Date and Person is auto-skipped).<br>
+            Date formats: <b>DD/MM/YYYY</b>, <b>DD-Mon-YY</b>, or <b>YYYY-MM-DD</b>. Duplicates (same Date + Name + Reason) skipped. If no Rep is in a row, your sticky default is used.
           </div>
           <div id="off-bulk-area" contenteditable="true" style="min-height:220px;max-height:45vh;overflow:auto;border:2px dashed var(--line);border-radius:var(--r-md);padding:10px;background:var(--surface-2);font-size:11px"></div>
           <div id="off-bulk-status" style="margin-top:8px;font-size:12px;color:var(--mute);font-weight:600"></div>
@@ -2019,6 +2020,28 @@ function offBulkParse() {
   setTimeout(() => offBulkParseWorker(payload, OFF_BULK_IS_TEXT), 50);
 }
 
+// Build a column map from a header row. Returns {date, day, name, out, in, reason, wo, rep} indices or null if no header detected.
+function offDetectHeaderMap(firstRow) {
+  if (!firstRow || !firstRow.length) return null;
+  const low = firstRow.map(c => (c||'').toLowerCase().trim());
+  // Only treat as header if NO cell parses as a date (so pure data rows aren't mistaken for headers)
+  if (low.some(v => offParseDate(v))) return null;
+  const map = { date:-1, day:-1, name:-1, out:-1, in:-1, reason:-1, wo:-1, rep:-1 };
+  low.forEach((h, i) => {
+    if (/^date$|date\b/.test(h) && map.date<0) map.date = i;
+    else if (/\bday\b/.test(h) && map.day<0 && !/day.*?rate/.test(h)) map.day = i;
+    else if (/(person|name|scaffolder|employee|who)/.test(h) && map.name<0) map.name = i;
+    else if (/\bout\b|time\s*out|start/.test(h) && map.out<0) map.out = i;
+    else if (/\bin\b|time\s*in|end|return/.test(h) && map.in<0) map.in = i;
+    else if (/(reason|purpose|work|description|activity|task)/.test(h) && map.reason<0) map.reason = i;
+    else if (/(work\s*order|^wo$|order|job\s*no)/.test(h) && map.wo<0) map.wo = i;
+    else if (/(rep|rtay|client|contact|signatory)/.test(h) && map.rep<0) map.rep = i;
+  });
+  // Need at least date + name + reason to be a usable header row
+  if (map.date >= 0 && map.name >= 0 && map.reason >= 0) return map;
+  return null;
+}
+
 function offBulkParseWorker(payload, isText) {
   const status = document.getElementById('off-bulk-status');
   const t0 = Date.now();
@@ -2040,34 +2063,47 @@ function offBulkParseWorker(payload, isText) {
   }
   const existingKeys = new Set(OFF.items.map(o => (o.date||'')+'|'+((o.name||'').toLowerCase().trim())+'|'+((o.reason||'').toLowerCase().trim())));
 
+  // Try to detect a header row
+  const headerMap = offDetectHeaderMap(rows[0]);
+  const dataRows = headerMap ? rows.slice(1) : rows;
+  const mode = headerMap ? 'header' : 'positional';
+
   const entries = [];
   const skipped = [];
-  rows.forEach((cells, i) => {
+  dataRows.forEach((cells, i) => {
     if (!cells.length) return;
-    // Date detection in first ~3 cells
-    let dateIdx = -1, date = '';
-    for (let j = 0; j < Math.min(3, cells.length); j++) {
-      const d = offParseDate(cells[j]);
-      if (d) { date = d; dateIdx = j; break; }
+    const rowNum = (headerMap ? i+2 : i+1);
+    let date = '', name = '', outT = '', inT = '', reason = '', wo = '', rep = '';
+    if (headerMap) {
+      date = offParseDate(cells[headerMap.date] || '');
+      name = (headerMap.name >= 0 ? cells[headerMap.name] : '').trim();
+      outT = (headerMap.out >= 0 ? cells[headerMap.out] : '').trim();
+      inT  = (headerMap.in >= 0 ? cells[headerMap.in] : '').trim();
+      reason = (headerMap.reason >= 0 ? cells[headerMap.reason] : '').trim();
+      wo   = (headerMap.wo >= 0 ? cells[headerMap.wo] : '').trim();
+      rep  = (headerMap.rep >= 0 ? cells[headerMap.rep] : '').trim();
+    } else {
+      // Positional: Date | [Day optional] | Person | Out | In | Reason | WO | Rep
+      let dateIdx = -1;
+      for (let j = 0; j < Math.min(3, cells.length); j++) {
+        const d = offParseDate(cells[j]);
+        if (d) { date = d; dateIdx = j; break; }
+      }
+      if (!date) { if (i === 0) return; skipped.push('row '+rowNum+': no date'); return; }
+      let pos = dateIdx + 1;
+      if (cells[pos] && DAY_NAMES.includes(cells[pos].toLowerCase())) pos++;
+      name   = (cells[pos++] || '').trim();
+      outT   = (cells[pos++] || '').trim();
+      inT    = (cells[pos++] || '').trim();
+      reason = (cells[pos++] || '').trim();
+      wo     = (cells[pos++] || '').trim();
+      rep    = (cells[pos++] || '').trim();
     }
-    if (!date) {
-      // Header row (strings like "Date", "Name") is expected to fail — skip quietly on row 1
-      if (i === 0) return;
-      skipped.push('row '+(i+1)+': no date');
-      return;
-    }
-    let pos = dateIdx + 1;
-    if (cells[pos] && DAY_NAMES.includes(cells[pos].toLowerCase())) pos++;
-    const name   = (cells[pos++] || '').trim();
-    const outT   = (cells[pos++] || '').trim();
-    const inT    = (cells[pos++] || '').trim();
-    const reason = (cells[pos++] || '').trim();
-    const wo     = (cells[pos++] || '').trim();
-    const rep    = (cells[pos++] || '').trim();
-    if (!name)   { skipped.push('row '+(i+1)+': no name'); return; }
-    if (!reason) { skipped.push('row '+(i+1)+': no reason'); return; }
+    if (!date)   { skipped.push('row '+rowNum+': no date'); return; }
+    if (!name)   { skipped.push('row '+rowNum+': no name'); return; }
+    if (!reason) { skipped.push('row '+rowNum+': no reason'); return; }
     const key = date+'|'+name.toLowerCase()+'|'+reason.toLowerCase();
-    if (existingKeys.has(key)) { skipped.push('row '+(i+1)+': duplicate'); return; }
+    if (existingKeys.has(key)) { skipped.push('row '+rowNum+': duplicate'); return; }
     existingKeys.add(key);
     entries.push({
       id: Date.now() + i,
@@ -2075,18 +2111,21 @@ function offBulkParseWorker(payload, isText) {
       name, date,
       out:  outT || 'Multiple',
       in:   inT || 'Multiple',
-      reason, wo, rep
+      reason, wo, rep: rep || offGetDefaultRep()
     });
   });
 
   const parseMs = Date.now() - t0;
   if (!entries.length) {
-    status.innerHTML = '<span style="color:var(--err)">⚠ No valid entries parsed from '+rows.length+' rows. '+(skipped.length?'First issue: '+skipped[0]:'')+'</span>';
+    status.innerHTML = '<span style="color:var(--err)">⚠ No valid entries parsed from '+rows.length+' rows (' + mode + ' mode). '+(skipped.length?'First issue: '+skipped[0]:'')+'</span>';
     return;
   }
-  status.innerHTML = '<span style="color:#00695c">✓ Parsed in '+parseMs+'ms — '+entries.length+' entries ready'+(skipped.length?' ('+skipped.length+' skipped)':'')+'</span>';
-  const msg = 'Found ' + entries.length + ' valid entries to add.\n' +
-    (skipped.length ? skipped.length + ' row(s) skipped (header / duplicates / missing data).\n' : '') +
+  const modeLabel = headerMap
+    ? '<b>header mode</b> — mapped: ' + Object.entries(headerMap).filter(([k,v])=>v>=0).map(([k,v])=>k+'→col'+(v+1)).join(', ')
+    : '<b>positional mode</b> (no headers detected)';
+  status.innerHTML = '<span style="color:#00695c">✓ Parsed in '+parseMs+'ms — '+entries.length+' entries ready'+(skipped.length?' ('+skipped.length+' skipped)':'')+'</span><br><span style="font-size:10.5px;color:var(--mute)">'+modeLabel+'</span>';
+  const msg = 'Found ' + entries.length + ' valid entries to add' + (headerMap ? ' (header row detected ✓)' : ' (no header row — using positional order)') + '.\n' +
+    (skipped.length ? skipped.length + ' row(s) skipped (duplicates / missing data).\n' : '') +
     '\nAdd them to the Offsite Register?';
   if (!confirm(msg)) { status.textContent = ''; return; }
   OFF.items = entries.concat(OFF.items);

@@ -3406,14 +3406,77 @@ const DAILY = {
   bigScreen: false,
   todayOnly: false
 };
-const TEAMS = [
-  { id:'GREEN',     label:'GREEN TEAM',    colour:'#2e7d32', bg:'#e8f5e9' },
-  { id:'RED',       label:'RED TEAM',      colour:'#c62828', bg:'#ffebee' },
-  { id:'ORANGE',    label:'ORANGE TEAM',   colour:'#ef6c00', bg:'#fff3e0' },
-  { id:'DISMANTLE', label:'DISMANTLE',     colour:'#4527a0', bg:'#ede7f6' },
-  { id:'SCF-YARD',  label:'SCF-YARD',      colour:'#00695c', bg:'#e0f2f1' },
-  { id:'UNASSIGNED',label:'UNASSIGNED',    colour:'#607d8b', bg:'#eceff1' }
+// Base built-in teams — can't be deleted. Custom teams added by Steve live in localStorage and get appended at runtime.
+const TEAMS_BASE = [
+  { id:'GREEN',     label:'GREEN TEAM',    colour:'#2e7d32', bg:'#e8f5e9', dark:'#1b5e20' },
+  { id:'RED',       label:'RED TEAM',      colour:'#c62828', bg:'#ffebee', dark:'#b71c1c' },
+  { id:'ORANGE',    label:'ORANGE TEAM',   colour:'#ef6c00', bg:'#fff3e0', dark:'#c75100' },
+  { id:'DISMANTLE', label:'DISMANTLE',     colour:'#4527a0', bg:'#ede7f6', dark:'#311b92' },
+  { id:'SCF-YARD',  label:'SCF-YARD',      colour:'#00695c', bg:'#e0f2f1', dark:'#004d40' },
+  { id:'UNASSIGNED',label:'UNASSIGNED',    colour:'#607d8b', bg:'#eceff1', dark:'#5d4037' }
 ];
+let TEAMS = TEAMS_BASE.slice();
+function dmGetCustomTeams()  { try { return JSON.parse(localStorage.getItem('kaefer_v2_custom_teams') || '[]'); } catch(e) { return []; } }
+function dmSetCustomTeams(v) { localStorage.setItem('kaefer_v2_custom_teams', JSON.stringify(v)); }
+function dmRefreshTeams() {
+  // UNASSIGNED must always be last. Custom teams insert before it.
+  const customs = dmGetCustomTeams();
+  const base = TEAMS_BASE.filter(t => t.id !== 'UNASSIGNED');
+  const unassigned = TEAMS_BASE.find(t => t.id === 'UNASSIGNED');
+  TEAMS = base.concat(customs).concat([unassigned]);
+}
+dmRefreshTeams();
+
+// Darker shade of a hex colour for the bold team divider bar
+function dmDarken(hex, pct) {
+  const n = parseInt(hex.replace('#',''),16);
+  const r = Math.max(0, ((n>>16)&255) - Math.round(255*pct));
+  const g = Math.max(0, ((n>>8)&255)  - Math.round(255*pct));
+  const b = Math.max(0, (n&255)       - Math.round(255*pct));
+  return '#' + ((1<<24) | (r<<16) | (g<<8) | b).toString(16).slice(1);
+}
+function dmTeamDark(team) { return team.dark || dmDarken(team.colour, 0.18); }
+
+function dmAddTeamPrompt() {
+  const name = (prompt('New team name (e.g. BLUE, NIGHT SHIFT):') || '').trim();
+  if (!name) return;
+  const id = name.toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'');
+  if (!id) { alert('Team name must have letters or numbers.'); return; }
+  if (TEAMS.find(t => t.id === id)) { alert('A team with that name already exists.'); return; }
+  const presets = {
+    BLUE:   { colour:'#1565c0', bg:'#e3f2fd', dark:'#0d47a1' },
+    YELLOW: { colour:'#f9a825', bg:'#fffde7', dark:'#f57f17' },
+    PINK:   { colour:'#ad1457', bg:'#fce4ec', dark:'#880e4f' },
+    TEAL:   { colour:'#00838f', bg:'#e0f7fa', dark:'#006064' },
+    BLACK:  { colour:'#424242', bg:'#f5f5f5', dark:'#212121' },
+    BROWN:  { colour:'#6d4c41', bg:'#efebe9', dark:'#4e342e' }
+  };
+  const presetKey = Object.keys(presets).find(k => id.indexOf(k) >= 0);
+  const defaultColour = presetKey ? presets[presetKey].colour : '#546e7a';
+  const colour = (prompt('Team colour (hex, e.g. #1565c0):', defaultColour) || defaultColour).trim();
+  if (!/^#[0-9a-f]{6}$/i.test(colour)) { alert('Invalid colour. Use hex like #1565c0.'); return; }
+  const bg = presetKey && presets[presetKey].colour === colour ? presets[presetKey].bg : colour + '14';
+  const dark = presetKey && presets[presetKey].colour === colour ? presets[presetKey].dark : dmDarken(colour, 0.18);
+  const customs = dmGetCustomTeams();
+  customs.push({ id, label: id + ' TEAM', colour, bg, dark });
+  dmSetCustomTeams(customs);
+  dmRefreshTeams();
+  render_daily(document.getElementById('stage'));
+}
+function dmDeleteTeam(id) {
+  if (TEAMS_BASE.find(t => t.id === id)) { alert('Can\'t delete a built-in team.'); return; }
+  // Check if anyone is assigned to it
+  const home = dmGetHome();
+  const assigned = Object.keys(home).filter(pid => home[pid] === id);
+  if (assigned.length) {
+    if (!confirm(assigned.length + ' people are currently on this team. Delete anyway? They\'ll go back to Unassigned.')) return;
+    assigned.forEach(pid => delete home[pid]);
+    dmSetHome(home);
+  } else if (!confirm('Delete team "' + id + '"?')) return;
+  dmSetCustomTeams(dmGetCustomTeams().filter(t => t.id !== id));
+  dmRefreshTeams();
+  render_daily(document.getElementById('stage'));
+}
 const DAYS_WK_UP = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 const DAYS_WK_SHORT = ['sun','mon','tue','wed','thu','fri','sat'];
 
@@ -3578,9 +3641,12 @@ function render_daily(stage, tabCfg) {
 
       <!-- Team composition -->
       <div style="padding:4px 14px 14px">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px;gap:10px;flex-wrap:wrap">
           <h3 style="margin:0;font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--mute)">Team composition · ${activePeople.length} people</h3>
-          <div style="font-size:10.5px;color:var(--mute)">Dropdown saves to <b>home team</b> · tick <b>Today only</b> to override just today · ⭐ marks team leader</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn-ghost" onclick="dmAddTeamPrompt()" style="font-size:11px;padding:5px 10px" title="Add a new team (e.g. extra crew when running more scaffolders)">+ Add team</button>
+            <div style="font-size:10.5px;color:var(--mute)">Dropdown saves to <b>home team</b> · tick <b>Today only</b> to override just today · ⭐ marks team leader</div>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
           ${renderDailyTeamCards(peopleByTeam, away, dateKey)}
@@ -3592,54 +3658,67 @@ function render_daily(stage, tabCfg) {
 
 function renderDailyJobsTable(jobs, peopleByTeam) {
   if (!jobs.length) {
-    return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic;border:2px dashed var(--line);border-radius:var(--r-md)">No jobs for this day. Open Hours Register and set the Day column for each job you want on today\'s meeting.</div>';
+    return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic;border:2px dashed var(--line);border-radius:var(--r-md);background:#eef1f5">No jobs for this day. Open Hours Register and set the Day column for each job you want on today\'s meeting.</div>';
   }
   // Group by team order
   const byTeam = {};
   TEAMS.forEach(t => byTeam[t.id] = []);
   jobs.forEach(j => { const t = j.team || 'UNASSIGNED'; (byTeam[t] = byTeam[t] || []).push(j); });
 
-  let html = `<div style="overflow-x:auto;border:1px solid #1a1a1a;border-radius:var(--r-md)">
-    <table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff">
+  // Soft-grey wrapper; teams get bold full-colour divider bars.
+  let html = `<div style="background:#eef1f5;padding:14px;border-radius:var(--r-md);border:1px solid #d8dde5">
+    <table style="width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid #d8dde5;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04);font-size:12.5px">
       <thead>
-        <tr style="background:#1a1a1a;color:#fff">
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">ORDER</th>
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">OP</th>
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">FUNCTIONAL LOCATION</th>
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">DESCRIPTION</th>
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">OPERATION SHORT TEXT</th>
-          <th style="padding:8px 6px;text-align:center;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">HRS</th>
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px;border-right:1px solid #444">TEAM</th>
-          <th style="padding:8px 8px;text-align:left;font-size:10.5px;letter-spacing:.5px">CREW</th>
+        <tr style="background:#f9fafb">
+          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Func Loc</th>
+          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">OP</th>
+          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Description</th>
+          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Operation Short Text</th>
+          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Crew</th>
+          <th style="padding:11px 8px;text-align:center;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb;width:40px"></th>
         </tr>
       </thead>
       <tbody>`;
 
-  let firstGroup = true;
   TEAMS.forEach(team => {
     const list = byTeam[team.id] || [];
     if (!list.length) return;
-    if (!firstGroup) {
-      html += '<tr><td colspan="8" style="height:8px;background:#f0f0f0;border-top:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a"></td></tr>';
-    }
-    firstGroup = false;
-    const crewForTeam = (peopleByTeam[team.id]||[]).map(({p}) =>
-      `<span style="display:inline-block;padding:2px 8px;margin:1px 2px 1px 0;background:${team.colour};color:#fff;border-radius:3px;font-size:11px;font-weight:700;line-height:1.5">${escHtml(p.name)}</span>`
-    ).join('');
+    const dark = dmTeamDark(team);
+    const leaderLabel = dmLeaderLabel(team.id);
+    const leadBit = leaderLabel
+      ? `<span style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:none;padding-left:14px;border-left:2px solid rgba(255,255,255,.4);margin-left:10px">★ Lead: <b style="font-weight:900">${escHtml(leaderLabel)}</b></span>`
+      : `<span style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:none;padding-left:14px;border-left:2px solid rgba(255,255,255,.4);margin-left:10px;opacity:.75;font-style:italic">★ no leader assigned</span>`;
+    const jobsPill = `<span style="background:rgba(0,0,0,.2);padding:5px 12px;border-radius:14px;font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:none"><b style="font-size:14px;font-weight:900;margin-right:3px">${list.length}</b>${list.length===1?'job':'jobs'}</span>`;
+
+    html += `<tr><td colspan="6" style="padding:0;background:${dark};border-top:3px solid rgba(0,0,0,.25);border-bottom:3px solid rgba(0,0,0,.25)">
+      <div style="display:flex;align-items:center;padding:12px 18px;color:#fff">
+        <span style="font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,.3)">${escHtml(team.label)}</span>
+        ${leadBit}
+        <div style="flex:1"></div>
+        ${jobsPill}
+      </div>
+    </td></tr>`;
+
+    const isUnassigned = team.id === 'UNASSIGNED';
+    const crewForTeam = isUnassigned
+      ? '<span style="color:#9ca3af;font-size:11px;font-style:italic">— awaiting crew assignment —</span>'
+      : (peopleByTeam[team.id]||[]).map(({p}) =>
+          `<span style="display:inline-block;padding:3px 8px;margin:2px 3px 2px 0;background:#f3f4f6;color:#374151;border-left:3px solid ${team.colour};border-radius:3px;font-size:11px;font-weight:600;line-height:1.5">${escHtml(p.name)}</span>`
+        ).join('') || '<span style="color:#9ca3af;font-size:11px;font-style:italic">no crew on this team</span>';
+
+    const rowBg = isUnassigned ? '#fffbeb' : '#fff';
     list.forEach((j, idx) => {
-      html += `<tr style="border-bottom:1px solid #e5e5e5">
-        <td style="padding:6px 8px;background:#fff59d;font-weight:700;font-family:'Consolas',monospace;font-size:11.5px;border-right:1px solid #e5e5e5">${escHtml(j.order||'')}</td>
-        <td style="padding:6px 8px;background:#fff59d;font-weight:700;font-family:'Consolas',monospace;font-size:11.5px;border-right:1px solid #e5e5e5;text-align:center">${escHtml(j.op||'')}</td>
-        <td style="padding:6px 8px;color:#1565c0;font-family:'Consolas',monospace;font-size:11px;border-right:1px solid #e5e5e5">${escHtml(j.loc||'')}</td>
-        <td style="padding:6px 8px;color:#1565c0;border-right:1px solid #e5e5e5">${escHtml(j.desc||'')}</td>
-        <td style="padding:6px 8px;color:#1565c0;border-right:1px solid #e5e5e5;font-weight:600">${escHtml(j.short||'')}</td>
-        <td style="padding:6px 6px;text-align:center;font-weight:700;border-right:1px solid #e5e5e5">${escHtml(j.hours||'')}</td>
-        <td style="padding:6px 8px;border-right:1px solid #e5e5e5">
-          <select onchange="dmSetJobTeam('${j.id}',this.value);render_daily(document.getElementById('stage'))" style="padding:3px 6px;border:2px solid ${team.colour};border-radius:var(--r-sm);font-size:11px;font-weight:800;background:${team.bg};color:${team.colour};cursor:pointer">
+      html += `<tr style="background:${rowBg}">
+        <td style="padding:12px 14px;font-family:'SF Mono','Consolas',monospace;font-size:11px;color:#2563eb;border-bottom:1px solid #f3f4f6">${escHtml(j.loc||'')}</td>
+        <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;width:50px"><span style="background:#111827;color:#fff;padding:4px 8px;border-radius:4px;font-weight:800;font-size:11px;font-variant-numeric:tabular-nums;display:inline-block">${escHtml(j.op||'')}</span></td>
+        <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6"><div style="font-weight:700;font-size:13px;color:#111827">${escHtml(j.desc||'')}</div></td>
+        <td style="padding:12px 14px;color:#374151;font-size:12.5px;border-bottom:1px solid #f3f4f6">${escHtml(j.short||'')}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;max-width:280px">${idx===0?crewForTeam:''}</td>
+        <td style="padding:8px 6px;border-bottom:1px solid #f3f4f6;text-align:center">
+          <select onchange="dmSetJobTeam('${j.id}',this.value);render_daily(document.getElementById('stage'))" title="Change team" style="padding:3px 5px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;font-weight:700;background:#fff;color:${team.colour};cursor:pointer">
             ${TEAMS.map(t=>`<option value="${t.id}" ${t.id===team.id?'selected':''}>${t.label.replace(' TEAM','')}</option>`).join('')}
           </select>
         </td>
-        <td style="padding:4px 8px;min-width:200px">${idx===0?(crewForTeam || '<span style="color:#999;font-size:10px;font-style:italic">no crew on this team</span>'):''}</td>
       </tr>`;
     });
   });
@@ -3656,11 +3735,13 @@ function renderDailyTeamCards(peopleByTeam, away, dateKey) {
     if (team.id === 'UNASSIGNED') return; // render unassigned separately after main teams
     const list = peopleByTeam[team.id] || [];
     const leaderLabel = dmLeaderLabel(team.id);
+    const isCustom = !TEAMS_BASE.find(t => t.id === team.id);
+    const delBtn = isCustom ? `<button onclick="dmDeleteTeam('${team.id}')" title="Delete this custom team" style="background:rgba(0,0,0,.2);border:0;color:#fff;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:12px;font-weight:800;line-height:1">×</button>` : '<span></span>';
     html += `<div style="border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#fff">
       <div style="background:${team.colour};color:#fff;padding:8px 11px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;font-weight:800;font-size:11px;letter-spacing:1px">
         <span>${team.label} · ${list.length}</span>
         <span style="text-align:center;font-weight:700;font-size:12.5px;letter-spacing:.2px;text-transform:none;opacity:.97">${leaderLabel ? '👤 ' + escHtml(leaderLabel) : '<span style="opacity:.5;font-style:italic;font-size:11px">no leader</span>'}</span>
-        <span></span>
+        ${delBtn}
       </div>`;
     if (!list.length) {
       html += '<div style="padding:10px 12px;color:var(--mute);font-size:11.5px;font-style:italic;text-align:center">— no one on this team —</div>';

@@ -909,7 +909,7 @@ const TABS = [
     desc:'Who went offsite, when, why. Feeds Direct Manning so offsite ≠ absent. Fast log entry.' },
   { id:'inspections', label:'Inspections',       accent:'var(--t-inspections)', phase:2, status:'coming',
     desc:'Daily inspections. Permanent IDs, standard sync. Keeps all current fields, cleaner entry flow.' },
-  { id:'submissions', label:'Submissions',       accent:'var(--t-submissions)', phase:2, status:'in build',
+  { id:'submissions', label:'Submissions',       accent:'var(--t-submissions)', phase:2, status:'ready',
     desc:'Staff Smart Form inbox — leave, PPE, purchasing. Approve, apply to Attendance/PPE Register, print PDF.' },
   { id:'actions',     label:'Actions',           accent:'var(--t-actions)',     phase:2, status:'coming',
     desc:'Open and closed actions with owner, due date, status. Cleaned up status/priority taxonomy.' },
@@ -6184,6 +6184,7 @@ function subRender() {
         <span style="margin-left:10px;font-size:11px;color:var(--mute)">Staff forms submitted via QR / Smart Forms — approve or apply to the register</span>
         <div style="flex:1"></div>
         <span style="font-size:11px;color:var(--mute);margin-right:8px">${SUB.loading?'⟳ loading…':SUB.err?'<span style="color:var(--err)">⚠ '+escHtml(SUB.err.slice(0,80))+'</span>':SUB.loaded?'✓ synced · '+totalN+' total · <b style="color:#e65100">'+pendingN+' pending</b>':''}</span>
+        <button class="btn-ghost" onclick="subExportCsv()">⬇ CSV</button>
         <button class="btn-ghost" onclick="subLoad()">↻ Refresh</button>
       </div>
 
@@ -6442,6 +6443,26 @@ function subPrintPdf(id) {
   w.document.write(docHtml);
   w.document.close();
   setTimeout(() => w.print(), 400);
+}
+
+function subExportCsv() {
+  if (!SUB.items.length) { alert('Nothing to export.'); return; }
+  const search = (SUB.search||'').toLowerCase().trim();
+  let items = SUB.items.slice();
+  if (SUB.filter === 'pending') items = items.filter(s => (s.status||'Pending').toLowerCase().indexOf('pending') >= 0);
+  else if (SUB.filter !== 'all') items = items.filter(s => s.type === SUB.filter);
+  if (search) items = items.filter(s => (s.name||'').toLowerCase().indexOf(search) >= 0);
+  items.sort((a,b) => (b.submitted||'').localeCompare(a.submitted||''));
+  const esc = v => { v = (v==null?'':String(v)); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; };
+  const cols = ['submitted','type','name','status','position','site','leaveType','firstDay','lastDay','workingDays','items','supplier','cost','poNumber','description','notes'];
+  const header = cols.join(',');
+  const rows = items.map(s => cols.map(c => esc(s[c])).join(','));
+  const csv = '﻿' + header + '\n' + rows.join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+  a.download = 'submissions-' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
 

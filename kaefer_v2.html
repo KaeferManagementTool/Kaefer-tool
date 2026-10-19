@@ -4450,13 +4450,15 @@ function rptBuildCsvRows(type, from, to) {
 const REGISTERS_SCHEMA = {
   ppe: {
     label: 'PPE', icon: '🦺', color: '#2e7d32',
-    description: 'PPE issued to each worker — hard hats, boots, gloves, harnesses, etc.',
+    description: 'PPE orders & issuances — track pending orders at top, received items in the archive section below.',
     expiryField: 'expiry',
+    splitByStatus: true,  // custom narrow-view render: Pending orders at top, Received at bottom
     columns: [
       { id:'person',   label:'Person',    type:'person', required:true, width:180 },
-      { id:'item',     label:'Item',      type:'select', required:true, options:['Hard hat','Boots','Gloves','Hi-vis shirt','Hi-vis vest','Safety glasses','Hearing protection','Harness','Overalls','Wet weather gear','Gumboots','Other'] },
+      { id:'item',     label:'Item',      type:'combo', required:true, width:160, options:['Hard hat','Boots','Gloves','Hi-vis shirt','Hi-vis vest','Safety glasses','Hearing protection','Harness','Overalls','Wet weather gear','Gumboots','Other'] },
       { id:'size',     label:'Size',      type:'text', width:80 },
-      { id:'issued',   label:'Issued',    type:'date', required:true, width:120 },
+      { id:'status',   label:'Status',    type:'select', required:true, options:['Pending','Waiting on Quote','Ordered','Received'] },
+      { id:'issued',   label:'Date',      type:'date', required:true, width:120 },
       { id:'expiry',   label:'Expires',   type:'date', width:120 },
       { id:'signedBy', label:'Signed by', type:'text', width:140 },
       { id:'notes',    label:'Notes',     type:'text' }
@@ -4789,6 +4791,26 @@ function regRenderTable() {
     tb.innerHTML = `<tr><td colspan="${schema.columns.length+2}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">${REG.filter||REG.expiringOnly?'No entries match the current filter.':'No entries yet. Add one above.'}</td></tr>`;
     return;
   }
+  // Split-by-status (PPE): render Pending orders first, then Received at the bottom
+  if (schema.splitByStatus) {
+    const pending  = items.filter(x => (x.status||'Pending').toLowerCase() !== 'received');
+    const received = items.filter(x => (x.status||'').toLowerCase() === 'received');
+    const colSpan = schema.columns.length + (schema.expiryField?2:1);
+    let html = '';
+    if (pending.length) {
+      html += `<tr><td colspan="${colSpan}" style="background:#e65100;color:#fff;padding:7px 14px;font-weight:800;letter-spacing:1.2px;font-size:11px;text-transform:uppercase;border-top:3px solid #bf360c">📋 Pending orders · ${pending.length}</td></tr>`;
+      html += pending.map(x => regRenderRow(x, schema)).join('');
+    }
+    if (received.length) {
+      html += `<tr><td colspan="${colSpan}" style="background:#2e7d32;color:#fff;padding:7px 14px;font-weight:800;letter-spacing:1.2px;font-size:11px;text-transform:uppercase;border-top:3px solid #1b5e20">✅ Received / Collected · ${received.length}</td></tr>`;
+      html += received.map(x => regRenderRow(x, schema)).join('');
+    }
+    if (!pending.length && !received.length) {
+      html = `<tr><td colspan="${colSpan}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No entries.</td></tr>`;
+    }
+    tb.innerHTML = html;
+    return;
+  }
   tb.innerHTML = items.map(x => regRenderRow(x, schema)).join('');
 }
 
@@ -4826,15 +4848,20 @@ function regAdd() {
   const entry = { id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2,6) };
   for (const col of schema.columns) {
     const el = document.getElementById('add-'+col.id);
-    const v = el ? (el.value || '').trim() : '';
+    let v = el ? (el.value || '').trim() : '';
+    // Default status to 'Pending' for PPE if not explicitly set
+    if (!v && col.id === 'status' && REG.activeType === 'ppe') v = 'Pending';
     if (col.required && !v) { alert('Please fill in: '+col.label); el && el.focus(); return; }
     entry[col.id] = v;
   }
   REG.items[REG.activeType] = REG.items[REG.activeType] || [];
   REG.items[REG.activeType].unshift(entry);
   regSave(REG.activeType);
-  // Clear the form
-  schema.columns.forEach(col => { const el = document.getElementById('add-'+col.id); if (el) el.value = ''; });
+  // Clear the form (keep status defaulted)
+  schema.columns.forEach(col => {
+    const el = document.getElementById('add-'+col.id);
+    if (el) el.value = (col.id === 'status' && REG.activeType === 'ppe') ? 'Pending' : '';
+  });
   regRender();
 }
 
@@ -5067,13 +5094,18 @@ function regStartTrainingCellEdit(cellId, personName, ticket, entryId) {
   const current = entry ? (entry.expiry || '') : '';
   const safePerson = personName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
   const safeTicket = ticket.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-  cell.innerHTML = `<input type="date" value="${current}" autofocus style="width:120px;padding:3px;border:2px solid #6a1b9a;border-radius:3px;font-size:11px;background:#fff;color:#000" onblur="regSaveTrainingCellEdit('${cellId}','${safePerson}','${safeTicket}','${entryId||''}',this.value)" onkeydown="if(event.key==='Enter'){this.blur();}if(event.key==='Escape'){regRenderTable();}">`;
+  // Stash the original value in a data attribute so blur can compare
+  cell.innerHTML = `<input type="date" value="${current}" data-original="${current}" autofocus style="width:130px;padding:4px;border:2px solid #6a1b9a;border-radius:3px;font-size:11px;background:#fff;color:#000;font-weight:700" onblur="regSaveTrainingCellEdit('${cellId}','${safePerson}','${safeTicket}','${entryId||''}',this.value,this.dataset.original)" onkeydown="if(event.key==='Enter'){this.blur();}if(event.key==='Escape'){this.value=this.dataset.original;this.blur();}">`;
   const input = cell.querySelector('input');
   if (input) { input.focus(); input.select && input.select(); }
 }
 
-function regSaveTrainingCellEdit(cellId, personName, ticket, entryId, newVal) {
+function regSaveTrainingCellEdit(cellId, personName, ticket, entryId, newVal, originalVal) {
   const parsed = (newVal || '').trim();
+  const orig = (originalVal || '').trim();
+  // If nothing changed, do nothing — this is the critical fix:
+  // clicking a cell + clicking away should NOT clear the date
+  if (parsed === orig) { regRenderTable(); return; }
   const items = REG.items.training = REG.items.training || [];
   if (entryId) {
     const e = items.find(x => x.id === entryId);
@@ -5439,6 +5471,14 @@ function regImportPpeV1() {
       });
     }
     if (!items.length) { skipped++; return; }
+    // Map v1 status → v2 status
+    const rawStatus = (v1.status || '').toLowerCase();
+    let v2Status = 'Pending';
+    if (rawStatus.includes('collect') || rawStatus.includes('received') || rawStatus.includes('issued')) v2Status = 'Received';
+    else if (rawStatus.includes('order')) v2Status = 'Ordered';
+    else if (rawStatus.includes('quote')) v2Status = 'Waiting on Quote';
+    // Just the role + user notes, status already captured in `status` field
+    const cleanNotes = [v1._notes || '', v1._pos ? ('Role: '+v1._pos) : ''].filter(Boolean).join(' · ');
     items.forEach((it, i2) => {
       if (!it.desc) return;
       const k = rawName.toLowerCase()+'|'+it.desc.toLowerCase()+'|'+(it.size||'')+'|'+date;
@@ -5449,10 +5489,11 @@ function regImportPpeV1() {
         person: rawName,
         item:   it.desc,
         size:   it.size || '',
+        status: v2Status,
         issued: date,
         expiry: '',
         signedBy: '',
-        notes:  notes,
+        notes:  cleanNotes,
         _personId: peopleByName[rawName.toLowerCase()] || ''
       });
     });

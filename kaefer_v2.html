@@ -4457,7 +4457,7 @@ const REGISTERS_SCHEMA = {
       { id:'person',   label:'Person',    type:'person', required:true, width:180 },
       { id:'item',     label:'Item',      type:'combo', required:true, width:160, options:['Hard hat','Boots','Gloves','Hi-vis shirt','Hi-vis vest','Safety glasses','Hearing protection','Harness','Overalls','Wet weather gear','Gumboots','Other'] },
       { id:'size',     label:'Size',      type:'text', width:80 },
-      { id:'status',   label:'Status',    type:'select', required:true, options:['Pending','Waiting on Quote','Ordered','Received'] },
+      { id:'status',   label:'Status',    type:'select', required:true, options:['Pending','Waiting on Quote','Ordered','Collected'] },
       { id:'issued',   label:'Date',      type:'date', required:true, width:120 },
       { id:'expiry',   label:'Expires',   type:'date', width:120 },
       { id:'signedBy', label:'Signed by', type:'text', width:140 },
@@ -4622,6 +4622,17 @@ function regLoad(type) {
     if (fixed > 0) {
       regSave('training');
       console.log('[Registers] Auto-migrated '+fixed+' training entries: Issued → Expires');
+    }
+  }
+  // Auto-fix: for PPE, migrate old "Received" status to "Collected" (matches v1 terminology)
+  if (type === 'ppe' && Array.isArray(REG.items.ppe)) {
+    let fixed = 0;
+    REG.items.ppe.forEach(e => {
+      if (e && (e.status||'').toLowerCase() === 'received') { e.status = 'Collected'; fixed++; }
+    });
+    if (fixed > 0) {
+      regSave('ppe');
+      console.log('[Registers] Auto-migrated '+fixed+' PPE entries: Received → Collected');
     }
   }
   REG.loaded[type] = true;
@@ -4806,22 +4817,21 @@ function regRenderTable() {
     tb.innerHTML = `<tr><td colspan="${schema.columns.length+2}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">${REG.filter||REG.expiringOnly?'No entries match the current filter.':'No entries yet. Add one above.'}</td></tr>`;
     return;
   }
-  // Split-by-status (PPE): render Pending orders first, then Received at the bottom
+  // Split-by-status (PPE): render Pending orders first, then Collected archive below (v1 layout)
   if (schema.splitByStatus) {
-    const pending  = items.filter(x => (x.status||'Pending').toLowerCase() !== 'received');
-    const received = items.filter(x => (x.status||'').toLowerCase() === 'received');
+    const pending   = items.filter(x => (x.status||'Pending').toLowerCase() !== 'collected');
+    const collected = items.filter(x => (x.status||'').toLowerCase() === 'collected');
     const colSpan = schema.columns.length + (schema.expiryField?2:1);
     let html = '';
     if (pending.length) {
-      html += `<tr><td colspan="${colSpan}" style="background:#e65100;color:#fff;padding:7px 14px;font-weight:800;letter-spacing:1.2px;font-size:11px;text-transform:uppercase;border-top:3px solid #bf360c">📋 Pending orders · ${pending.length}</td></tr>`;
+      html += `<tr><td colspan="${colSpan}" style="background:#c8102e;color:#fff;padding:8px 14px;font-weight:800;letter-spacing:1.5px;font-size:11.5px;text-transform:uppercase;border-top:3px solid #8a0a1f">📋 Pending Orders · ${pending.length}</td></tr>`;
       html += pending.map(x => regRenderRow(x, schema)).join('');
+    } else {
+      html += `<tr><td colspan="${colSpan}" style="padding:16px;text-align:center;color:var(--mute);font-style:italic;background:#fafafa">No pending orders — tick a new entry above to log one.</td></tr>`;
     }
-    if (received.length) {
-      html += `<tr><td colspan="${colSpan}" style="background:#2e7d32;color:#fff;padding:7px 14px;font-weight:800;letter-spacing:1.2px;font-size:11px;text-transform:uppercase;border-top:3px solid #1b5e20">✅ Received / Collected · ${received.length}</td></tr>`;
-      html += received.map(x => regRenderRow(x, schema)).join('');
-    }
-    if (!pending.length && !received.length) {
-      html = `<tr><td colspan="${colSpan}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No entries.</td></tr>`;
+    if (collected.length) {
+      html += `<tr><td colspan="${colSpan}" style="background:#2e7d32;color:#fff;padding:8px 14px;font-weight:800;letter-spacing:1.5px;font-size:11.5px;text-transform:uppercase;border-top:3px solid #1b5e20">✓ Collected · ${collected.length}</td></tr>`;
+      html += collected.map(x => regRenderRow(x, schema)).join('');
     }
     tb.innerHTML = html;
     return;
@@ -5486,10 +5496,10 @@ function regImportPpeV1() {
       });
     }
     if (!items.length) { skipped++; return; }
-    // Map v1 status → v2 status
+    // Map v1 status → v2 status (match v1 "Collected" terminology)
     const rawStatus = (v1.status || '').toLowerCase();
     let v2Status = 'Pending';
-    if (rawStatus.includes('collect') || rawStatus.includes('received') || rawStatus.includes('issued')) v2Status = 'Received';
+    if (rawStatus.includes('collect') || rawStatus.includes('received') || rawStatus.includes('issued')) v2Status = 'Collected';
     else if (rawStatus.includes('order')) v2Status = 'Ordered';
     else if (rawStatus.includes('quote')) v2Status = 'Waiting on Quote';
     // Just the role + user notes, status already captured in `status` field

@@ -6266,18 +6266,24 @@ function subCardHtml(s) {
   const sig = s.signature ? `<div style="margin-top:10px"><div style="font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mute);margin-bottom:4px">Submitter signature</div><img src="${escHtml(s.signature)}" style="max-width:220px;max-height:70px;background:#fff;border:1px solid #e0e0e0;border-radius:4px;padding:3px"></div>` : '';
   const approvSig = s.approverSignature ? `<div style="margin-top:10px;padding:8px 10px;background:#e8f5e9;border-left:3px solid #2e7d32;border-radius:4px"><div style="font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#2e7d32;margin-bottom:4px">✓ Approved by ${escHtml(s.approvedBy||'')}${s.approvedDate?' · '+escHtml(s.approvedDate):''}</div><img src="${escHtml(s.approverSignature)}" style="max-width:200px;max-height:60px;background:#fff;border:1px solid #c8e6c9;border-radius:4px;padding:3px"></div>` : '';
 
-  // Actions depend on type + status
+  // Actions — always available regardless of status so you can re-apply or fix a bad submission
   const actions = [];
-  if (s.type === 'leave' && sLow.indexOf('applied') < 0) {
-    actions.push(`<button class="btn" style="background:#1a237e" onclick="subApplyLeave('${idAttr}')">✓ Apply to Attendance</button>`);
+  const isApplied = sLow.indexOf('applied') >= 0;
+  const isAdded   = sLow.indexOf('added') >= 0;
+  if (s.type === 'leave') {
+    actions.push(`<button class="btn" style="background:#1a237e" onclick="subApplyLeave('${idAttr}')">${isApplied?'↻ Re-apply to Attendance':'✓ Apply to Attendance'}</button>`);
   }
-  if (s.type === 'ppe' && sLow.indexOf('added') < 0) {
-    actions.push(`<button class="btn" style="background:#e65100" onclick="subApplyPpe('${idAttr}')">✓ Add to PPE Register</button>`);
+  if (s.type === 'ppe') {
+    actions.push(`<button class="btn" style="background:#e65100" onclick="subApplyPpe('${idAttr}')">${isAdded?'↻ Re-add to PPE':'✓ Add to PPE Register'}</button>`);
   }
   if (sLow.indexOf('pending') >= 0) {
     actions.push(`<button class="btn" style="background:#2e7d32" onclick="subSetStatus('${idAttr}','Approved')">✓ Approve</button>`);
     actions.push(`<button class="btn-ghost" style="color:var(--err);border-color:var(--err)" onclick="subSetStatus('${idAttr}','Rejected')">✗ Reject</button>`);
+  } else {
+    // Approved / Rejected / Applied — let Steve reopen it
+    actions.push(`<button class="btn-ghost" onclick="subSetStatus('${idAttr}','Pending')">↺ Reopen (back to Pending)</button>`);
   }
+  actions.push(`<button class="btn-ghost" onclick="subEditEntry('${idAttr}')">✎ Edit</button>`);
   actions.push(`<button class="btn-ghost" onclick="subPrintPdf('${idAttr}')">🖨 Print / PDF</button>`);
 
   return `<div class="card" style="margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow-sm)">
@@ -6541,6 +6547,99 @@ function subPrintPdf(id) {
   w.document.write(docHtml);
   w.document.close();
   setTimeout(() => w.print(), 400);
+}
+
+function subEditEntry(id) {
+  const s = subFind(id);
+  if (!s) return;
+  // Build an edit modal — show every field the backend knows about for this type
+  const existing = document.getElementById('sub-edit-ml');
+  if (existing) existing.remove();
+  const ml = document.createElement('div');
+  ml.id = 'sub-edit-ml';
+  ml.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  const fieldsByType = {
+    leave: [['name','Name'],['leaveType','Leave Type'],['firstDay','First Day (YYYY-MM-DD or DD/MM/YYYY)'],['lastDay','Last Day'],['workingDays','Working Days'],['position','Position'],['site','Site'],['notes','Notes']],
+    ppe:   [['name','Name'],['items','Items'],['position','Position'],['notes','Notes']],
+    purch: [['name','Name'],['supplier','Supplier'],['cost','Cost'],['poNumber','PO Number'],['description','Description'],['notes','Notes']]
+  };
+  const fields = fieldsByType[s.type] || [['name','Name'],['notes','Notes']];
+  const typeColor = s.type === 'leave' ? '#1a237e' : s.type === 'ppe' ? '#e65100' : s.type === 'purch' ? '#2e7d32' : '#607d8b';
+  ml.innerHTML = `
+    <div style="background:#fff;border-radius:var(--r-md);max-width:560px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="background:${typeColor};color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-weight:800;font-size:13px;letter-spacing:.5px">✎ EDIT SUBMISSION</span>
+        <div style="flex:1"></div>
+        <button onclick="document.getElementById('sub-edit-ml').remove()" style="background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:16px">
+        ${fields.map(([k,label]) => `
+          <div style="margin-bottom:12px">
+            <label style="display:block;font-size:11px;font-weight:700;color:var(--mute);letter-spacing:.3px;text-transform:uppercase;margin-bottom:4px">${label}</label>
+            ${k === 'notes' || k === 'description' || k === 'items'
+              ? `<textarea id="sub-edit-${k}" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px;font-family:inherit;min-height:60px;resize:vertical">${escHtml(s[k]||'')}</textarea>`
+              : `<input id="sub-edit-${k}" type="text" value="${escHtml(s[k]||'')}" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px">`
+            }
+          </div>
+        `).join('')}
+        <div style="margin-bottom:12px">
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--mute);letter-spacing:.3px;text-transform:uppercase;margin-bottom:4px">Status</label>
+          <select id="sub-edit-status" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px">
+            ${['Pending','Approved','Rejected','Applied','Added'].map(x => `<option value="${x}" ${((s.status||'Pending')===x)?'selected':''}>${x}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--line);margin-top:8px">
+          <button class="btn-ghost" onclick="document.getElementById('sub-edit-ml').remove()">Cancel</button>
+          <button class="btn" onclick="subSaveEdit('${String(id).replace(/'/g,"\\'")}')">Save</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(ml);
+}
+
+function subSaveEdit(id) {
+  const s = subFind(id);
+  if (!s) return;
+  const u = workerUrl();
+  if (!u) { alert('No sync URL.'); return; }
+  const fieldsByType = {
+    leave: ['name','leaveType','firstDay','lastDay','workingDays','position','site','notes'],
+    ppe:   ['name','items','position','notes'],
+    purch: ['name','supplier','cost','poNumber','description','notes']
+  };
+  const fields = fieldsByType[s.type] || ['name','notes'];
+  const updates = {};
+  fields.forEach(k => {
+    const el = document.getElementById('sub-edit-'+k);
+    if (el) updates[k] = el.value;
+  });
+  const stEl = document.getElementById('sub-edit-status');
+  if (stEl) updates.status = stEl.value;
+  // Try the richer update_submission endpoint first; fall back to update_submission_status (status only)
+  const payload = { action:'update_submission', sheetName: s.sheetName, rowNum: s.rowNum, updates: updates };
+  fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
+    .then(r => r.json())
+    .then(j => {
+      if (!j.ok) {
+        // Backend doesn't support full edit — at least save the status if it changed
+        if (updates.status && updates.status !== s.status) {
+          return fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+            body: JSON.stringify({ action:'update_submission_status', sheetName: s.sheetName, rowNum: s.rowNum, status: updates.status }) })
+            .then(r=>r.json()).then(j2 => {
+              if (!j2.ok) throw new Error(j2.error || 'Status update failed');
+              Object.assign(s, updates);  // local only — backend didn't accept full edit
+              alert('⚠ Backend doesn\'t support full submission edits yet.\n\nStatus saved to backend; other field changes are local to this browser only.\n\nTo add full edit support, add an "update_submission" action to your Apps Script worker.');
+              document.getElementById('sub-edit-ml').remove();
+              subRender();
+            });
+        }
+        throw new Error(j.error || 'Update failed');
+      }
+      Object.assign(s, updates);
+      document.getElementById('sub-edit-ml').remove();
+      subRender();
+    })
+    .catch(e => alert('Save failed: ' + e.message));
 }
 
 function subExportCsv() {

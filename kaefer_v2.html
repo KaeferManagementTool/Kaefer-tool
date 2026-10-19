@@ -6200,11 +6200,135 @@ function scfRender() {
           return `<button onclick="SCF.tab='${t.id}';scfRender()" style="padding:9px 16px;border:0;border-right:1px solid var(--line);background:${on?'#fff':'transparent'};color:${on?t.col:'var(--mute)'};font-weight:700;font-size:12px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;border-bottom:${on?'3px solid '+t.col:'3px solid transparent'};transition:all .15s">${t.label} <span style="background:${t.col};color:#fff;padding:1px 7px;border-radius:10px;font-size:10px;margin-left:4px">${n}</span></button>`;
         }).join('')}
       </div>
+      ${scfRenderBubbles()}
       <div id="scf-body" style="padding:14px"></div>
     </div>
   `;
   scfRenderBody();
   if (SCF.openDetail) scfRenderDetail();
+}
+
+/* ---- Scaffold Register bubble stats row ---- */
+// Yarwun area name → regex that matches the start of a Functional Location string
+const SCF_AREA_PATTERNS = [
+  { label:'DIGESTION',         color:'#1565c0', patterns:[/^2030580/, /^2030550/, /\bDIG\b/i, /digestion/i] },
+  { label:'BOILER',            color:'#ef6c00', patterns:[/^2030106/, /\bBOIL/i, /boiler/i] },
+  { label:'CALCINATION',       color:'#6a1b9a', patterns:[/^2030452/, /\bCALC/i, /calcin/i] },
+  { label:'CLARIFICATION',     color:'#00695c', patterns:[/^2030453/, /\bCLAR/i, /clarif/i] },
+  { label:'MATERIAL HANDLING', color:'#2e7d32', patterns:[/^2030055/, /^2030720/, /\bMH\b/i, /material/i, /handling/i] },
+  { label:'RMA',               color:'#c62828', patterns:[/\bRMA\b/i, /residue/i] },
+  { label:'HYDRATE',           color:'#ad1457', patterns:[/^20304/, /\bHYD/i, /hydrate/i] },
+  { label:'WHARF',             color:'#5d4037', patterns:[/\bWHARF/i, /wharf/i] },
+  { label:'COGEN',             color:'#455a64', patterns:[/\bCOG/i, /cogen/i] }
+];
+
+function scfDetectArea(scaffold) {
+  if (!scaffold) return 'OTHER';
+  const loc = (scaffold.location || '').toString();
+  const notes = (scaffold.notes || '').toString();
+  const haystack = loc + ' ' + notes;
+  for (const area of SCF_AREA_PATTERNS) {
+    if (area.patterns.some(p => p.test(haystack))) return area.label;
+  }
+  return 'OTHER';
+}
+
+function scfDaysSinceErect(scaffold) {
+  if (!scaffold || !scaffold.dateErected) return null;
+  const d = new Date(scaffold.dateErected); if (isNaN(d)) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+
+const SCF_LONGTERM_DAYS = 90;
+
+function scfWeekRanges(n) {
+  // Build the last n Mon-Sun week ranges (newest first)
+  const out = [];
+  const now = new Date();
+  const day = now.getDay(); const diff = (day + 6) % 7;
+  const thisMon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff);
+  for (let i = 0; i < n; i++) {
+    const mon = new Date(thisMon); mon.setDate(thisMon.getDate() - i*7);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    out.push({ from: mon.toISOString().slice(0,10), to: sun.toISOString().slice(0,10), label: fdDisplay(mon.toISOString().slice(0,10)) + ' – ' + fdDisplay(sun.toISOString().slice(0,10)) });
+  }
+  return out;
+}
+
+function scfRenderBubbles() {
+  const active     = SCF.active     || [];
+  const pending    = SCF.pending    || [];
+  const dismantled = SCF.dismantled || [];
+  const sumKg  = list => list.reduce((n,s) => n + (parseFloat(s.totalWeightKg)||0), 0);
+  const toTons = kg => (kg/1000).toFixed(3);
+
+  const longTerm = active.filter(s => { const d = scfDaysSinceErect(s); return d != null && d >= SCF_LONGTERM_DAYS; });
+
+  // Group ACTIVE scaffolds by detected area
+  const byArea = {};
+  active.forEach(s => {
+    const a = scfDetectArea(s);
+    (byArea[a] = byArea[a] || []).push(s);
+  });
+
+  // Build an ordered list of area bubbles (only those with data), in SCF_AREA_PATTERNS order + OTHER last
+  const areaBubbles = [];
+  SCF_AREA_PATTERNS.forEach(def => {
+    const list = byArea[def.label];
+    if (list && list.length) areaBubbles.push({ label: def.label, color: def.color, list });
+  });
+  if (byArea['OTHER'] && byArea['OTHER'].length) {
+    areaBubbles.push({ label:'OTHER', color:'#607d8b', list: byArea['OTHER'] });
+  }
+
+  // Weekly dismantled picker
+  if (!SCF.weekPick) {
+    const wk = scfWeekRanges(1)[0];
+    SCF.weekPick = { from: wk.from, to: wk.to };
+  }
+  const weeks = scfWeekRanges(12);
+  const wkDismantled = dismantled.filter(s => {
+    if (!s.dismantledAt) return false;
+    const d = String(s.dismantledAt).slice(0,10);
+    return d >= SCF.weekPick.from && d <= SCF.weekPick.to;
+  });
+
+  // Build the bubbles HTML
+  const bubble = (opts) => {
+    const { label, color, border, big, sub, extra, textColor } = opts;
+    return `<div style="display:flex;flex-direction:column;align-items:center;min-width:118px">
+      <div style="font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;padding:2px 10px;background:#fff;border:2px solid ${border||color};border-radius:12px;color:${border||color};margin-bottom:-10px;position:relative;z-index:2;white-space:nowrap">${label}</div>
+      <div style="width:118px;height:118px;border-radius:50%;background:${color};color:${textColor||'#fff'};display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.15);padding:4px;text-align:center">
+        <div style="font-size:19px;font-weight:800;line-height:1">${big}</div>
+        <div style="font-size:10px;opacity:.9;margin-top:3px">${sub}</div>
+        ${extra ? `<div style="font-size:9px;opacity:.85;margin-top:2px;line-height:1.3">${extra}</div>` : ''}
+      </div>
+    </div>`;
+  };
+
+  const mainBubbles = [
+    bubble({ label:'TOTAL ACTIVE', color:'#1a1a1a', big: toTons(sumKg(active)) + ' t', sub: active.length + ' scaffolds' }),
+    bubble({ label:'LONG-TERM', color:'#ef6c00', big: toTons(sumKg(longTerm)) + ' t', sub: longTerm.length + ' scaffolds', extra: '≥' + SCF_LONGTERM_DAYS + ' days standing' }),
+    bubble({ label:'PENDING', color:'#e65100', big: toTons(sumKg(pending)) + ' t', sub: pending.length + ' scaffolds' }),
+    bubble({ label:'DISMANTLED', color:'#607d8b', big: toTons(sumKg(dismantled)) + ' t', sub: dismantled.length + ' total' })
+  ];
+
+  return `<div style="padding:14px;background:linear-gradient(135deg,#fafafa,#eceff1);border-bottom:1px solid var(--line)">
+    <p style="margin:0 0 14px;font-size:11px;color:var(--mute);text-align:center">Scaffold activity at a glance — tonnage and count by status & plant area.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start">
+      ${mainBubbles.join('')}
+      ${areaBubbles.length ? '<div style="width:1px;align-self:stretch;background:var(--line);margin:0 4px"></div>' : ''}
+      ${areaBubbles.map(a => bubble({ label: a.label, color: a.color, big: toTons(sumKg(a.list)) + ' t', sub: a.list.length + ' scaffolds' })).join('')}
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:14px;font-size:12px">
+      <span style="font-weight:700;color:#333">Weekly Dismantled:</span>
+      <select onchange="(function(v){const w=scfWeekRanges(12).find(x=>x.from+'|'+x.to===v);if(w){SCF.weekPick={from:w.from,to:w.to};scfRender();}})(this.value)" style="padding:5px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;font-weight:600;background:#fff">
+        ${weeks.map(w => `<option value="${w.from}|${w.to}" ${w.from===SCF.weekPick.from?'selected':''}>${w.label}</option>`).join('')}
+      </select>
+      <span style="font-weight:700;color:#c62828">${toTons(sumKg(wkDismantled))} t</span>
+      <span style="color:var(--mute)">(${wkDismantled.length} scaffold${wkDismantled.length===1?'':'s'})</span>
+    </div>
+  </div>`;
 }
 
 function scfRenderBody() {

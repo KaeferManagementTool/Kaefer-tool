@@ -4609,6 +4609,21 @@ function regLoad(type) {
     const raw = JSON.parse(localStorage.getItem('kaefer_v2_registers_'+type) || '[]');
     REG.items[type] = Array.isArray(raw) ? raw : [];
   } catch(e) { REG.items[type] = []; }
+  // Auto-fix: for Training, any entry where the date landed in Issued but Expires is blank → swap it to Expires
+  if (type === 'training' && Array.isArray(REG.items.training)) {
+    let fixed = 0;
+    REG.items.training.forEach(e => {
+      if (e && e.issueDate && !e.expiry) {
+        e.expiry = e.issueDate;
+        e.issueDate = '';
+        fixed++;
+      }
+    });
+    if (fixed > 0) {
+      regSave('training');
+      console.log('[Registers] Auto-migrated '+fixed+' training entries: Issued → Expires');
+    }
+  }
   REG.loaded[type] = true;
 }
 function regSave(type) {

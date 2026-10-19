@@ -4450,18 +4450,15 @@ function rptBuildCsvRows(type, from, to) {
 const REGISTERS_SCHEMA = {
   ppe: {
     label: 'PPE', icon: '🦺', color: '#2e7d32',
-    description: 'PPE orders & issuances — track pending orders at top, received items in the archive section below.',
-    expiryField: 'expiry',
-    splitByStatus: true,  // custom narrow-view render: Pending orders at top, Received at bottom
+    description: 'PPE orders — pending orders at top, collected items archived below. Toggle to see each person\'s order history.',
+    splitByStatus: true,
     columns: [
-      { id:'person',   label:'Person',    type:'person', required:true, width:180 },
-      { id:'item',     label:'Item',      type:'combo', required:true, width:160, options:['Hard hat','Boots','Gloves','Hi-vis shirt','Hi-vis vest','Safety glasses','Hearing protection','Harness','Overalls','Wet weather gear','Gumboots','Other'] },
-      { id:'size',     label:'Size',      type:'text', width:80 },
-      { id:'status',   label:'Status',    type:'select', required:true, options:['Pending','Waiting on Quote','Ordered','Collected'] },
-      { id:'issued',   label:'Date',      type:'date', required:true, width:120 },
-      { id:'expiry',   label:'Expires',   type:'date', width:120 },
-      { id:'signedBy', label:'Signed by', type:'text', width:140 },
-      { id:'notes',    label:'Notes',     type:'text' }
+      { id:'person', label:'Person', type:'person', required:true, width:180 },
+      { id:'item',   label:'Item',   type:'combo',  required:true, width:170, options:['Hard hat','Boots','Gloves','Hi-vis shirt','Hi-vis vest','Shirts','Pants','Overalls','Safety glasses','Hearing protection','Harness','Wet weather gear','Gumboots','Long sleeve','Other'] },
+      { id:'size',   label:'Size',   type:'text',   width:90 },
+      { id:'status', label:'Status', type:'select', required:true, options:['Pending','Waiting on Quote','Ordered','Collected'] },
+      { id:'issued', label:'Date',   type:'date',   required:true, width:120 },
+      { id:'notes',  label:'Notes',  type:'text' }
     ]
   },
   vehicle: {
@@ -4542,7 +4539,8 @@ const REG = {
   filter: '',
   expiringOnly: false,
   trainingView: 'wide',
-  trainingShowArchived: false
+  trainingShowArchived: false,
+  ppeView: 'orders'   // 'orders' (pending/collected split) or 'byPerson' (grouped history per person)
 };
 
 // Per-person metadata for Training wide view: archive flag, sort order, group override
@@ -4734,6 +4732,10 @@ function regRender() {
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;margin-top:14px;margin-left:12px">
           <input type="checkbox" ${REG.trainingShowArchived?'checked':''} onchange="REG.trainingShowArchived=this.checked;regRenderTable()"> Show archived
         </label>` : ''}
+        ${REG.activeType === 'ppe' ? `<div style="margin-top:14px;margin-left:12px;display:flex;gap:0;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden">
+          <button onclick="REG.ppeView='orders';regRenderTable()" style="padding:6px 14px;border:0;background:${REG.ppeView==='orders'?schema.color:'#fff'};color:${REG.ppeView==='orders'?'#fff':'#333'};font-weight:700;font-size:11px;cursor:pointer">📋 Order list</button>
+          <button onclick="REG.ppeView='byPerson';regRenderTable()" style="padding:6px 14px;border:0;background:${REG.ppeView==='byPerson'?schema.color:'#fff'};color:${REG.ppeView==='byPerson'?'#fff':'#333'};font-weight:700;font-size:11px;cursor:pointer;border-left:1px solid var(--line)">👤 By person</button>
+        </div>` : ''}
         <div class="spacer"></div>
         <div style="font-size:11px;color:var(--mute);margin-top:16px">Any cell is click-to-edit · dates stored as YYYY-MM-DD, shown DD/MM/YYYY</div>
       </div>
@@ -4777,6 +4779,11 @@ function regRenderTable() {
   // Training wide view: build pivot
   if (REG.activeType === 'training' && REG.trainingView === 'wide') {
     wrap.innerHTML = regRenderTrainingWide();
+    return;
+  }
+  // PPE by-person view
+  if (REG.activeType === 'ppe' && REG.ppeView === 'byPerson') {
+    wrap.innerHTML = regRenderPpeByPerson();
     return;
   }
   // Normal narrow table — build the standard structure
@@ -5148,6 +5155,73 @@ function regSaveTrainingCellEdit(cellId, personName, ticket, entryId, newVal, or
     regSave('training');
   }
   regRenderTable();
+}
+
+// PPE "By Person" view — grouped per scaffolder with full order history
+function regRenderPpeByPerson() {
+  const items = REG.items.ppe || [];
+  if (!items.length) return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No PPE orders yet. Add one above or import from v1.</div>';
+  const filter = (REG.filter || '').toLowerCase().trim();
+  // Group by person
+  const byPerson = {};
+  items.forEach(x => {
+    const n = (x.person || '').trim() || '(unknown)';
+    if (!byPerson[n]) byPerson[n] = [];
+    byPerson[n].push(x);
+  });
+  // Sort within each person: newest first by date
+  Object.keys(byPerson).forEach(k => {
+    byPerson[k].sort((a,b) => (b.issued||'').localeCompare(a.issued||''));
+  });
+  // Filter + sort names
+  let names = Object.keys(byPerson).sort((a,b) => a.localeCompare(b));
+  if (filter) {
+    names = names.filter(n => n.toLowerCase().includes(filter) || byPerson[n].some(x => (x.item||'').toLowerCase().includes(filter) || (x.notes||'').toLowerCase().includes(filter)));
+  }
+  if (!names.length) return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No people match the current filter.</div>';
+
+  let html = '<div style="overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff">';
+  let totalOrders = 0;
+  names.forEach(name => {
+    const list = byPerson[name];
+    totalOrders += list.length;
+    const pending   = list.filter(x => (x.status||'').toLowerCase() !== 'collected').length;
+    const collected = list.filter(x => (x.status||'').toLowerCase() === 'collected').length;
+    html += `<div style="border-bottom:3px solid #1a1a1a">
+      <div style="background:#1a1a1a;color:#fff;padding:9px 14px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:2">
+        <span style="font-weight:800;font-size:13.5px">${escHtml(name)}</span>
+        <span style="font-size:11px;color:#aaa">${list.length} total</span>
+        ${pending ? `<span style="background:#c8102e;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px">${pending} pending</span>` : ''}
+        ${collected ? `<span style="background:#2e7d32;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px">${collected} collected</span>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+        <thead><tr style="background:#f5f5f5;color:#555">
+          <th style="padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;width:110px">DATE</th>
+          <th style="padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px">ITEM</th>
+          <th style="padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;width:90px">SIZE</th>
+          <th style="padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;width:130px">STATUS</th>
+          <th style="padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px">NOTES</th>
+        </tr></thead>
+        <tbody>`;
+    list.forEach(x => {
+      const status = (x.status||'Pending');
+      const sLow = status.toLowerCase();
+      const sBg = sLow === 'collected' ? '#2e7d32' : sLow === 'ordered' ? '#1565c0' : sLow === 'waiting on quote' ? '#5d4037' : '#e65100';
+      html += `<tr style="border-top:1px solid var(--line)">
+        <td style="padding:5px 10px;white-space:nowrap;color:#555">${fdDisplay(x.issued)}</td>
+        <td style="padding:5px 10px;font-weight:700;color:#1a1a1a">${escHtml(x.item||'')}</td>
+        <td style="padding:5px 10px;font-weight:600">${escHtml(x.size||'')}</td>
+        <td style="padding:5px 10px"><select onchange="regEditField('${x.id}','status',this.value);regRenderTable()" style="padding:2px 6px;border:1px solid var(--line);border-radius:3px;font-size:10px;font-weight:700;background:${sBg};color:#fff;cursor:pointer">
+          ${['Pending','Waiting on Quote','Ordered','Collected'].map(o=>`<option value="${o}" ${o===status?'selected':''}>${o}</option>`).join('')}
+        </select></td>
+        <td style="padding:5px 10px;color:var(--mute);font-size:11px">${escHtml(x.notes||'')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  });
+  html += '</div>';
+  html += `<div style="padding:8px 12px;font-size:10.5px;color:var(--mute);background:#fafafa;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r-sm) var(--r-sm)">Showing <b>${names.length}</b> people · <b>${totalOrders}</b> orders · newest first · change status inline</div>`;
+  return html;
 }
 
 // Legacy alias (older code may still call this)

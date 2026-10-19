@@ -4926,6 +4926,62 @@ function regDetectHeaderMap(firstRow, schema) {
   return map;
 }
 
+// For Training only: detect the KAEFER wide-format roster and transform it
+// into narrow Person/Ticket/Expires rows that the normal header-map parser handles.
+function regTryWideTrainingTransform(rows) {
+  if (!rows || !rows.length) return null;
+  const header = (rows[0] || []).map(c => (c||'').toString().trim());
+  const headerLow = header.map(h => h.toLowerCase());
+  const nameIdx = headerLow.findIndex(h => h === 'name' || h === 'person' || h === 'scaffolder');
+  if (nameIdx < 0) return null;
+  // Only consider "wide" if there are many columns and most non-skip cells in the data rows parse as dates
+  if (header.length < 10) return null;
+  const skipCols = new Set();
+  headerLow.forEach((h, i) => {
+    if (['section','team','status','name','person','scaffolder','role','position','id','notes','comments'].includes(h)) skipCols.add(i);
+  });
+  const roleIdx = headerLow.indexOf('role');
+  const dataRows = rows.slice(1);
+  // Sanity check: at least 30% of non-skip cells in the first data row should parse as dates
+  if (!dataRows.length) return null;
+  const firstData = dataRows[0] || [];
+  let candidateCells = 0, dateCells = 0;
+  firstData.forEach((v, i) => {
+    if (skipCols.has(i)) return;
+    const s = (v || '').trim();
+    if (!s) return;
+    candidateCells++;
+    if (offParseDate(s)) dateCells++;
+  });
+  if (candidateCells < 3 || (dateCells / candidateCells) < 0.5) return null;
+  // Transform
+  const narrow = [['Person','Ticket','Issued','Expires','Issued By','Notes']];
+  dataRows.forEach(cells => {
+    const rawName = (cells[nameIdx] || '').trim();
+    if (!rawName) return;
+    let name = rawName;
+    // "Lastname, Firstname" or "Lastname. Firstname" → "Firstname Lastname"
+    if (name.includes(',')) {
+      const p = name.split(',').map(s => s.trim());
+      if (p.length === 2 && p[1]) name = p[1] + ' ' + p[0];
+    } else if (/\. /.test(name) && !/^\w\.\s/.test(name)) {
+      const p = name.split('.').map(s => s.trim());
+      if (p.length === 2 && p[1]) name = p[1] + ' ' + p[0];
+    }
+    const role = roleIdx >= 0 ? (cells[roleIdx] || '').trim() : '';
+    cells.forEach((val, i) => {
+      if (skipCols.has(i)) return;
+      const v = (val || '').trim();
+      if (!v) return;
+      const parsed = offParseDate(v);
+      if (!parsed) return;
+      narrow.push([name, header[i], '', v, 'KAEFER', role]);
+    });
+  });
+  if (narrow.length === 1) return null;
+  return narrow;
+}
+
 function regBulkParse() {
   const status = document.getElementById('reg-bulk-status');
   const payload = REG_BULK_HTML;
@@ -4969,6 +5025,17 @@ function regBulkParseWorker(payload, isText) {
     });
   }
   if (!rows.length) { status.innerHTML = '<span style="color:var(--err)">⚠ No rows detected.</span>'; return; }
+
+  // If this is the Training register and the paste looks like a wide-format roster
+  // (Name column + many ticket-named columns with dates), auto-transform to narrow.
+  let wideNote = '';
+  if (REG.activeType === 'training') {
+    const transformed = regTryWideTrainingTransform(rows);
+    if (transformed) {
+      wideNote = ' <span style="color:#6a1b9a;font-weight:600">(wide format auto-transformed)</span>';
+      rows = transformed;
+    }
+  }
 
   const headerMap = regDetectHeaderMap(rows[0], schema);
   if (!headerMap) {
@@ -5027,7 +5094,7 @@ function regBulkParseWorker(payload, isText) {
     return;
   }
   const mapped = Object.entries(headerMap).filter(([k,v])=>v>=0).map(([k,v])=>k+'→col'+(v+1)).join(', ');
-  status.innerHTML = '<span style="color:'+schema.color+'">✓ Parsed in '+parseMs+'ms — '+entries.length+' entries ready'+(skipped.length?' ('+skipped.length+' skipped)':'')+'</span><br><span style="font-size:10.5px;color:var(--mute)">mapped: '+mapped+'</span>';
+  status.innerHTML = '<span style="color:'+schema.color+'">✓ Parsed in '+parseMs+'ms — '+entries.length+' entries ready'+(skipped.length?' ('+skipped.length+' skipped)':'')+'</span>'+wideNote+'<br><span style="font-size:10.5px;color:var(--mute)">mapped: '+mapped+'</span>';
   const msg = 'Found ' + entries.length + ' valid entries to add to the ' + schema.label + ' Register.\n' +
     (skipped.length ? skipped.length + ' row(s) skipped.\n' : '') + '\nContinue?';
   if (!confirm(msg)) { status.textContent = ''; return; }

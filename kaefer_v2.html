@@ -4538,7 +4538,8 @@ const REG = {
   items: {},     // { ppe: [...], vehicle: [...], ... }
   loaded: {},    // { ppe: true, ... }
   filter: '',
-  expiringOnly: false
+  expiringOnly: false,
+  trainingView: 'wide'   // 'wide' (pivot per-person) or 'narrow' (one row per ticket)
 };
 
 function regLoad(type) {
@@ -4639,21 +4640,16 @@ function regRender() {
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;margin-top:14px">
           <input type="checkbox" ${REG.expiringOnly?'checked':''} onchange="REG.expiringOnly=this.checked;regRenderTable()"> Expiring / expired only
         </label>
+        ${REG.activeType === 'training' ? `<div style="margin-top:14px;margin-left:12px;display:flex;gap:0;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden">
+          <button onclick="REG.trainingView='wide';regRenderTable()" style="padding:6px 14px;border:0;background:${REG.trainingView==='wide'?schema.color:'#fff'};color:${REG.trainingView==='wide'?'#fff':'#333'};font-weight:700;font-size:11px;cursor:pointer">▦ Wide (one row per person)</button>
+          <button onclick="REG.trainingView='narrow';regRenderTable()" style="padding:6px 14px;border:0;background:${REG.trainingView==='narrow'?schema.color:'#fff'};color:${REG.trainingView==='narrow'?'#fff':'#333'};font-weight:700;font-size:11px;cursor:pointer;border-left:1px solid var(--line)">☰ Narrow (one row per ticket)</button>
+        </div>` : ''}
         <div class="spacer"></div>
         <div style="font-size:11px;color:var(--mute);margin-top:16px">Any cell is click-to-edit · dates stored as YYYY-MM-DD, shown DD/MM/YYYY</div>
       </div>
 
       <!-- Table -->
-      <div style="overflow-x:auto">
-        <table class="dm-table" id="reg-table">
-          <thead><tr>
-            ${schema.columns.map(c => `<th${c.width?' style="min-width:'+c.width+'px"':''}>${escHtml(c.label)}${c.required?' <span style="color:var(--err)">*</span>':''}</th>`).join('')}
-            ${schema.expiryField ? '<th style="min-width:140px">Status</th>' : ''}
-            <th>&nbsp;</th>
-          </tr></thead>
-          <tbody id="reg-tbody"></tbody>
-        </table>
-      </div>
+      <div id="reg-table-wrap" style="overflow-x:auto"></div>
     </div>
   `;
   regRenderTable();
@@ -4686,6 +4682,22 @@ function regRenderField(col, val, prefix) {
 
 function regRenderTable() {
   const schema = REGISTERS_SCHEMA[REG.activeType];
+  const wrap = document.getElementById('reg-table-wrap');
+  if (!wrap) return;
+  // Training wide view: build pivot
+  if (REG.activeType === 'training' && REG.trainingView === 'wide') {
+    wrap.innerHTML = regRenderTrainingWide();
+    return;
+  }
+  // Normal narrow table — build the standard structure
+  wrap.innerHTML = `<table class="dm-table" id="reg-table">
+    <thead><tr>
+      ${schema.columns.map(c => `<th${c.width?' style="min-width:'+c.width+'px"':''}>${escHtml(c.label)}${c.required?' <span style="color:var(--err)">*</span>':''}</th>`).join('')}
+      ${schema.expiryField ? '<th style="min-width:140px">Status</th>' : ''}
+      <th>&nbsp;</th>
+    </tr></thead>
+    <tbody id="reg-tbody"></tbody>
+  </table>`;
   const tb = document.getElementById('reg-tbody');
   if (!tb) return;
   const filter = (REG.filter||'').toLowerCase().trim();
@@ -4803,6 +4815,163 @@ function regExportCsv() {
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = 'register-'+REG.activeType+'-'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ---- Training WIDE view: pivot one row per person, columns per ticket ---- */
+const REG_TRAINING_GROUPS = [
+  { label: 'ADMIN',    color: '#5d4037', names: ['Government ID','Medical','Privacy Consent','Data Consent'] },
+  { label: 'BASICS',   color: '#f57c00', names: ['GCI (General Construction Induction)','Site Induction','MSIC Card','Escape Hood','Biosecurity Induction'] },
+  { label: 'AREA',     color: '#ef6c00', names: ['GPC / FL Induction','Material Handling','RMA Induction','RMA Light Vehicle','Cogen Induction'] },
+  { label: 'SCAFFOLD', color: '#2e7d32', names: ['HRWL Scaffold Advanced','Scaffold Advanced CTO','HRWL Scaffold Intermediate','Scaffold Intermediate CTO','HRWL Scaffold Basic','Scaffold Basic CTO'] },
+  { label: 'HEIGHTS',  color: '#c62828', names: ['Working at Heights Statement','Working at Heights CTO'] },
+  { label: 'C/SPACE',  color: '#1565c0', names: ['Confined Space Entry','Confined Space CTO'] },
+  { label: 'HRWL',     color: '#4527a0', names: ['HRWL Forklift','Forklift Operator Auth','HRWL EWP','EWP Operator Auth','HRWL Rigging Basic','Rigging Basic Auth','HRWL Dogging','Dogging Auth'] },
+  { label: 'VEHICLE',  color: '#00695c', names: ['Light Vehicle Auth'] },
+  { label: 'PERMITS',  color: '#6a1b9a', names: ['Permit Practical','PTW Theory','LBG Theory','LBG Practical'] }
+];
+const REG_PEOPLE_GROUPS = [
+  { key: 'OFFICE STAFF', label: 'MANAGEMENT / OFFICE', bg: '#fff3e0', bar: '#e65100' },
+  { key: 'YARD STAFF',   label: 'YARD STAFF',          bg: '#e3f2fd', bar: '#1565c0' },
+  { key: 'SCAFFOLDERS',  label: 'SCAFFOLDERS',         bg: '#e8f5e9', bar: '#2e7d32' },
+  { key: '__other__',    label: 'OTHER / UNLINKED',    bg: '#fafafa', bar: '#607d8b' }
+];
+
+function regRenderTrainingWide() {
+  const items = REG.items.training || [];
+  if (!items.length) return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No training entries yet. Add one above or bulk-paste your roster.</div>';
+
+  // Pivot: person → ticket → entry
+  const peopleMap = {};
+  const ticketSet = new Set();
+  items.forEach(x => {
+    const pname = (x.person || '').trim();
+    const tname = (x.ticket || '').trim();
+    if (!pname || !tname) return;
+    if (!peopleMap[pname]) peopleMap[pname] = { role: x.notes || '', tickets: {} };
+    // If multiple entries for same person+ticket, keep the one with the LATEST expiry
+    const existing = peopleMap[pname].tickets[tname];
+    if (!existing || (x.expiry || '') > (existing.expiry || '')) {
+      peopleMap[pname].tickets[tname] = x;
+      if (x.notes && !peopleMap[pname].role) peopleMap[pname].role = x.notes;
+    }
+    ticketSet.add(tname);
+  });
+
+  // Build ordered column list from groups → anything leftover goes into OTHER
+  const orderedCols = [];
+  const groupBoundaries = [];
+  REG_TRAINING_GROUPS.forEach(g => {
+    const visible = g.names.filter(n => ticketSet.has(n));
+    if (!visible.length) return;
+    groupBoundaries.push({ label: g.label, color: g.color, start: orderedCols.length, count: visible.length });
+    visible.forEach(n => orderedCols.push(n));
+  });
+  const other = [...ticketSet].filter(t => !orderedCols.includes(t)).sort();
+  if (other.length) {
+    groupBoundaries.push({ label: 'OTHER', color: '#607d8b', start: orderedCols.length, count: other.length });
+    other.forEach(n => orderedCols.push(n));
+  }
+
+  // Group people by ATT2 group
+  const groups = {};
+  REG_PEOPLE_GROUPS.forEach(g => groups[g.key] = []);
+  Object.keys(peopleMap).sort((a,b) => a.localeCompare(b)).forEach(name => {
+    const p = (typeof ATT2 !== 'undefined' && ATT2.persons) ? ATT2.persons.find(x => (x.name||'').toLowerCase() === name.toLowerCase()) : null;
+    const g = p && p.group ? p.group : '__other__';
+    (groups[g] = groups[g] || []).push(name);
+  });
+
+  const filter = (REG.filter || '').toLowerCase().trim();
+  const expiringOnly = REG.expiringOnly;
+
+  // HTML
+  let html = '<div style="overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:var(--r-sm)"><table style="border-collapse:collapse;font-size:11px;min-width:100%">';
+
+  // Group header row
+  html += '<thead><tr>';
+  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;min-width:170px;position:sticky;left:0;z-index:4">PERSON</th>';
+  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;min-width:160px;position:sticky;left:170px;z-index:4;border-right:2px solid #c62828">ROLE</th>';
+  groupBoundaries.forEach(g => {
+    html += `<th colspan="${g.count}" style="background:${g.color};color:#fff;padding:5px 8px;text-align:center;font-size:10px;letter-spacing:1.2px;font-weight:800;border-right:2px solid #fff">${g.label}</th>`;
+  });
+  html += '</tr><tr>';
+  orderedCols.forEach(t => {
+    const short = (t.length > 20) ? t.replace(/\s*\(.*?\)\s*/g, '').replace('HRWL ','') : t;
+    const display = short.length > 18 ? short.slice(0, 17)+'…' : short;
+    html += `<th style="background:#333;color:#fff;padding:5px 4px;font-size:9.5px;font-weight:600;text-align:center;min-width:88px;max-width:110px;letter-spacing:.3px;position:sticky;top:28px;z-index:2" title="${escHtml(t)}">${escHtml(display)}</th>`;
+  });
+  html += '</tr></thead>';
+
+  html += '<tbody>';
+  let totalVisible = 0;
+  REG_PEOPLE_GROUPS.forEach(pg => {
+    const people = groups[pg.key] || [];
+    if (!people.length) return;
+    // Apply filters
+    const visiblePeople = people.filter(name => {
+      const pdata = peopleMap[name];
+      if (filter) {
+        const nameMatch = name.toLowerCase().includes(filter);
+        const roleMatch = (pdata.role || '').toLowerCase().includes(filter);
+        if (!nameMatch && !roleMatch) {
+          const ticketMatch = orderedCols.some(t => pdata.tickets[t] && t.toLowerCase().includes(filter));
+          if (!ticketMatch) return false;
+        }
+      }
+      if (expiringOnly) {
+        const anyExpiring = orderedCols.some(t => {
+          const e = pdata.tickets[t]; if (!e) return false;
+          const s = regExpiryStatus(e, 'training');
+          return s && s.days <= 30;
+        });
+        if (!anyExpiring) return false;
+      }
+      return true;
+    });
+    if (!visiblePeople.length) return;
+    totalVisible += visiblePeople.length;
+    // Group banner row
+    html += `<tr><td colspan="${orderedCols.length+2}" style="background:${pg.bar};color:#fff;padding:6px 12px;font-weight:800;letter-spacing:1.2px;font-size:10.5px;position:sticky;left:0">👥 ${pg.label} · ${visiblePeople.length}</td></tr>`;
+    visiblePeople.forEach(name => {
+      const pdata = peopleMap[name];
+      html += '<tr>';
+      html += `<td style="padding:5px 10px;font-weight:700;background:${pg.bg};position:sticky;left:0;z-index:1;border-right:1px solid #ccc;white-space:nowrap">${escHtml(name)}</td>`;
+      html += `<td style="padding:5px 10px;color:#555;font-size:10.5px;background:${pg.bg};position:sticky;left:170px;z-index:1;border-right:2px solid #c62828;white-space:nowrap">${escHtml(pdata.role || '')}</td>`;
+      orderedCols.forEach(t => {
+        const e = pdata.tickets[t];
+        if (!e) {
+          html += '<td style="padding:4px;background:#fafafa;border:1px solid #e5e5e5"></td>';
+          return;
+        }
+        const s = regExpiryStatus(e, 'training');
+        const bg = s ? s.bg : '#fff';
+        const col = s ? s.color : '#333';
+        const dateStr = e.expiry ? fdDisplay(e.expiry) : '—';
+        html += `<td style="padding:4px 6px;background:${bg};color:${col};font-weight:700;text-align:center;border:1px solid #e5e5e5;cursor:pointer;font-size:10.5px;white-space:nowrap" title="${escHtml(t)} — ${s?s.label:'no expiry set'} — click to edit" onclick="regEditTrainingCell('${e.id}')">${dateStr}</td>`;
+      });
+      html += '</tr>';
+    });
+  });
+
+  if (!totalVisible) html += `<tr><td colspan="${orderedCols.length+2}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No people match the current filter.</td></tr>`;
+  html += '</tbody></table></div>';
+  html += `<div style="padding:8px 12px;font-size:10.5px;color:var(--mute);background:#fafafa;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r-sm) var(--r-sm)">Showing <b>${totalVisible}</b> people · <b>${orderedCols.length}</b> ticket columns · scroll horizontally to see all · click any date cell to edit</div>`;
+  return html;
+}
+
+function regEditTrainingCell(id) {
+  const e = (REG.items.training || []).find(x => x.id === id);
+  if (!e) return;
+  const current = e.expiry || '';
+  const prompted = prompt('Expiry date for\n' + e.ticket + ' — ' + e.person + '\n\n(YYYY-MM-DD or DD/MM/YYYY, leave blank to clear)', current);
+  if (prompted === null) return;
+  const raw = (prompted || '').trim();
+  if (!raw) { e.expiry = ''; regSave('training'); regRenderTable(); return; }
+  const parsed = /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0,10) : (typeof offParseDate === 'function' ? offParseDate(raw) : '');
+  if (!parsed) { alert('Could not understand that date.'); return; }
+  e.expiry = parsed;
+  regSave('training');
+  regRenderTable();
 }
 
 /* ---- Registers bulk paste (per-register, header-smart) ---- */

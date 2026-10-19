@@ -6419,26 +6419,53 @@ function subApplyLeave(id) {
     dates.push(yr + '-' + mo + '-' + da);
   }
   if (!dates.length) { alert('No workdays in that range.'); return; }
-  const msg = 'Apply ' + leaveCode + ' to ' + name + ' for ' + dates.length + ' workday(s) (' + fdDisplay(from) + ' – ' + fdDisplay(to) + ')?';
-  if (!confirm(msg)) return;
   if (!person) {
-    // Just mark the submission as applied
+    const msg = 'Apply ' + leaveCode + ' off-roster for ' + name + ' — ' + dates.length + ' workday(s) (' + fdDisplay(from) + ' – ' + fdDisplay(to) + ')?\n\nNothing will be written to Attendance; just marks this submission as applied.';
+    if (!confirm(msg)) return;
     subSetStatus(id, 'Applied (off-roster)');
     return;
   }
-  // Hit the att2_bulk_tick endpoint if available, else fall back to one-by-one
-  const payload = { action:'att2_bulk_tick', data: { person_id: person.id, dates: dates, status: leaveCode } };
-  fetch(workerUrl(), { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
-    .then(r => r.json())
-    .then(j => {
-      if (!j.ok) throw new Error(j.error || 'Failed');
-      // Update local ticks cache
-      ATT2.ticks[person.id] = ATT2.ticks[person.id] || {};
-      dates.forEach(d => { ATT2.ticks[person.id][d] = leaveCode; });
-      // Mark submission applied
-      subSetStatus(id, 'Applied');
-    })
-    .catch(e => alert('Apply to attendance failed: ' + e.message));
+  // Preview exactly what we're about to write, with existing values flagged
+  const existingTicks = ATT2.ticks[person.id] || {};
+  const overwrites = dates.filter(d => existingTicks[d] && existingTicks[d] !== leaveCode);
+  const previewLines = dates.slice(0, 10).map(d => {
+    const was = existingTicks[d] || '(blank)';
+    return '  ' + fdDisplay(d) + ':  ' + was + ' → ' + leaveCode;
+  });
+  if (dates.length > 10) previewLines.push('  … and ' + (dates.length - 10) + ' more');
+  let msg = 'Apply ' + leaveCode + ' to ' + person.name + ' (' + dates.length + ' workday' + (dates.length>1?'s':'') + '):\n\n' + previewLines.join('\n');
+  if (overwrites.length) msg += '\n\n⚠ ' + overwrites.length + ' day(s) already have a different code — they will be overwritten.';
+  if (!confirm(msg)) return;
+  // One-by-one via the known-good att2_tick endpoint (same path the Attendance tab uses).
+  // Done sequentially so we can report any failures and stop early if the backend misbehaves.
+  const u = workerUrl();
+  if (!u) { alert('No sync URL.'); return; }
+  let i = 0, ok = 0, fail = 0, failMsgs = [];
+  function next() {
+    if (i >= dates.length) {
+      ATT2.lastSync = Date.now();
+      if (fail === 0) {
+        subSetStatus(id, 'Applied');
+        alert('Done — ' + ok + ' day(s) applied for ' + person.name + '.');
+      } else {
+        alert('Finished with errors.\nApplied: ' + ok + '\nFailed: ' + fail + '\n\n' + failMsgs.slice(0,3).join('\n'));
+      }
+      return;
+    }
+    const dk = dates[i++];
+    fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({ action:'att2_tick', data: { person_id: person.id, date: dk, status: leaveCode } }) })
+      .then(r => r.json())
+      .then(j => {
+        if (!j.ok) throw new Error(j.error || 'Unknown error');
+        ATT2.ticks[person.id] = ATT2.ticks[person.id] || {};
+        ATT2.ticks[person.id][dk] = leaveCode;
+        ok++;
+      })
+      .catch(e => { fail++; failMsgs.push(fdDisplay(dk) + ': ' + e.message); })
+      .then(next);
+  }
+  next();
 }
 
 function subApplyPpe(id) {

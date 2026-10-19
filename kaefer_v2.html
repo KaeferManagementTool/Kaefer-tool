@@ -6513,40 +6513,305 @@ function subApplyPpe(id) {
   alert('✓ Added ' + parts.length + ' PPE entries. Open Registers → PPE to see them.');
 }
 
+// KAEFER red-K logo as inline SVG so it prints offline
+const KAEFER_LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 60" style="height:48px"><circle cx="30" cy="30" r="28" fill="none" stroke="#c8102e" stroke-width="3"/><text x="30" y="42" text-anchor="middle" font-family="Arial Black,Arial,sans-serif" font-size="34" font-weight="900" fill="#c8102e">K</text><text x="68" y="42" font-family="Arial Black,Arial,sans-serif" font-size="30" font-weight="900" fill="#c8102e" letter-spacing="1">KAEFER</text></svg>';
+
 function subPrintPdf(id) {
   const s = subFind(id);
   if (!s) return;
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked.'); return; }
-  const typeLabel = s.type === 'leave' ? 'Leave Application' : s.type === 'ppe' ? 'PPE Request' : s.type === 'purch' ? 'Purchasing Request' : 'Submission';
-  let body = '';
-  body += '<h1 style="color:#c8102e;margin:0 0 4px;font-size:22px">KAEFER · ' + typeLabel + '</h1>';
-  body += '<div style="font-size:11px;color:#777;margin-bottom:14px">Submitted ' + escHtml(s.submitted||'') + ' · Status: <b>' + escHtml(s.status||'Pending') + '</b></div>';
-  body += '<table style="width:100%;font-size:13px;margin-bottom:14px"><tbody>';
-  body += '<tr><td style="color:#777;padding:3px 10px 3px 0;width:140px">Name</td><td><b>' + escHtml(s.name||'') + '</b></td></tr>';
-  if (s.position) body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Position</td><td>' + escHtml(s.position) + '</td></tr>';
-  if (s.site)     body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Site</td><td>' + escHtml(s.site) + '</td></tr>';
-  if (s.type === 'leave') {
-    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Leave type</td><td>' + escHtml(s.leaveType||'') + '</td></tr>';
-    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">First day</td><td>' + fdDisplay(s.firstDay) + '</td></tr>';
-    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Last day</td><td>' + fdDisplay(s.lastDay) + '</td></tr>';
-    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Working days</td><td>' + escHtml(String(s.workingDays||'')) + '</td></tr>';
-  } else if (s.type === 'ppe') {
-    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Items</td><td>' + escHtml(s.items||'') + '</td></tr>';
-  } else if (s.type === 'purch') {
-    if (s.supplier)    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Supplier</td><td>' + escHtml(s.supplier) + '</td></tr>';
-    if (s.cost != null && s.cost !== '') body += '<tr><td style="color:#777;padding:3px 10px 3px 0">Cost</td><td>$' + escHtml(String(s.cost)) + '</td></tr>';
-    if (s.poNumber)    body += '<tr><td style="color:#777;padding:3px 10px 3px 0">PO Number</td><td>' + escHtml(s.poNumber) + '</td></tr>';
-    if (s.description) body += '<tr><td style="color:#777;padding:3px 10px 3px 0;vertical-align:top">Description</td><td>' + escHtml(s.description) + '</td></tr>';
-  }
-  if (s.notes) body += '<tr><td style="color:#777;padding:3px 10px 3px 0;vertical-align:top">Notes</td><td style="font-style:italic">' + escHtml(s.notes) + '</td></tr>';
-  body += '</tbody></table>';
-  if (s.signature) body += '<div style="margin-top:14px"><div style="font-size:11px;color:#777;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Submitter signature</div><img src="' + escHtml(s.signature) + '" style="max-width:300px;max-height:100px;border:1px solid #ccc;padding:4px"></div>';
-  if (s.approverSignature) body += '<div style="margin-top:14px;padding:10px;background:#e8f5e9;border-left:3px solid #2e7d32"><div style="font-size:11px;color:#2e7d32;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">✓ Approved by ' + escHtml(s.approvedBy||'') + (s.approvedDate ? ' · ' + escHtml(s.approvedDate) : '') + '</div><img src="' + escHtml(s.approverSignature) + '" style="max-width:260px;max-height:80px;border:1px solid #c8e6c9;padding:4px"></div>';
-  const docHtml = '<!doctype html><html><head><meta charset="utf-8"><title>' + typeLabel + ' — ' + escHtml(s.name||'') + '</title><style>body{font-family:system-ui,-apple-system,sans-serif;color:#1a1a1a;max-width:720px;margin:20px auto;padding:0 20px}@media print{body{margin:0}}</style></head><body>' + body + '</body></html>';
+  const titleMap = { leave:'Leave Application Form', ppe:'PPE Request Form', purch:'Purchasing Request Form' };
+  const title = titleMap[s.type] || 'Submission Form';
+  const body = s.type === 'leave' ? subBuildLeaveForm(s)
+             : s.type === 'ppe'   ? subBuildPpeForm(s)
+             : s.type === 'purch' ? subBuildPurchForm(s)
+             : '<p>Unknown submission type.</p>';
+  const css = `
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color:#000; margin:0; padding:0; font-size:12px; line-height:1.35 }
+    .form-header { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:14px; padding-bottom:4px }
+    .form-header h1 { font-size:26px; font-weight:300; color:#777; margin:0; letter-spacing:.3px }
+    table.kf { width:100%; border-collapse:collapse; margin-bottom:10px }
+    table.kf td, table.kf th { border:1px solid #000; padding:6px 8px; vertical-align:middle; font-size:12px }
+    .lbl { background:#d9d9d9; font-weight:700 }
+    .lbl-dark { background:#000; color:#fff; font-weight:700; padding:5px 10px; letter-spacing:.5px }
+    .sect { background:#d9d9d9; font-weight:700; padding:5px 10px }
+    .center { text-align:center }
+    .box { display:inline-block; width:14px; height:14px; border:1.5px solid #000; vertical-align:middle }
+    .box.on { background:#000; position:relative }
+    .box.on::after { content:'✔'; color:#fff; font-size:11px; position:absolute; top:-2px; left:1px }
+    .sig-img { max-height:50px; max-width:200px }
+    .fill-line { border-bottom:1px solid #000; display:inline-block; min-width:40px; padding:0 6px; font-weight:700 }
+    @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact } }
+  `;
+  const docHtml = '<!doctype html><html><head><meta charset="utf-8"><title>' + title + ' — ' + escHtml(s.name||'') + '</title><style>' + css + '</style></head><body>' + body + '</body></html>';
   w.document.write(docHtml);
   w.document.close();
-  setTimeout(() => w.print(), 400);
+  setTimeout(() => w.print(), 500);
+}
+
+// ========= LEAVE FORM (matches KAEFER template) =========
+function subBuildLeaveForm(s) {
+  const leaveTypes = ['Annual','Sick','Without Pay','Long Service','Study','Bereavement','In Lieu','Other'];
+  const chosen = (s.leaveType||'').toLowerCase();
+  const tick = type => (chosen.indexOf(type.toLowerCase()) >= 0) ? '<span class="box on"></span>' : '<span class="box"></span>';
+  const workDays = s.workingDays || '';
+  // Returning to work = lastDay + 1 (next workday)
+  let returnDate = '';
+  if (s.lastDay) {
+    const d = subParseDate(s.lastDay);
+    if (d) {
+      const r = new Date(d); r.setDate(r.getDate()+1);
+      while (r.getDay() === 0 || r.getDay() === 6) r.setDate(r.getDate()+1);
+      returnDate = String(r.getDate()).padStart(2,'0') + '/' + String(r.getMonth()+1).padStart(2,'0') + '/' + r.getFullYear();
+    }
+  }
+  const isApproved = (s.status||'').toLowerCase().indexOf('approv') >= 0 || (s.status||'').toLowerCase().indexOf('applied') >= 0;
+  const isRejected = (s.status||'').toLowerCase().indexOf('reject') >= 0;
+
+  return `
+    <div class="form-header">
+      <h1>Leave Application Form</h1>
+      ${KAEFER_LOGO_SVG}
+    </div>
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:14%">Name:</td>
+        <td style="width:30%"><b>${escHtml(s.name||'')}</b></td>
+        <td class="lbl" style="width:14%">Employee No:</td>
+        <td style="width:20%">${escHtml(s.employeeNo||'')}</td>
+        <td class="lbl center" style="width:10%">Staff</td>
+        <td class="center" style="width:12%">${/staff/i.test(s.employeeType||s.position||'')?'<span class="box on"></span>':'<span class="box"></span>'}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Position:</td>
+        <td>${escHtml(s.position||'')}</td>
+        <td class="lbl">Location:</td>
+        <td>${escHtml(s.site||'Yarwun')}</td>
+        <td class="lbl center">Wages</td>
+        <td class="center">${/wages/i.test(s.employeeType||'')?'<span class="box on"></span>':'<span class="box"></span>'}</td>
+      </tr>
+    </table>
+
+    <div style="padding:4px 0 10px;font-size:13px">
+      I wish to apply for <span class="fill-line center" style="min-width:60px">${escHtml(String(workDays))}</span> working days leave.
+    </div>
+
+    <table class="kf">
+      <tr><td colspan="8" class="sect">TYPE OF LEAVE APPLIED FOR <i style="font-weight:400">(Please tick)</i></td></tr>
+      <tr>
+        <td colspan="2" style="border-right:none"></td>
+        <td colspan="6" class="sect center" style="border-left:none">Other</td>
+      </tr>
+      <tr>${leaveTypes.map(t => `<td class="lbl center" style="width:12.5%">${t === 'Other' ? t + '<br><span style="font-weight:400;font-size:10px">Pls specify</span>' : t}</td>`).join('')}</tr>
+      <tr>${leaveTypes.map(t => `<td class="center">${tick(t)}</td>`).join('')}</tr>
+    </table>
+
+    <table class="kf">
+      <tr>
+        <td class="lbl center" style="width:33.33%">First Day Of Leave</td>
+        <td class="lbl center" style="width:33.33%">Last Day Of Leave</td>
+        <td class="lbl center" style="width:33.34%">Returning To Work</td>
+      </tr>
+      <tr>
+        <td class="center">${fdDisplay(s.firstDay) || ''}</td>
+        <td class="center">${fdDisplay(s.lastDay) || ''}</td>
+        <td class="center">${escHtml(returnDate)}</td>
+      </tr>
+    </table>
+
+    <table class="kf">
+      <tr><td colspan="3" class="sect">ROSTERED DAY OFF</td></tr>
+      <tr><td class="lbl center">Date</td><td class="lbl center">Date</td><td class="lbl center">Date</td></tr>
+      <tr><td>1.&nbsp;${escHtml(s.rdo1||'')}</td><td>2.&nbsp;${escHtml(s.rdo2||'')}</td><td>3.&nbsp;${escHtml(s.rdo3||'')}</td></tr>
+    </table>
+
+    <table class="kf">
+      <tr>
+        <td style="width:70%;color:#c8102e;font-weight:600">How many Public Holidays are included in the leave period?</td>
+        <td class="center">${escHtml(s.publicHolidays||'')}</td>
+      </tr>
+      <tr>
+        <td style="color:#c8102e;font-weight:600">Do you want this paid in advance? <i style="color:#000;font-weight:400">(Please tick)</i></td>
+        <td class="center">Yes <span class="box ${/yes/i.test(s.paidAdvance||'')?'on':''}"></span>&nbsp;&nbsp; No <span class="box ${/no/i.test(s.paidAdvance||'')?'on':''}"></span></td>
+      </tr>
+    </table>
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:25%">Signature of Applicant:</td>
+        <td style="height:60px;text-align:center">${s.signature?'<img src="'+escHtml(s.signature)+'" class="sig-img">':''}</td>
+        <td class="lbl" style="width:10%">Date:</td>
+        <td style="width:20%" class="center">${escHtml(s.submitted||'')}</td>
+      </tr>
+    </table>
+
+    <div style="margin-top:14px">
+      <div class="lbl-dark" style="display:inline-block">RECOMMENDATION / APPROVAL</div>
+      <span style="margin-left:10px;font-style:italic">(Please tick)</span>
+    </div>
+    <table class="kf" style="margin-top:4px;border-top:none">
+      <tr>
+        <td style="width:40px" class="center"><span class="box ${isApproved?'on':''}"></span></td>
+        <td>This application for <span class="fill-line" style="min-width:50px">${escHtml(String(workDays))}</span> days is approved/recommended.</td>
+      </tr>
+      <tr>
+        <td class="center"><span class="box ${isRejected?'on':''}"></span></td>
+        <td>This application for <span class="fill-line" style="min-width:50px"></span> days is not approved/recommended.</td>
+      </tr>
+    </table>
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:25%">Signature of Approver:</td>
+        <td style="height:60px;text-align:center">${s.approverSignature?'<img src="'+escHtml(s.approverSignature)+'" class="sig-img">':''}</td>
+        <td class="lbl" style="width:10%">Date:</td>
+        <td style="width:20%" class="center">${escHtml(s.approvedDate||'')}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Approver Name:</td>
+        <td colspan="3">${escHtml(s.approvedBy||'')}</td>
+      </tr>
+    </table>
+
+    ${s.notes ? '<div style="margin-top:10px;padding:8px 10px;border:1px solid #000;background:#f5f5f5"><b>Notes:</b> ' + escHtml(s.notes) + '</div>' : ''}
+  `;
+}
+
+// ========= PPE REQUEST FORM =========
+function subBuildPpeForm(s) {
+  const items = (s.items||'').split(/,\s*/).filter(Boolean);
+  const isApproved = (s.status||'').toLowerCase().indexOf('approv') >= 0 || (s.status||'').toLowerCase().indexOf('added') >= 0;
+  const isRejected = (s.status||'').toLowerCase().indexOf('reject') >= 0;
+  return `
+    <div class="form-header">
+      <h1>PPE Request Form</h1>
+      ${KAEFER_LOGO_SVG}
+    </div>
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:14%">Name:</td>
+        <td style="width:36%"><b>${escHtml(s.name||'')}</b></td>
+        <td class="lbl" style="width:14%">Date:</td>
+        <td style="width:36%">${escHtml(s.submitted||'')}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Position:</td>
+        <td>${escHtml(s.position||'')}</td>
+        <td class="lbl">Location:</td>
+        <td>${escHtml(s.site||'Yarwun')}</td>
+      </tr>
+    </table>
+
+    <table class="kf">
+      <tr><td colspan="3" class="sect">ITEMS REQUESTED</td></tr>
+      <tr><td class="lbl center" style="width:8%">#</td><td class="lbl">Item Description</td><td class="lbl center" style="width:15%">Qty</td></tr>
+      ${items.length ? items.map((it,i) => {
+        const m = it.match(/^(.+?)(?:\s*x(\d+))?$/i);
+        const desc = m ? m[1].trim() : it;
+        const qty  = m && m[2] ? m[2] : '1';
+        return `<tr><td class="center">${i+1}</td><td>${escHtml(desc)}</td><td class="center">${escHtml(qty)}</td></tr>`;
+      }).join('') : '<tr><td colspan="3" style="height:40px"></td></tr>'}
+      ${items.length < 6 ? Array(6-items.length).fill('<tr><td style="height:24px"></td><td></td><td></td></tr>').join('') : ''}
+    </table>
+
+    ${s.notes ? '<table class="kf"><tr><td class="lbl" style="width:14%">Notes</td><td>' + escHtml(s.notes) + '</td></tr></table>' : ''}
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:25%">Signature of Applicant:</td>
+        <td style="height:60px;text-align:center">${s.signature?'<img src="'+escHtml(s.signature)+'" class="sig-img">':''}</td>
+      </tr>
+    </table>
+
+    <div style="margin-top:14px">
+      <div class="lbl-dark" style="display:inline-block">APPROVAL</div>
+    </div>
+    <table class="kf" style="margin-top:4px">
+      <tr>
+        <td style="width:40px" class="center"><span class="box ${isApproved?'on':''}"></span></td>
+        <td>Approved</td>
+        <td style="width:40px" class="center"><span class="box ${isRejected?'on':''}"></span></td>
+        <td>Not approved</td>
+      </tr>
+      <tr>
+        <td class="lbl" style="width:25%" colspan="2">Signature of Approver:</td>
+        <td style="height:60px;text-align:center" colspan="2">${s.approverSignature?'<img src="'+escHtml(s.approverSignature)+'" class="sig-img">':''}</td>
+      </tr>
+      <tr>
+        <td class="lbl" colspan="2">Approver Name:</td>
+        <td colspan="2">${escHtml(s.approvedBy||'')} &nbsp;&nbsp; <b>Date:</b> ${escHtml(s.approvedDate||'')}</td>
+      </tr>
+    </table>
+  `;
+}
+
+// ========= PURCHASING FORM =========
+function subBuildPurchForm(s) {
+  const isApproved = (s.status||'').toLowerCase().indexOf('approv') >= 0;
+  const isRejected = (s.status||'').toLowerCase().indexOf('reject') >= 0;
+  return `
+    <div class="form-header">
+      <h1>Purchasing Request Form</h1>
+      ${KAEFER_LOGO_SVG}
+    </div>
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:14%">Requested by:</td>
+        <td style="width:36%"><b>${escHtml(s.name||'')}</b></td>
+        <td class="lbl" style="width:14%">Date:</td>
+        <td style="width:36%">${escHtml(s.submitted||'')}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Position:</td>
+        <td>${escHtml(s.position||'')}</td>
+        <td class="lbl">Location:</td>
+        <td>${escHtml(s.site||'Yarwun')}</td>
+      </tr>
+    </table>
+
+    <table class="kf">
+      <tr><td colspan="2" class="sect">PURCHASE DETAILS</td></tr>
+      <tr><td class="lbl" style="width:20%">Supplier:</td><td>${escHtml(s.supplier||'')}</td></tr>
+      <tr><td class="lbl">Cost (approx):</td><td>${s.cost != null && s.cost !== '' ? '$'+escHtml(String(s.cost)) : ''}</td></tr>
+      <tr><td class="lbl">PO Number:</td><td>${escHtml(s.poNumber||'')}</td></tr>
+      <tr><td class="lbl" style="vertical-align:top;height:70px">Description:</td><td>${escHtml(s.description||'')}</td></tr>
+    </table>
+
+    ${s.notes ? '<table class="kf"><tr><td class="lbl" style="width:20%">Notes</td><td>' + escHtml(s.notes) + '</td></tr></table>' : ''}
+
+    <table class="kf">
+      <tr>
+        <td class="lbl" style="width:25%">Signature of Applicant:</td>
+        <td style="height:60px;text-align:center">${s.signature?'<img src="'+escHtml(s.signature)+'" class="sig-img">':''}</td>
+      </tr>
+    </table>
+
+    <div style="margin-top:14px">
+      <div class="lbl-dark" style="display:inline-block">APPROVAL</div>
+    </div>
+    <table class="kf" style="margin-top:4px">
+      <tr>
+        <td style="width:40px" class="center"><span class="box ${isApproved?'on':''}"></span></td>
+        <td>Approved</td>
+        <td style="width:40px" class="center"><span class="box ${isRejected?'on':''}"></span></td>
+        <td>Not approved</td>
+      </tr>
+      <tr>
+        <td class="lbl" colspan="2" style="width:25%">Signature of Approver:</td>
+        <td style="height:60px;text-align:center" colspan="2">${s.approverSignature?'<img src="'+escHtml(s.approverSignature)+'" class="sig-img">':''}</td>
+      </tr>
+      <tr>
+        <td class="lbl" colspan="2">Approver Name:</td>
+        <td colspan="2">${escHtml(s.approvedBy||'')} &nbsp;&nbsp; <b>Date:</b> ${escHtml(s.approvedDate||'')}</td>
+      </tr>
+    </table>
+  `;
 }
 
 function subEditEntry(id) {

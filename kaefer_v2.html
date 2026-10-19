@@ -6323,6 +6323,68 @@ function subSetStatus(id, newStatus) {
     .catch(e => alert('Status update failed: ' + e.message));
 }
 
+// Parse any of: YYYY-MM-DD, DD/MM/YYYY, D/M/YY, DD-MM-YYYY, "2026-10-19T..." → Date, else null
+function subParseDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  const s = String(v).trim();
+  // ISO yyyy-mm-dd (optionally with time)
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) { const d = new Date(+m[1], +m[2]-1, +m[3]); return isNaN(d) ? null : d; }
+  // dd/mm/yyyy or dd-mm-yyyy (also 2-digit yr)
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (m) {
+    let y = +m[3]; if (y < 100) y += (y < 50 ? 2000 : 1900);
+    const d = new Date(y, +m[2]-1, +m[1]); return isNaN(d) ? null : d;
+  }
+  // Last resort: let JS try
+  const d = new Date(s); return isNaN(d) ? null : d;
+}
+
+// Fuzzy roster match: exact → startsWith → first-name match → surname match
+function subMatchPerson(name) {
+  if (!name || typeof ATT2 === 'undefined' || !Array.isArray(ATT2.persons)) return null;
+  const n = name.toLowerCase().trim();
+  const parts = n.split(/\s+/);
+  const first = parts[0] || '';
+  const last  = parts[parts.length-1] || '';
+  const persons = ATT2.persons;
+  // 1. exact (case-insensitive)
+  let p = persons.find(x => (x.name||'').toLowerCase().trim() === n);
+  if (p) return p;
+  // 2. one contains the other (handles "Boz" vs "Boz Nixon", "Bozzy Nixon" vs "Boz Nixon")
+  p = persons.find(x => {
+    const xn = (x.name||'').toLowerCase().trim();
+    return xn.indexOf(n) >= 0 || n.indexOf(xn) >= 0;
+  });
+  if (p) return p;
+  // 3. first-name AND last-name both match somewhere in the roster entry
+  if (first && last && first !== last) {
+    p = persons.find(x => {
+      const xn = (x.name||'').toLowerCase();
+      return xn.indexOf(first) >= 0 && xn.indexOf(last) >= 0;
+    });
+    if (p) return p;
+  }
+  // 4. first name only (unique)
+  if (first) {
+    const firstMatches = persons.filter(x => {
+      const xp = (x.name||'').toLowerCase().split(/\s+/);
+      return xp[0] === first;
+    });
+    if (firstMatches.length === 1) return firstMatches[0];
+  }
+  // 5. surname only (unique)
+  if (last && last !== first) {
+    const lastMatches = persons.filter(x => {
+      const xp = (x.name||'').toLowerCase().split(/\s+/);
+      return xp[xp.length-1] === last;
+    });
+    if (lastMatches.length === 1) return lastMatches[0];
+  }
+  return null;
+}
+
 function subApplyLeave(id) {
   const s = subFind(id);
   if (!s || s.type !== 'leave') return;
@@ -6330,22 +6392,31 @@ function subApplyLeave(id) {
   const from = s.firstDay, to = s.lastDay;
   if (!name || !from || !to) { alert('Missing name or dates.'); return; }
   if (typeof ATT2 === 'undefined' || !ATT2.loaded) { alert('Attendance roster not loaded yet. Open the Attendance tab once, then try again.'); return; }
-  const person = ATT2.persons.find(p => (p.name||'').toLowerCase() === name.toLowerCase());
+  let person = subMatchPerson(name);
   if (!person) {
-    if (!confirm('No roster match for "' + name + '". Apply as off-roster? Click Cancel to skip.')) return;
+    // Offer a dropdown of roster names so Steve can pick manually
+    const names = (ATT2.persons||[]).map(p => p.name).filter(Boolean).sort();
+    const pick = prompt('No roster match for "' + name + '".\n\nType the exact name from your roster to match, or leave blank to apply off-roster:\n\n' + names.join(', '));
+    if (pick === null) return;
+    if (pick.trim()) {
+      person = subMatchPerson(pick.trim());
+      if (!person) { alert('Still no match for "' + pick + '". Nothing applied.'); return; }
+    }
   }
   const leaveCode = /sick/i.test(s.leaveType||'') ? 'SL'
                   : /personal|carer|bereavement/i.test(s.leaveType||'') ? 'AL'
                   : /annual|holiday/i.test(s.leaveType||'') ? 'AL'
                   : 'AL';
   const dates = [];
-  const d1 = new Date(from+'T00:00:00'), d2 = new Date(to+'T00:00:00');
-  if (isNaN(d1) || isNaN(d2) || d2 < d1) { alert('Invalid date range.'); return; }
+  const d1 = subParseDate(from), d2 = subParseDate(to);
+  if (!d1 || !d2 || d2 < d1) { alert('Invalid date range.\n\nFrom: "' + from + '"\nTo:   "' + to + '"\n\nParsed as: ' + (d1?d1.toDateString():'(none)') + ' → ' + (d2?d2.toDateString():'(none)')); return; }
   for (let d = new Date(d1); d <= d2; d.setDate(d.getDate()+1)) {
     // Skip weekends
     const dow = d.getDay();
     if (dow === 0 || dow === 6) continue;
-    dates.push(d.toISOString().slice(0,10));
+    // Local YYYY-MM-DD (toISOString would shift to UTC and roll Brisbane dates back a day)
+    const yr = d.getFullYear(), mo = String(d.getMonth()+1).padStart(2,'0'), da = String(d.getDate()).padStart(2,'0');
+    dates.push(yr + '-' + mo + '-' + da);
   }
   if (!dates.length) { alert('No workdays in that range.'); return; }
   const msg = 'Apply ' + leaveCode + ' to ' + name + ' for ' + dates.length + ' workday(s) (' + fdDisplay(from) + ' – ' + fdDisplay(to) + ')?';

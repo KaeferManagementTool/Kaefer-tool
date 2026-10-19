@@ -4535,12 +4535,71 @@ const REGISTERS_SCHEMA = {
 
 const REG = {
   activeType: 'ppe',
-  items: {},     // { ppe: [...], vehicle: [...], ... }
-  loaded: {},    // { ppe: true, ... }
+  items: {},
+  loaded: {},
   filter: '',
   expiringOnly: false,
-  trainingView: 'wide'   // 'wide' (pivot per-person) or 'narrow' (one row per ticket)
+  trainingView: 'wide',
+  trainingShowArchived: false
 };
+
+// Per-person metadata for Training wide view: archive flag, sort order, group override
+function regTrainingMeta() {
+  try { return JSON.parse(localStorage.getItem('kaefer_v2_training_people_meta') || '{}'); }
+  catch(e) { return {}; }
+}
+function regTrainingSetMeta(m) { localStorage.setItem('kaefer_v2_training_people_meta', JSON.stringify(m)); }
+function regTrainingPersonMeta(name) { return regTrainingMeta()[name] || {}; }
+function regTrainingUpdatePersonMeta(name, patch) {
+  const all = regTrainingMeta();
+  all[name] = Object.assign(all[name] || {}, patch);
+  regTrainingSetMeta(all);
+}
+function regTrainingResolveGroup(name) {
+  const over = (regTrainingPersonMeta(name) || {}).group;
+  if (over) return over;
+  const p = (typeof ATT2 !== 'undefined' && ATT2.persons) ? ATT2.persons.find(x => (x.name||'').toLowerCase() === name.toLowerCase()) : null;
+  return p && p.group ? p.group : '__other__';
+}
+function regTrainingToggleArchive(name) {
+  const m = regTrainingPersonMeta(name);
+  regTrainingUpdatePersonMeta(name, { archived: !m.archived });
+  regRenderTable();
+}
+function regTrainingMove(name, dir) {
+  const meta = regTrainingMeta();
+  const group = regTrainingResolveGroup(name);
+  // Build list of people in same group (and not archived)
+  const items = REG.items.training || [];
+  const allNames = Array.from(new Set(items.map(x => (x.person||'').trim()).filter(Boolean)));
+  const peers = allNames.filter(n => regTrainingResolveGroup(n) === group && !(regTrainingPersonMeta(n).archived));
+  // Sort by current order then alpha
+  peers.sort((a,b) => {
+    const oa = (meta[a] && meta[a].order != null) ? meta[a].order : 1e6;
+    const ob = (meta[b] && meta[b].order != null) ? meta[b].order : 1e6;
+    if (oa !== ob) return oa - ob;
+    return a.localeCompare(b);
+  });
+  // Normalise all orders so we can swap cleanly
+  peers.forEach((n, i) => {
+    if (!meta[n]) meta[n] = {};
+    meta[n].order = i;
+  });
+  const idx = peers.indexOf(name);
+  if (idx < 0) return;
+  const target = dir === 'up' ? idx - 1 : idx + 1;
+  if (target < 0 || target >= peers.length) return;
+  const other = peers[target];
+  const tmp = meta[name].order;
+  meta[name].order = meta[other].order;
+  meta[other].order = tmp;
+  regTrainingSetMeta(meta);
+  regRenderTable();
+}
+function regTrainingChangeGroup(name, group) {
+  regTrainingUpdatePersonMeta(name, { group: group || null });
+  regRenderTable();
+}
 
 function regLoad(type) {
   if (REG.loaded[type]) return;
@@ -4643,7 +4702,10 @@ function regRender() {
         ${REG.activeType === 'training' ? `<div style="margin-top:14px;margin-left:12px;display:flex;gap:0;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden">
           <button onclick="REG.trainingView='wide';regRenderTable()" style="padding:6px 14px;border:0;background:${REG.trainingView==='wide'?schema.color:'#fff'};color:${REG.trainingView==='wide'?'#fff':'#333'};font-weight:700;font-size:11px;cursor:pointer">▦ Wide (one row per person)</button>
           <button onclick="REG.trainingView='narrow';regRenderTable()" style="padding:6px 14px;border:0;background:${REG.trainingView==='narrow'?schema.color:'#fff'};color:${REG.trainingView==='narrow'?'#fff':'#333'};font-weight:700;font-size:11px;cursor:pointer;border-left:1px solid var(--line)">☰ Narrow (one row per ticket)</button>
-        </div>` : ''}
+        </div>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;margin-top:14px;margin-left:12px">
+          <input type="checkbox" ${REG.trainingShowArchived?'checked':''} onchange="REG.trainingShowArchived=this.checked;regRenderTable()"> Show archived
+        </label>` : ''}
         <div class="spacer"></div>
         <div style="font-size:11px;color:var(--mute);margin-top:16px">Any cell is click-to-edit · dates stored as YYYY-MM-DD, shown DD/MM/YYYY</div>
       </div>
@@ -4848,7 +4910,6 @@ function regRenderTrainingWide() {
     const tname = (x.ticket || '').trim();
     if (!pname || !tname) return;
     if (!peopleMap[pname]) peopleMap[pname] = { role: x.notes || '', tickets: {} };
-    // If multiple entries for same person+ticket, keep the one with the LATEST expiry
     const existing = peopleMap[pname].tickets[tname];
     if (!existing || (x.expiry || '') > (existing.expiry || '')) {
       peopleMap[pname].tickets[tname] = x;
@@ -4857,7 +4918,7 @@ function regRenderTrainingWide() {
     ticketSet.add(tname);
   });
 
-  // Build ordered column list from groups → anything leftover goes into OTHER
+  // Column order
   const orderedCols = [];
   const groupBoundaries = [];
   REG_TRAINING_GROUPS.forEach(g => {
@@ -4872,25 +4933,38 @@ function regRenderTrainingWide() {
     other.forEach(n => orderedCols.push(n));
   }
 
-  // Group people by ATT2 group
+  // People grouping, honouring per-person meta
+  const meta = regTrainingMeta();
   const groups = {};
   REG_PEOPLE_GROUPS.forEach(g => groups[g.key] = []);
-  Object.keys(peopleMap).sort((a,b) => a.localeCompare(b)).forEach(name => {
-    const p = (typeof ATT2 !== 'undefined' && ATT2.persons) ? ATT2.persons.find(x => (x.name||'').toLowerCase() === name.toLowerCase()) : null;
-    const g = p && p.group ? p.group : '__other__';
+  const archived = [];
+  Object.keys(peopleMap).forEach(name => {
+    const m = meta[name] || {};
+    if (m.archived) { archived.push(name); return; }
+    const g = regTrainingResolveGroup(name);
     (groups[g] = groups[g] || []).push(name);
   });
+  // Sort within each group by meta.order, then alpha
+  Object.keys(groups).forEach(g => {
+    groups[g].sort((a,b) => {
+      const oa = (meta[a] && meta[a].order != null) ? meta[a].order : 1e6;
+      const ob = (meta[b] && meta[b].order != null) ? meta[b].order : 1e6;
+      if (oa !== ob) return oa - ob;
+      return a.localeCompare(b);
+    });
+  });
+  archived.sort((a,b) => a.localeCompare(b));
 
   const filter = (REG.filter || '').toLowerCase().trim();
   const expiringOnly = REG.expiringOnly;
 
-  // HTML
   let html = '<div style="overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:var(--r-sm)"><table style="border-collapse:collapse;font-size:11px;min-width:100%">';
 
-  // Group header row
+  // Header rows
   html += '<thead><tr>';
-  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;min-width:170px;position:sticky;left:0;z-index:4">PERSON</th>';
-  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;min-width:160px;position:sticky;left:170px;z-index:4;border-right:2px solid #c62828">ROLE</th>';
+  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 6px;text-align:center;font-size:10px;min-width:70px;position:sticky;left:0;z-index:4">ACTIONS</th>';
+  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;min-width:160px;position:sticky;left:70px;z-index:4">PERSON</th>';
+  html += '<th rowspan="2" style="background:#1a1a1a;color:#fff;padding:6px 10px;text-align:left;font-size:10px;letter-spacing:.5px;min-width:150px;position:sticky;left:230px;z-index:4;border-right:2px solid #c62828">ROLE</th>';
   groupBoundaries.forEach(g => {
     html += `<th colspan="${g.count}" style="background:${g.color};color:#fff;padding:5px 8px;text-align:center;font-size:10px;letter-spacing:1.2px;font-weight:800;border-right:2px solid #fff">${g.label}</th>`;
   });
@@ -4898,16 +4972,52 @@ function regRenderTrainingWide() {
   orderedCols.forEach(t => {
     const short = (t.length > 20) ? t.replace(/\s*\(.*?\)\s*/g, '').replace('HRWL ','') : t;
     const display = short.length > 18 ? short.slice(0, 17)+'…' : short;
-    html += `<th style="background:#333;color:#fff;padding:5px 4px;font-size:9.5px;font-weight:600;text-align:center;min-width:88px;max-width:110px;letter-spacing:.3px;position:sticky;top:28px;z-index:2" title="${escHtml(t)}">${escHtml(display)}</th>`;
+    html += `<th style="background:#333;color:#fff;padding:5px 4px;font-size:9.5px;font-weight:600;text-align:center;min-width:92px;max-width:110px;letter-spacing:.3px;position:sticky;top:28px;z-index:2" title="${escHtml(t)}">${escHtml(display)}</th>`;
   });
   html += '</tr></thead>';
 
   html += '<tbody>';
   let totalVisible = 0;
+
+  const renderPersonRow = (name, pg, isArchived) => {
+    const pdata = peopleMap[name];
+    const nameAttr = name.replace(/'/g, "\\'");
+    // Actions cell: up, down, archive toggle, group select
+    const actions = `<td style="padding:3px 4px;background:${pg.bg};position:sticky;left:0;z-index:1;border-right:1px solid #ccc;white-space:nowrap">
+      <div style="display:flex;gap:1px;align-items:center">
+        <button onclick="regTrainingMove('${nameAttr}','up')" title="Move up" style="width:18px;height:18px;padding:0;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:10px;line-height:1">▲</button>
+        <button onclick="regTrainingMove('${nameAttr}','down')" title="Move down" style="width:18px;height:18px;padding:0;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:10px;line-height:1">▼</button>
+        <button onclick="regTrainingToggleArchive('${nameAttr}')" title="${isArchived?'Un-archive':'Archive — hide from main view'}" style="width:22px;height:18px;padding:0;border:1px solid var(--line);background:${isArchived?'#2e7d32':'#fff'};color:${isArchived?'#fff':'#333'};cursor:pointer;font-size:10px;line-height:1">${isArchived?'↩':'📦'}</button>
+      </div>
+    </td>`;
+    const groupSelect = `<select onchange="regTrainingChangeGroup('${nameAttr}',this.value)" title="Change group" style="font-size:9px;padding:1px;border:0;background:transparent;margin-left:6px;color:var(--mute);max-width:85px">
+      <option value="">— (auto)</option>
+      ${REG_PEOPLE_GROUPS.filter(g=>g.key!=='__other__').map(g=>`<option value="${g.key}" ${((meta[name]||{}).group===g.key)?'selected':''}>${g.label.split(' /')[0]}</option>`).join('')}
+    </select>`;
+    let r = '<tr>';
+    r += actions;
+    r += `<td style="padding:5px 10px;font-weight:700;background:${pg.bg};position:sticky;left:70px;z-index:1;border-right:1px solid #ccc;white-space:nowrap">${escHtml(name)}${groupSelect}</td>`;
+    r += `<td style="padding:5px 10px;color:#555;font-size:10.5px;background:${pg.bg};position:sticky;left:230px;z-index:1;border-right:2px solid #c62828;white-space:nowrap">${escHtml(pdata.role || '')}</td>`;
+    orderedCols.forEach(t => {
+      const e = pdata.tickets[t];
+      const cellId = 'rtc-' + Math.random().toString(36).slice(2,8);
+      if (!e) {
+        r += `<td id="${cellId}" style="padding:4px;background:#fafafa;border:1px solid #e5e5e5;cursor:pointer;text-align:center;color:#bbb;font-size:14px" title="Click to add ${escHtml(t)}" onclick="regStartTrainingCellEdit('${cellId}','${nameAttr}','${t.replace(/'/g,"\\'")}','')">+</td>`;
+        return;
+      }
+      const s = regExpiryStatus(e, 'training');
+      const bg = s ? s.bg : '#fff';
+      const col = s ? s.color : '#333';
+      const dateStr = e.expiry ? fdDisplay(e.expiry) : '—';
+      r += `<td id="${cellId}" style="padding:4px 6px;background:${bg};color:${col};font-weight:700;text-align:center;border:1px solid #e5e5e5;cursor:pointer;font-size:10.5px;white-space:nowrap" title="${escHtml(t)} — ${s?s.label:'no expiry set'} — click to edit" onclick="regStartTrainingCellEdit('${cellId}','${nameAttr}','${t.replace(/'/g,"\\'")}','${e.id}')">${dateStr}</td>`;
+    });
+    r += '</tr>';
+    return r;
+  };
+
   REG_PEOPLE_GROUPS.forEach(pg => {
     const people = groups[pg.key] || [];
     if (!people.length) return;
-    // Apply filters
     const visiblePeople = people.filter(name => {
       const pdata = peopleMap[name];
       if (filter) {
@@ -4930,45 +5040,68 @@ function regRenderTrainingWide() {
     });
     if (!visiblePeople.length) return;
     totalVisible += visiblePeople.length;
-    // Group banner row
-    html += `<tr><td colspan="${orderedCols.length+2}" style="background:${pg.bar};color:#fff;padding:6px 12px;font-weight:800;letter-spacing:1.2px;font-size:10.5px;position:sticky;left:0">👥 ${pg.label} · ${visiblePeople.length}</td></tr>`;
-    visiblePeople.forEach(name => {
-      const pdata = peopleMap[name];
-      html += '<tr>';
-      html += `<td style="padding:5px 10px;font-weight:700;background:${pg.bg};position:sticky;left:0;z-index:1;border-right:1px solid #ccc;white-space:nowrap">${escHtml(name)}</td>`;
-      html += `<td style="padding:5px 10px;color:#555;font-size:10.5px;background:${pg.bg};position:sticky;left:170px;z-index:1;border-right:2px solid #c62828;white-space:nowrap">${escHtml(pdata.role || '')}</td>`;
-      orderedCols.forEach(t => {
-        const e = pdata.tickets[t];
-        if (!e) {
-          html += '<td style="padding:4px;background:#fafafa;border:1px solid #e5e5e5"></td>';
-          return;
-        }
-        const s = regExpiryStatus(e, 'training');
-        const bg = s ? s.bg : '#fff';
-        const col = s ? s.color : '#333';
-        const dateStr = e.expiry ? fdDisplay(e.expiry) : '—';
-        html += `<td style="padding:4px 6px;background:${bg};color:${col};font-weight:700;text-align:center;border:1px solid #e5e5e5;cursor:pointer;font-size:10.5px;white-space:nowrap" title="${escHtml(t)} — ${s?s.label:'no expiry set'} — click to edit" onclick="regEditTrainingCell('${e.id}')">${dateStr}</td>`;
-      });
-      html += '</tr>';
-    });
+    html += `<tr><td colspan="${orderedCols.length+3}" style="background:${pg.bar};color:#fff;padding:6px 12px;font-weight:800;letter-spacing:1.2px;font-size:10.5px;position:sticky;left:0">👥 ${pg.label} · ${visiblePeople.length}</td></tr>`;
+    visiblePeople.forEach(name => { html += renderPersonRow(name, pg, false); });
   });
 
-  if (!totalVisible) html += `<tr><td colspan="${orderedCols.length+2}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No people match the current filter.</td></tr>`;
+  // Archived section
+  if (REG.trainingShowArchived && archived.length) {
+    const archPg = { bg:'#f5f5f5', bar:'#607d8b', label:'ARCHIVED (no longer employed)' };
+    html += `<tr><td colspan="${orderedCols.length+3}" style="background:${archPg.bar};color:#fff;padding:6px 12px;font-weight:800;letter-spacing:1.2px;font-size:10.5px;position:sticky;left:0;border-top:3px solid #1a1a1a">📦 ${archPg.label} · ${archived.length}</td></tr>`;
+    archived.forEach(name => { html += renderPersonRow(name, archPg, true); });
+  }
+
+  if (!totalVisible && !(REG.trainingShowArchived && archived.length)) {
+    html += `<tr><td colspan="${orderedCols.length+3}" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No people match the current filter.</td></tr>`;
+  }
   html += '</tbody></table></div>';
-  html += `<div style="padding:8px 12px;font-size:10.5px;color:var(--mute);background:#fafafa;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r-sm) var(--r-sm)">Showing <b>${totalVisible}</b> people · <b>${orderedCols.length}</b> ticket columns · scroll horizontally to see all · click any date cell to edit</div>`;
+  html += `<div style="padding:8px 12px;font-size:10.5px;color:var(--mute);background:#fafafa;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r-sm) var(--r-sm)">Showing <b>${totalVisible}</b> active · <b>${archived.length}</b> archived · <b>${orderedCols.length}</b> ticket columns · <b>▲▼</b> reorder · <b>📦</b> archive · click any date cell to edit · click <b>+</b> to add a ticket</div>`;
   return html;
 }
 
+// Inline cell edit: replaces the cell with a date input while editing
+function regStartTrainingCellEdit(cellId, personName, ticket, entryId) {
+  const cell = document.getElementById(cellId);
+  if (!cell) return;
+  const entry = entryId ? (REG.items.training || []).find(x => x.id === entryId) : null;
+  const current = entry ? (entry.expiry || '') : '';
+  const safePerson = personName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  const safeTicket = ticket.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  cell.innerHTML = `<input type="date" value="${current}" autofocus style="width:120px;padding:3px;border:2px solid #6a1b9a;border-radius:3px;font-size:11px;background:#fff;color:#000" onblur="regSaveTrainingCellEdit('${cellId}','${safePerson}','${safeTicket}','${entryId||''}',this.value)" onkeydown="if(event.key==='Enter'){this.blur();}if(event.key==='Escape'){regRenderTable();}">`;
+  const input = cell.querySelector('input');
+  if (input) { input.focus(); input.select && input.select(); }
+}
+
+function regSaveTrainingCellEdit(cellId, personName, ticket, entryId, newVal) {
+  const parsed = (newVal || '').trim();
+  const items = REG.items.training = REG.items.training || [];
+  if (entryId) {
+    const e = items.find(x => x.id === entryId);
+    if (e) { e.expiry = parsed; regSave('training'); }
+  } else if (parsed) {
+    items.push({
+      id: 'r_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+      person: personName,
+      ticket: ticket,
+      issueDate: '',
+      expiry: parsed,
+      issuer: '',
+      notes: ''
+    });
+    regSave('training');
+  }
+  regRenderTable();
+}
+
+// Legacy alias (older code may still call this)
 function regEditTrainingCell(id) {
   const e = (REG.items.training || []).find(x => x.id === id);
   if (!e) return;
-  const current = e.expiry || '';
-  const prompted = prompt('Expiry date for\n' + e.ticket + ' — ' + e.person + '\n\n(YYYY-MM-DD or DD/MM/YYYY, leave blank to clear)', current);
-  if (prompted === null) return;
-  const raw = (prompted || '').trim();
-  if (!raw) { e.expiry = ''; regSave('training'); regRenderTable(); return; }
-  const parsed = /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0,10) : (typeof offParseDate === 'function' ? offParseDate(raw) : '');
-  if (!parsed) { alert('Could not understand that date.'); return; }
+  const next = prompt('Expiry date for\n'+e.ticket+' — '+e.person+'\n\n(YYYY-MM-DD, leave blank to clear)', e.expiry || '');
+  if (next === null) return;
+  const raw = (next || '').trim();
+  const parsed = raw ? (/^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0,10) : (typeof offParseDate === 'function' ? offParseDate(raw) : '')) : '';
+  if (raw && !parsed) { alert('Invalid date.'); return; }
   e.expiry = parsed;
   regSave('training');
   regRenderTable();

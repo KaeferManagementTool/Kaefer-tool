@@ -8122,13 +8122,14 @@ async function tsBuildFilledBase64() {
     const date = tsDateForDay(TS.weekStart, dayIdx);
     const dateSerial = tsDateToExcelSerial(date);
 
-    const rows = [];
+    // Group this day's rows by job so we can insert a blank spacer row between jobs
+    const jobGroups = [];
     Object.values(TS.jobs).forEach(job => {
-      (job.assignments || []).forEach(a => {
-        const hrs = a.hrs && a.hrs[dayKey];
-        if (hrs == null || hrs === 0 || hrs === '') return;
-        rows.push({ job, assignment: a, hours: hrs });
+      const assignments = (job.assignments || []).filter(a => {
+        const h = a.hrs && a.hrs[dayKey];
+        return h != null && h !== 0 && h !== '';
       });
+      if (assignments.length) jobGroups.push({ job, assignments });
     });
 
     const xmlStr = await zip.file(path).async('string');
@@ -8207,43 +8208,59 @@ async function tsBuildFilledBase64() {
       return c;
     };
 
-    // Write new data rows starting at row 2
-    rows.forEach((row, i) => {
-      const r = i + 2;
-      const put = (col, value, kind) => {
-        if (value === '' || value == null) return;
-        const ref = col + r;
-        const cell = cellByRef[ref];
-        // Never overwrite a formula cell
-        if (cell && cell.getElementsByTagName('f').length > 0) return;
-        const c = cell || ensureCell(r, col);
-        // Clear existing children (value / inline string)
-        while (c.firstChild) c.removeChild(c.firstChild);
-        c.removeAttribute('t');
-        if (kind === 's') {
-          c.setAttribute('t', 'inlineStr');
-          const is = doc.createElementNS(SS_NS, 'is');
-          const t = doc.createElementNS(SS_NS, 't');
-          t.setAttribute('xml:space', 'preserve');
-          t.textContent = String(value);
-          is.appendChild(t);
-          c.appendChild(is);
-        } else {
-          // numeric or date (date = numeric serial)
-          const v = doc.createElementNS(SS_NS, 'v');
-          v.textContent = String(value);
-          c.appendChild(v);
-        }
-      };
-      const woNum = Number(row.job.workOrder);
-      put('C', isFinite(woNum) && String(woNum) === String(row.job.workOrder).trim() ? woNum : row.job.workOrder, isFinite(woNum) ? 'n' : 's');
-      const opNum = Number(row.job.operation);
-      put('D', isFinite(opNum) && String(opNum) === String(row.job.operation).trim() ? opNum : row.job.operation, isFinite(opNum) ? 'n' : 's');
-      put('F', row.job.workCentre || TS_WORKCENTRE_DEFAULT, 's');
-      put('G', dateSerial, 'n');
-      put(TS_DAY_COLS[dayIdx], Number(row.hours), 'n');
-      put('AG', row.job.progress || 'Ongoing', 's');
-      put('AH', row.assignment.name, 's');
+    // Writer helper — put a value at the given (row, col), preserving the cell's style
+    const putCell = (r, col, value, kind) => {
+      if (value === '' || value == null) return;
+      const ref = col + r;
+      const cell = cellByRef[ref];
+      if (cell && cell.getElementsByTagName('f').length > 0) return;  // never overwrite formulas
+      const c = cell || ensureCell(r, col);
+      while (c.firstChild) c.removeChild(c.firstChild);
+      c.removeAttribute('t');
+      if (kind === 's') {
+        c.setAttribute('t', 'inlineStr');
+        const is = doc.createElementNS(SS_NS, 'is');
+        const t = doc.createElementNS(SS_NS, 't');
+        t.setAttribute('xml:space', 'preserve');
+        t.textContent = String(value);
+        is.appendChild(t);
+        c.appendChild(is);
+      } else {
+        const v = doc.createElementNS(SS_NS, 'v');
+        v.textContent = String(value);
+        c.appendChild(v);
+      }
+    };
+
+    // Write each job's crew rows, then leave a 1-row spacer before the next job.
+    // On the spacer row we populate F (WorkCentre) and G (SubDate) only — matching the Rio Tinto house style.
+    let r = 2;
+    jobGroups.forEach((group, gi) => {
+      const job = group.assignments[0] && group.assignments[0]._job || group.job;
+      const woNum = Number(group.job.workOrder);
+      const opNum = Number(group.job.operation);
+      const woVal = isFinite(woNum) && String(woNum) === String(group.job.workOrder).trim() ? woNum : group.job.workOrder;
+      const opVal = isFinite(opNum) && String(opNum) === String(group.job.operation).trim() ? opNum : group.job.operation;
+      const woKind = isFinite(woNum) ? 'n' : 's';
+      const opKind = isFinite(opNum) ? 'n' : 's';
+      const workCentre = group.job.workCentre || TS_WORKCENTRE_DEFAULT;
+      const progress   = group.job.progress || 'Ongoing';
+      group.assignments.forEach(a => {
+        putCell(r, 'C', woVal, woKind);
+        putCell(r, 'D', opVal, opKind);
+        putCell(r, 'F', workCentre, 's');
+        putCell(r, 'G', dateSerial, 'n');
+        putCell(r, TS_DAY_COLS[dayIdx], Number(a.hrs[dayKey]), 'n');
+        putCell(r, 'AG', progress, 's');
+        putCell(r, 'AH', a.name, 's');
+        r++;
+      });
+      // Blank spacer row before the next job (not after the last group)
+      if (gi < jobGroups.length - 1) {
+        putCell(r, 'F', workCentre, 's');
+        putCell(r, 'G', dateSerial, 'n');
+        r++;
+      }
     });
 
     const newXml = serializer.serializeToString(doc);

@@ -8324,11 +8324,116 @@ function tsMatchPerson(a) {
   return candidates.find(c => c.rtId && String(c.rtId).trim()) || candidates[0];
 }
 
+// Read the LINK sheet of the stored Rio Tinto template into a {lowername: id} map.
+// Used as a backup lookup during export — if the Employees extras somehow don't carry an rtId,
+// we can still fill the ID straight from the template's own LINK list.
+async function tsLoadLinkMap() {
+  const tmplB64 = tsGetTemplate();
+  if (!tmplB64) return {};
+  const bin = atob(tmplB64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const zip = await JSZip.loadAsync(buf);
+  const workbookXml = await zip.file('xl/workbook.xml').async('string');
+  const relsXml     = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  let linkPath = null;
+  const re = /<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(workbookXml)) !== null) {
+    if (m[1].toUpperCase() === 'LINK') {
+      const rrel = new RegExp('<Relationship[^>]*Id="' + m[2] + '"[^>]*Target="([^"]+)"');
+      const rm = rrel.exec(relsXml);
+      if (rm) linkPath = rm[1].startsWith('xl/') ? rm[1] : ('xl/' + rm[1].replace(/^\/xl\//, ''));
+      break;
+    }
+  }
+  if (!linkPath || !zip.file(linkPath)) return {};
+  const linkXml = await zip.file(linkPath).async('string');
+  const sharedXml = zip.file('xl/sharedStrings.xml') ? await zip.file('xl/sharedStrings.xml').async('string') : '';
+  const sst = [];
+  if (sharedXml) {
+    const sstDoc = new DOMParser().parseFromString(sharedXml, 'text/xml');
+    const siList = sstDoc.getElementsByTagName('si');
+    for (let i = 0; i < siList.length; i++) {
+      const ts = siList[i].getElementsByTagName('t');
+      let text = '';
+      for (let j = 0; j < ts.length; j++) text += ts[j].textContent || '';
+      sst.push(text);
+    }
+  }
+  const doc = new DOMParser().parseFromString(linkXml, 'text/xml');
+  const cells = doc.getElementsByTagName('c');
+  const rowMap = {};
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    const ref = c.getAttribute('r'); if (!ref) continue;
+    const col = ref.match(/^[A-Z]+/)[0];
+    if (col !== 'E' && col !== 'F') continue;
+    const row = parseInt(ref.match(/\d+/)[0], 10);
+    const t = c.getAttribute('t') || '';
+    let value = '';
+    if (t === 'inlineStr') {
+      const tn = c.getElementsByTagName('t');
+      if (tn.length) value = tn[0].textContent || '';
+    } else if (t === 's') {
+      const vn = c.getElementsByTagName('v');
+      if (vn.length) { const idx = parseInt(vn[0].textContent, 10); value = sst[idx] || ''; }
+    } else {
+      const vn = c.getElementsByTagName('v');
+      if (vn.length) value = vn[0].textContent || '';
+    }
+    rowMap[row] = rowMap[row] || {};
+    if (col === 'E') rowMap[row].name = value.trim();
+    if (col === 'F') rowMap[row].id = value.trim();
+  }
+  const map = {};
+  Object.values(rowMap).forEach(r => {
+    if (r.name && r.id && r.name.toLowerCase() !== 'name') {
+      map[r.name.toLowerCase()] = r.id;
+    }
+  });
+  return map;
+}
+
+// Fuzzy lookup against a LINK map (same 5-step algorithm as the Employees import)
+function tsFindInLinkMap(name, linkMap) {
+  const key = (name || '').toLowerCase().trim();
+  if (!key || !linkMap) return null;
+  if (linkMap[key]) return linkMap[key];
+  const keys = Object.keys(linkMap);
+  for (const k of keys) {
+    if (k === key || k.indexOf(key) >= 0 || key.indexOf(k) >= 0) return linkMap[k];
+  }
+  const parts = key.split(/\s+/);
+  const first = parts[0] || '';
+  const last  = parts[parts.length - 1] || '';
+  if (first && last && first !== last) {
+    for (const k of keys) {
+      const kp = k.split(/\s+/);
+      const kFirst = kp[0] || '';
+      const kLast  = kp[kp.length - 1] || '';
+      if (kLast !== last) continue;
+      if (kFirst === first || kFirst.indexOf(first) === 0 || first.indexOf(kFirst) === 0) return linkMap[k];
+    }
+    for (const k of keys) {
+      if (k.indexOf(first) >= 0 && k.indexOf(last) >= 0) return linkMap[k];
+    }
+  }
+  if (last) {
+    const bySurname = keys.filter(k => k.split(/\s+/).pop() === last);
+    if (bySurname.length === 1) return linkMap[bySurname[0]];
+  }
+  return null;
+}
+
 async function tsBuildFilledBase64() {
   // Make sure the Employees-tab extras (rtId, position etc.) are layered onto ATT2.persons
   // right before we export — guarantees we read the latest IDs the user has entered.
   if (typeof empMergeExtras === 'function') empMergeExtras();
   await tsLoadJsZip();
+  // Load the LINK map once per export, as a backup source of IDs
+  const linkMap = await tsLoadLinkMap();
+  TS._lastLinkMap = linkMap;  // stash for the post-export diagnostic
   const tmplB64 = tsGetTemplate();
   if (!tmplB64) throw new Error('No template stored');
   const bin = atob(tmplB64);
@@ -8534,20 +8639,21 @@ async function tsBuildFilledBase64() {
         putCell(r, TS_DAY_COLS[dayIdx], Number(a.hrs[dayKey]), 'n');
         putCell(r, 'AG', progress, 's');
         putCell(r, 'AH', a.name, 's');
-        // PersonnelID: prefer the ID stored on the Employees record (direct, reliable).
-        // Uses fuzzy matching so "Steve" matches "Steven", "Chris" matches "Christopher" etc.
-        // Also overwrites AH with the canonical Employees name — makes the backup VLOOKUP work too.
+        // PersonnelID lookup order:
+        //   1. Employees record (rtId filled in via Employees tab or Import)
+        //   2. LINK sheet of the uploaded template (same source Rio Tinto's VLOOKUP uses)
+        //   3. Fall back to the VLOOKUP formula and let Excel sort it out
         const person = tsMatchPerson(a);
-        if (person && person.rtId) {
-          const n = Number(person.rtId);
-          putCell(r, 'E', isFinite(n) ? n : person.rtId, isFinite(n) ? 'n' : 's');
-          if (person.name && person.name !== a.name) {
-            putCell(r, 'AH', person.name, 's');  // use the canonical name
-          }
+        let rtId = (person && person.rtId) ? String(person.rtId).trim() : '';
+        if (!rtId) rtId = tsFindInLinkMap(a.name, linkMap) || '';
+        if (!rtId && person && person.name && person.name !== a.name) {
+          rtId = tsFindInLinkMap(person.name, linkMap) || '';
+        }
+        if (rtId) {
+          const n = Number(rtId);
+          putCell(r, 'E', isFinite(n) ? n : rtId, isFinite(n) ? 'n' : 's');
+          // Keep the typed name on the sheet — matches what the user sees in the UI
         } else {
-          if (person && person.name && person.name !== a.name) {
-            putCell(r, 'AH', person.name, 's');  // at least give VLOOKUP a fighting chance
-          }
           tsEnsureVlookup(r);
         }
         r++;
@@ -8593,17 +8699,20 @@ async function tsExport() {
   try {
     const b64 = await tsBuildFilledBase64();
     tsDownloadFromBase64(b64, 'Time_sheet_' + TS.weekStart + '.xlsm');
-    // Diagnostic: which crew members had no RT PersonnelID applied?
+    // Diagnostic: which crew still ended up without an RT PersonnelID written?
     if (typeof empMergeExtras === 'function') empMergeExtras();
+    const linkMap = TS._lastLinkMap || {};
     const missing = new Set();
     Object.values(TS.jobs).forEach(job => {
       (job.assignments || []).forEach(a => {
         const p = tsMatchPerson(a);
-        if (!p || !p.rtId || !String(p.rtId).trim()) missing.add(a.name || '(unnamed)');
+        const empId  = (p && p.rtId) ? String(p.rtId).trim() : '';
+        const linkId = tsFindInLinkMap(a.name, linkMap) || (p && p.name ? tsFindInLinkMap(p.name, linkMap) : '');
+        if (!empId && !linkId) missing.add(a.name || '(unnamed)');
       });
     });
     if (missing.size) {
-      alert('✓ Exported.\n\n⚠ These crew still have no RT PersonnelID — their row will show #N/A unless the LINK sheet has them:\n\n  • ' + Array.from(missing).join('\n  • ') + '\n\nOpen Employees tab, find each one, and fill in the RT PersonnelID column.');
+      alert('✓ Exported.\n\n⚠ These crew still have no RT PersonnelID — their row will show #N/A:\n\n  • ' + Array.from(missing).join('\n  • ') + '\n\nCheck Employees tab OR the LINK sheet of your template — the name needs to appear in at least one of them with an ID.');
     }
   } catch(e) { alert('Export failed: ' + e.message); }
 }

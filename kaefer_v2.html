@@ -8650,9 +8650,26 @@ async function tsBuildFilledBase64() {
           rtId = tsFindInLinkMap(person.name, linkMap) || '';
         }
         if (rtId) {
+          // Force-overwrite column E — the template has a VLOOKUP formula there and putCell's
+          // safety guard would skip it otherwise. We WANT to replace that formula with the direct ID.
+          const eRef = 'E' + r;
+          const eCell = cellByRef[eRef] || ensureCell(r, 'E');
+          while (eCell.firstChild) eCell.removeChild(eCell.firstChild);
+          eCell.removeAttribute('t');
           const n = Number(rtId);
-          putCell(r, 'E', isFinite(n) ? n : rtId, isFinite(n) ? 'n' : 's');
-          // Keep the typed name on the sheet — matches what the user sees in the UI
+          if (isFinite(n)) {
+            const v = doc.createElementNS(SS_NS, 'v');
+            v.textContent = String(n);
+            eCell.appendChild(v);
+          } else {
+            eCell.setAttribute('t', 'inlineStr');
+            const is = doc.createElementNS(SS_NS, 'is');
+            const t = doc.createElementNS(SS_NS, 't');
+            t.setAttribute('xml:space', 'preserve');
+            t.textContent = String(rtId);
+            is.appendChild(t);
+            eCell.appendChild(is);
+          }
         } else {
           tsEnsureVlookup(r);
         }

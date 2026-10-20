@@ -8362,6 +8362,30 @@ async function tsBuildFilledBase64() {
       return c;
     };
 
+    // Ensure E{r} contains the PersonnelID VLOOKUP formula (template only has it on ~286 rows).
+    // We lift the exact formula string from the template's own E2 cell so any custom tweaks are honoured.
+    let _vlookupTemplate = null;
+    const tsEnsureVlookup = (r) => {
+      if (_vlookupTemplate === null) {
+        const e2 = cellByRef['E2'];
+        if (e2 && e2.getElementsByTagName('f').length > 0) {
+          _vlookupTemplate = e2.getElementsByTagName('f')[0].textContent || '';
+        } else {
+          _vlookupTemplate = 'IF(AH{R}=0," ",(VLOOKUP(AH{R},LINK!E$2:F$170,2,FALSE)))';
+        }
+      }
+      const ref = 'E' + r;
+      const existing = cellByRef[ref];
+      if (existing && existing.getElementsByTagName('f').length > 0) return;  // already has a formula
+      const c = existing || ensureCell(r, 'E');
+      while (c.firstChild) c.removeChild(c.firstChild);
+      c.removeAttribute('t');
+      const f = doc.createElementNS(SS_NS, 'f');
+      // Rewrite the template formula with this row's number (replace AH2/AH3/… → AH{r})
+      f.textContent = _vlookupTemplate.replace(/AH\d+/g, 'AH' + r);
+      c.appendChild(f);
+    };
+
     // Writer helper — put a value at the given (row, col), preserving the cell's style
     const putCell = (r, col, value, kind) => {
       if (value === '' || value == null) return;
@@ -8407,6 +8431,9 @@ async function tsBuildFilledBase64() {
         putCell(r, TS_DAY_COLS[dayIdx], Number(a.hrs[dayKey]), 'n');
         putCell(r, 'AG', progress, 's');
         putCell(r, 'AH', a.name, 's');
+        // Make sure the PersonnelID VLOOKUP exists for this row. The template only pre-fills E
+        // for a limited number of rows, so new rows past that end up with blank IDs otherwise.
+        tsEnsureVlookup(r);
         r++;
       });
       // Blank spacer row before the next job (not after the last group)

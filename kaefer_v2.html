@@ -8045,82 +8045,219 @@ function tsLoadSheetJs() {
 // and formula cells like G3+ = =G2) are left completely untouched so the template's logic keeps working.
 const TS_DATA_COLS = ['C','D','F','G','X','Y','Z','AA','AB','AC','AD','AG','AH'];
 
+// Load JSZip from CDN. Used to surgically rewrite only the sheet XMLs — keeps styles,
+// data validation, VBA, charts etc. byte-identical to the uploaded template.
+function tsLoadJsZip() {
+  return new Promise((resolve, reject) => {
+    if (typeof JSZip !== 'undefined') return resolve();
+    if (TS._jszipLoading) {
+      const check = setInterval(() => {
+        if (typeof JSZip !== 'undefined') { clearInterval(check); resolve(); }
+      }, 100);
+      return;
+    }
+    TS._jszipLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load JSZip from CDN. Check internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+
+// Convert a JS Date → Excel serial number (1900 date system, treating Excel's 1900 leap-year bug)
+function tsDateToExcelSerial(d) {
+  const epoch = Date.UTC(1899, 11, 30);  // 1899-12-30 (Excel's day 0 in 1900 system)
+  // Use local-noon-ish to avoid DST edge cases
+  const local = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
+  return Math.round((local.getTime() - epoch) / 86400000);
+}
+
+// Column letter → zero-based index (A=0, Z=25, AA=26, AH=33)
+function tsColIdx(letters) {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) {
+    n = n * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return n - 1;
+}
+function tsRowFromRef(ref) { return parseInt(ref.match(/\d+$/)[0], 10); }
+function tsColFromRef(ref) { return ref.match(/^[A-Z]+/)[0]; }
+
 async function tsBuildFilledBase64() {
-  await tsLoadSheetJs();
+  await tsLoadJsZip();
   const tmplB64 = tsGetTemplate();
   if (!tmplB64) throw new Error('No template stored');
   const bin = atob(tmplB64);
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-  // Read with everything preserved — styles, formulas, number formats, VBA.
-  const wb = XLSX.read(buf, {
-    type:'array', cellStyles:true, cellFormula:true, cellNF:true,
-    cellHTML:false, bookVBA:true, sheetStubs:true
-  });
+  const zip = await JSZip.loadAsync(buf);
 
-  TS_DAYS_UP.forEach((daySheet, dayIdx) => {
-    if (!wb.Sheets[daySheet]) return;
-    const ws = wb.Sheets[daySheet];
+  // Map day sheet names to their sheet file paths via workbook.xml + its rels
+  const workbookXml = await zip.file('xl/workbook.xml').async('string');
+  const relsXml     = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  const sheetMap = {};
+  const sheetRe = /<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g;
+  let sm;
+  while ((sm = sheetRe.exec(workbookXml)) !== null) {
+    const name = sm[1], rid = sm[2];
+    const relRe = new RegExp('<Relationship[^>]*Id="' + rid + '"[^>]*Target="([^"]+)"');
+    const relM = relRe.exec(relsXml);
+    if (relM) {
+      let target = relM[1];
+      if (!target.startsWith('xl/')) target = 'xl/' + target.replace(/^\/xl\//, '');
+      sheetMap[name.toUpperCase()] = target;
+    }
+  }
+
+  const parser = new DOMParser();
+  const serializer = new XMLSerializer();
+  const SS_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+
+  for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+    const daySheet = TS_DAYS_UP[dayIdx];
+    const path = sheetMap[daySheet];
+    if (!path || !zip.file(path)) continue;
     const dayKey = TS_DAYS[dayIdx];
     const date = tsDateForDay(TS.weekStart, dayIdx);
+    const dateSerial = tsDateToExcelSerial(date);
 
-    // Build rows for this day
     const rows = [];
     Object.values(TS.jobs).forEach(job => {
       (job.assignments || []).forEach(a => {
         const hrs = a.hrs && a.hrs[dayKey];
         if (hrs == null || hrs === 0 || hrs === '') return;
-        rows.push({ job, assignment: a, hours: hrs, date });
+        rows.push({ job, assignment: a, hours: hrs });
       });
     });
 
-    // Clear previous VALUES in our data columns only (keep formulas and all other columns intact)
-    const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
-    if (ref) {
-      for (let r = 1; r <= ref.e.r; r++) {
-        TS_DATA_COLS.forEach(col => {
-          const addr = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col(col) });
-          const cell = ws[addr];
-          if (cell && cell.f == null) {
-            // Preserve style/number-format from the template, just clear the value
-            if (cell.s) { delete cell.v; cell.t = 'z'; }
-            else delete ws[addr];
-          }
-        });
+    const xmlStr = await zip.file(path).async('string');
+    const doc = parser.parseFromString(xmlStr, 'text/xml');
+    const sheetData = doc.getElementsByTagName('sheetData')[0];
+    if (!sheetData) continue;
+
+    // Build row-by-row index of this sheet's cells
+    const rowEls = {};  // rowNum → <row> element
+    const cellByRef = {};  // "G2" → <c> element
+    const rowsNL = sheetData.getElementsByTagName('row');
+    for (let i = 0; i < rowsNL.length; i++) {
+      const rowEl = rowsNL[i];
+      const rn = parseInt(rowEl.getAttribute('r'), 10);
+      rowEls[rn] = rowEl;
+      const cells = rowEl.getElementsByTagName('c');
+      for (let j = 0; j < cells.length; j++) {
+        cellByRef[cells[j].getAttribute('r')] = cells[j];
       }
     }
 
-    // Overwrite with this week's rows (row 2 upward = r:1)
+    const maxRow = Math.max(2, ...Object.keys(rowEls).map(Number));
+
+    // Clear existing data in our data columns (never touch formula cells)
+    for (let r = 2; r <= maxRow; r++) {
+      TS_DATA_COLS.forEach(col => {
+        const ref = col + r;
+        const cell = cellByRef[ref];
+        if (!cell) return;
+        // Formula cell? leave alone
+        if (cell.getElementsByTagName('f').length > 0) return;
+        // Keep the style attr; remove the value and any inline string block, drop t attr
+        cell.removeAttribute('t');
+        // Remove all children (<v>, <is>, etc.)
+        while (cell.firstChild) cell.removeChild(cell.firstChild);
+      });
+    }
+
+    // Helper: fetch-or-create a cell element at (row, col) with correct position within the row
+    const ensureCell = (r, col) => {
+      const ref = col + r;
+      if (cellByRef[ref]) return cellByRef[ref];
+      // Need to create. First ensure the row exists.
+      let rowEl = rowEls[r];
+      if (!rowEl) {
+        rowEl = doc.createElementNS(SS_NS, 'row');
+        rowEl.setAttribute('r', String(r));
+        // Insert in correct sorted position
+        let inserted = false;
+        const existing = sheetData.getElementsByTagName('row');
+        for (let i = 0; i < existing.length; i++) {
+          if (parseInt(existing[i].getAttribute('r'), 10) > r) {
+            sheetData.insertBefore(rowEl, existing[i]);
+            inserted = true; break;
+          }
+        }
+        if (!inserted) sheetData.appendChild(rowEl);
+        rowEls[r] = rowEl;
+      }
+      const c = doc.createElementNS(SS_NS, 'c');
+      c.setAttribute('r', ref);
+      // Insert in correct column order within the row
+      const colIdx = tsColIdx(col);
+      let inserted = false;
+      const siblings = rowEl.getElementsByTagName('c');
+      for (let i = 0; i < siblings.length; i++) {
+        const sRef = siblings[i].getAttribute('r');
+        const sCol = sRef.match(/^[A-Z]+/)[0];
+        if (tsColIdx(sCol) > colIdx) {
+          rowEl.insertBefore(c, siblings[i]);
+          inserted = true; break;
+        }
+      }
+      if (!inserted) rowEl.appendChild(c);
+      cellByRef[ref] = c;
+      return c;
+    };
+
+    // Write new data rows starting at row 2
     rows.forEach((row, i) => {
-      const r = i + 1;
-      const put = (col, val, type) => {
-        if (val === '' || val == null) return;
-        const addr = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col(col) });
-        const old = ws[addr] || {};
-        // Overwrite value + type, keep existing style (s) so formatting carries over
-        ws[addr] = { ...old, v: val, t: type || 's', w: undefined, f: undefined };
+      const r = i + 2;
+      const put = (col, value, kind) => {
+        if (value === '' || value == null) return;
+        const ref = col + r;
+        const cell = cellByRef[ref];
+        // Never overwrite a formula cell
+        if (cell && cell.getElementsByTagName('f').length > 0) return;
+        const c = cell || ensureCell(r, col);
+        // Clear existing children (value / inline string)
+        while (c.firstChild) c.removeChild(c.firstChild);
+        c.removeAttribute('t');
+        if (kind === 's') {
+          c.setAttribute('t', 'inlineStr');
+          const is = doc.createElementNS(SS_NS, 'is');
+          const t = doc.createElementNS(SS_NS, 't');
+          t.setAttribute('xml:space', 'preserve');
+          t.textContent = String(value);
+          is.appendChild(t);
+          c.appendChild(is);
+        } else {
+          // numeric or date (date = numeric serial)
+          const v = doc.createElementNS(SS_NS, 'v');
+          v.textContent = String(value);
+          c.appendChild(v);
+        }
       };
       const woNum = Number(row.job.workOrder);
-      put('C', isFinite(woNum) ? woNum : row.job.workOrder, isFinite(woNum) ? 'n' : 's');
+      put('C', isFinite(woNum) && String(woNum) === String(row.job.workOrder).trim() ? woNum : row.job.workOrder, isFinite(woNum) ? 'n' : 's');
       const opNum = Number(row.job.operation);
-      put('D', isFinite(opNum) ? opNum : row.job.operation, isFinite(opNum) ? 'n' : 's');
+      put('D', isFinite(opNum) && String(opNum) === String(row.job.operation).trim() ? opNum : row.job.operation, isFinite(opNum) ? 'n' : 's');
       put('F', row.job.workCentre || TS_WORKCENTRE_DEFAULT, 's');
-      put('G', row.date, 'd');
+      put('G', dateSerial, 'n');
       put(TS_DAY_COLS[dayIdx], Number(row.hours), 'n');
       put('AG', row.job.progress || 'Ongoing', 's');
       put('AH', row.assignment.name, 's');
     });
 
-    // Keep the sheet range at least as wide as the template originally was
-    // so styles / data validation that referenced the full range still apply.
-  });
+    const newXml = serializer.serializeToString(doc);
+    zip.file(path, newXml);
+  }
 
-  // Write with VBA + styles preserved
-  const outBin = XLSX.write(wb, {
-    bookType: 'xlsm', type: 'base64',
-    bookVBA: true, cellStyles: true, compression: true
+  const outArr = await zip.generateAsync({
+    type:'uint8array',
+    compression:'DEFLATE',
+    mimeType:'application/vnd.ms-excel.sheet.macroEnabled.12'
   });
-  return outBin;
+  let bStr = '';
+  for (let i = 0; i < outArr.length; i++) bStr += String.fromCharCode(outArr[i]);
+  return btoa(bStr);
 }
 
 function tsDownloadFromBase64(b64, filename) {

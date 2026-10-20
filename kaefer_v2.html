@@ -8041,23 +8041,30 @@ function tsLoadSheetJs() {
   });
 }
 
+// Data columns we write to on each day sheet. All other columns (notably E = PersonnelID VLOOKUP formula,
+// and formula cells like G3+ = =G2) are left completely untouched so the template's logic keeps working.
+const TS_DATA_COLS = ['C','D','F','G','X','Y','Z','AA','AB','AC','AD','AG','AH'];
+
 async function tsBuildFilledBase64() {
   await tsLoadSheetJs();
   const tmplB64 = tsGetTemplate();
   if (!tmplB64) throw new Error('No template stored');
-  // Decode base64 → Uint8Array → workbook
   const bin = atob(tmplB64);
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-  const wb = XLSX.read(buf, { type:'array', cellStyles:true, bookVBA:true });
+  // Read with everything preserved — styles, formulas, number formats, VBA.
+  const wb = XLSX.read(buf, {
+    type:'array', cellStyles:true, cellFormula:true, cellNF:true,
+    cellHTML:false, bookVBA:true, sheetStubs:true
+  });
 
-  // For each day sheet, blank out existing data rows (keeping row 1 headers), then write new rows.
   TS_DAYS_UP.forEach((daySheet, dayIdx) => {
     if (!wb.Sheets[daySheet]) return;
     const ws = wb.Sheets[daySheet];
-    // Build list of (job × person × hours for this day) rows
     const dayKey = TS_DAYS[dayIdx];
     const date = tsDateForDay(TS.weekStart, dayIdx);
+
+    // Build rows for this day
     const rows = [];
     Object.values(TS.jobs).forEach(job => {
       (job.assignments || []).forEach(a => {
@@ -8066,48 +8073,53 @@ async function tsBuildFilledBase64() {
         rows.push({ job, assignment: a, hours: hrs, date });
       });
     });
-    // Clear existing data rows (row 2 downward) — we leave headers (row 1) alone
+
+    // Clear previous VALUES in our data columns only (keep formulas and all other columns intact)
     const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
     if (ref) {
       for (let r = 1; r <= ref.e.r; r++) {
-        for (let c = ref.s.c; c <= ref.e.c; c++) {
-          const addr = XLSX.utils.encode_cell({ r, c });
-          if (ws[addr]) delete ws[addr];
-        }
+        TS_DATA_COLS.forEach(col => {
+          const addr = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col(col) });
+          const cell = ws[addr];
+          if (cell && cell.f == null) {
+            // Preserve style/number-format from the template, just clear the value
+            if (cell.s) { delete cell.v; cell.t = 'z'; }
+            else delete ws[addr];
+          }
+        });
       }
     }
-    // Write our rows starting at row 2 (0-indexed r=1)
+
+    // Overwrite with this week's rows (row 2 upward = r:1)
     rows.forEach((row, i) => {
-      const r = i + 1;  // 0-indexed, so row 2 = r:1
-      // C: WorkOrder, D: Operation, F: WorkCentre, G: SubDate, X-AD: day hours, AG: Progress, AH: Name
-      const set = (col, val, type) => {
+      const r = i + 1;
+      const put = (col, val, type) => {
         if (val === '' || val == null) return;
         const addr = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col(col) });
-        ws[addr] = { v: val, t: type || 's' };
+        const old = ws[addr] || {};
+        // Overwrite value + type, keep existing style (s) so formatting carries over
+        ws[addr] = { ...old, v: val, t: type || 's', w: undefined, f: undefined };
       };
-      set('C', Number(row.job.workOrder) || row.job.workOrder, isNaN(Number(row.job.workOrder)) ? 's' : 'n');
-      set('D', Number(row.job.operation) || row.job.operation, isNaN(Number(row.job.operation)) ? 's' : 'n');
-      set('F', row.job.workCentre || TS_WORKCENTRE_DEFAULT, 's');
-      // SubDate = this day's date
-      const addrG = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col('G') });
-      ws[addrG] = { v: row.date, t: 'd' };
-      // Hours in the right day column
-      const hoursCol = TS_DAY_COLS[dayIdx];
-      set(hoursCol, Number(row.hours), 'n');
-      set('AG', row.job.progress || 'Ongoing', 's');
-      set('AH', row.assignment.name, 's');
+      const woNum = Number(row.job.workOrder);
+      put('C', isFinite(woNum) ? woNum : row.job.workOrder, isFinite(woNum) ? 'n' : 's');
+      const opNum = Number(row.job.operation);
+      put('D', isFinite(opNum) ? opNum : row.job.operation, isFinite(opNum) ? 'n' : 's');
+      put('F', row.job.workCentre || TS_WORKCENTRE_DEFAULT, 's');
+      put('G', row.date, 'd');
+      put(TS_DAY_COLS[dayIdx], Number(row.hours), 'n');
+      put('AG', row.job.progress || 'Ongoing', 's');
+      put('AH', row.assignment.name, 's');
     });
-    // Update sheet range
-    if (rows.length) {
-      ws['!ref'] = XLSX.utils.encode_range({
-        s: { r: 0, c: 0 },
-        e: { r: Math.max(ref ? ref.e.r : rows.length, rows.length), c: ref ? ref.e.c : XLSX.utils.decode_col('AJ') }
-      });
-    }
+
+    // Keep the sheet range at least as wide as the template originally was
+    // so styles / data validation that referenced the full range still apply.
   });
 
-  // Write with VBA preserved
-  const outBin = XLSX.write(wb, { bookType: 'xlsm', type: 'base64', bookVBA: true });
+  // Write with VBA + styles preserved
+  const outBin = XLSX.write(wb, {
+    bookType: 'xlsm', type: 'base64',
+    bookVBA: true, cellStyles: true, compression: true
+  });
   return outBin;
 }
 

@@ -1022,6 +1022,9 @@ async function attReload(silent) {
     const j = await apiCall('att2_load');
     ATT2.persons = (j.persons || []).sort((a,b)=> (a.order||0)-(b.order||0));
     ATT2.ticks   = j.ticks || {};
+    // Merge in locally-stored Employees-tab extras (rtId, position, phone, notes).
+    // The backend doesn't know those columns yet, so we persist them locally and layer them in.
+    if (typeof empMergeExtras === 'function') empMergeExtras();
     ATT2.loaded  = true;
     ATT2.lastSync = Date.now();
     updateStatus('Loaded ' + ATT2.persons.length + ' people — last sync ' + new Date().toLocaleTimeString('en-AU'));
@@ -8608,6 +8611,9 @@ function render_employees(stage, tabCfg) {
     if (typeof attReload === 'function') {
       attReload(() => { if (ACTIVE === 'employees') render_employees(document.getElementById('stage')); });
     }
+  } else {
+    // Make sure the local extras are layered onto whatever's in memory right now
+    empMergeExtras();
   }
   stage.innerHTML = `
     <div class="card">
@@ -8719,11 +8725,55 @@ function empRenderRows() {
 
 function empFindById(id) { return (ATT2.persons || []).find(p => String(p.id) === String(id)); }
 
+// Local extras store — fields the backend doesn't know about yet.
+// Keyed by person id. Survives ATT2 reloads from server because we re-merge them in.
+const EMP_EXTRA_FIELDS = ['rtId','position','phone','notes'];
+function empGetExtras() {
+  try { return JSON.parse(localStorage.getItem('kaefer_v2_employee_extras') || '{}'); }
+  catch(e) { return {}; }
+}
+function empSetExtras(x) { localStorage.setItem('kaefer_v2_employee_extras', JSON.stringify(x)); }
+function empMergeExtras() {
+  // Layer local extras onto every ATT2 person
+  const extras = empGetExtras();
+  (ATT2.persons || []).forEach(p => {
+    const extra = extras[p.id] || {};
+    EMP_EXTRA_FIELDS.forEach(f => {
+      // Only overwrite from local if local has a non-blank value — lets the backend still take over later
+      if (extra[f] !== undefined && extra[f] !== '') p[f] = extra[f];
+    });
+  });
+}
+function empSaveExtra(personId, field, value) {
+  const extras = empGetExtras();
+  extras[personId] = extras[personId] || {};
+  if (value == null || value === '') delete extras[personId][field];
+  else extras[personId][field] = value;
+  if (!Object.keys(extras[personId]).length) delete extras[personId];
+  empSetExtras(extras);
+}
+
 function empEditField(id, field, value) {
   const p = empFindById(id);
   if (!p) return;
-  p[field] = (value || '').toString().trim();
-  empPersistPerson(p);
+  const v = (value || '').toString().trim();
+  p[field] = v;
+  // Native fields → sync to backend. Extras → persist locally so they survive refresh.
+  if (EMP_EXTRA_FIELDS.indexOf(field) >= 0) {
+    empSaveExtra(id, field, v);
+    // Also update the "with RT ID" counter in the header
+    if (field === 'rtId') { const s = document.getElementById('emp-stats'); if (s) empRenderStats(); }
+  } else {
+    empPersistPerson(p);
+  }
+}
+function empRenderStats() {
+  const stats = document.getElementById('emp-stats');
+  if (!stats) return;
+  const total = (ATT2.persons||[]).length;
+  const active = (ATT2.persons||[]).filter(p => !((typeof pIsArchived==='function') && pIsArchived(p))).length;
+  const withId = (ATT2.persons||[]).filter(p => p.rtId).length;
+  stats.innerHTML = `<b>${active}</b> active · <b>${total}</b> total · <b>${withId}</b> with RT ID`;
 }
 
 function empDelete(id) {
@@ -8735,6 +8785,8 @@ function empDelete(id) {
     apiCall('att2_person_delete', { person_id: p.id }).catch(e => alert('Delete sync failed: ' + e.message));
   }
   ATT2.persons = (ATT2.persons || []).filter(x => x.id !== p.id);
+  // Also clear local extras for this person
+  const extras = empGetExtras(); if (extras[p.id]) { delete extras[p.id]; empSetExtras(extras); }
   empRenderRows();
 }
 
@@ -8850,7 +8902,7 @@ async function empImportFromTemplate() {
       if (p.rtId && String(p.rtId).trim() === String(hit).trim()) return;
       if (p.rtId) overwrote++; else filled++;
       p.rtId = String(hit);
-      empPersistPerson(p);
+      empSaveExtra(p.id, 'rtId', String(hit));   // persist locally so it survives refresh
     } else if (!p.rtId) {
       missed++;
       misses.push(p.name);

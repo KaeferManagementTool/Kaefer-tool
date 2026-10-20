@@ -2870,35 +2870,87 @@ function hrRenderArchive() {
         </div>
       </div>
       <div style="overflow-x:auto"><table class="dm-table" style="width:100%">
-        <thead><tr><th>Status</th><th>Date</th><th>Order</th><th>Op</th><th>Loc</th><th>Description</th><th>Short Text</th><th>Hrs</th><th>Notes</th><th>%</th><th>Erect</th><th>Dismantle</th><th>Modify</th><th>Day</th><th>Plan?</th></tr></thead>
+        <thead><tr><th>Status</th><th>Date</th><th>Order</th><th>Op</th><th>Loc</th><th>Description</th><th>Short Text</th><th>Hrs</th><th>Notes</th><th>%</th><th>Erect</th><th>Dismantle</th><th>Modify</th><th>Day</th><th>Plan?</th><th>&nbsp;</th></tr></thead>
         <tbody>`;
     matched.forEach(r => {
       const c  = colMap[r.status]      || colours[0];
       const hc = colMap[r.hoursStatus] || colours[0];
       const rowBg = `background:${c.bg};color:${c.fg}`;
-      const dayLbl = r.day ? DAYS_UP[DAYS.indexOf(r.day)] : '';
+      const idA = String(r.id || '').replace(/'/g, "\\'");
+      const dayOpts = ['', ...DAYS].map(d => `<option value="${d}" ${d===r.day?'selected':''}>${d?DAYS_UP[DAYS.indexOf(d)]:'—'}</option>`).join('');
       html += `<tr>
-        <td style="${rowBg};font-size:10px;font-weight:700;text-align:center">${(c.label||'').toUpperCase()}</td>
-        <td style="${rowBg};font-size:11px;white-space:nowrap">${fdDisplay(r.date)}</td>
-        <td style="${rowBg};font-size:11px">${escHtml(r.order||'')}</td>
-        <td style="${rowBg};font-size:11px">${escHtml(r.op||'')}</td>
-        <td style="${rowBg};font-size:11px">${escHtml(r.loc||'')}</td>
-        <td style="${rowBg};font-size:11.5px">${escHtml(r.desc||'')}</td>
-        <td style="${rowBg};font-size:11px">${escHtml(r.short||'')}</td>
-        <td style="background:${hc.bg};color:${hc.fg};text-align:center;font-weight:700">${escHtml(r.hours||'')}</td>
-        <td style="font-size:11px;color:var(--err)">${escHtml(r.notes||'')}</td>
-        <td style="text-align:center">${escHtml(r.percent||'')}</td>
-        <td style="text-align:center;background:#e8f5e9;color:#1b5e20;font-weight:700">${escHtml(r.erect||'')}</td>
-        <td style="text-align:center;background:#ffebee;color:#b71c1c;font-weight:700">${escHtml(r.dismantle||'')}</td>
-        <td style="text-align:center;background:#e3f2fd;color:#0d47a1;font-weight:700">${escHtml(r.modify||'')}</td>
-        <td style="text-align:center;font-size:11px;font-weight:700">${dayLbl}</td>
-        <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
+        <td style="${rowBg};padding:4px 6px;cursor:pointer;font-weight:700;font-size:10px;text-align:center;user-select:none" onclick="hrArchCycleStatus(${wi},'${idA}')" title="Click to cycle job status colour">${(c.label||'').toUpperCase()}</td>
+        <td style="${rowBg};font-size:11px;white-space:nowrap"><input type="date" value="${r.date||''}" onchange="hrArchEditField(${wi},'${idA}','date',this.value);hrRenderArchive()" style="background:transparent;border:0;font-size:11px;color:inherit;font-weight:600;width:100%"></td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','order',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.order||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','op',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.op||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','loc',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.loc||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','desc',this.textContent)" style="${rowBg};font-size:11.5px">${escHtml(r.desc||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','short',this.textContent)" style="${rowBg};font-size:11px">${escHtml(r.short||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','hours',this.textContent)" style="background:${hc.bg};color:${hc.fg};text-align:center;font-weight:700">${escHtml(r.hours||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','notes',this.textContent)" style="font-size:11px;color:var(--err)">${escHtml(r.notes||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','percent',this.textContent)" style="text-align:center">${escHtml(r.percent||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','erect',this.textContent)" style="text-align:center;background:#e8f5e9;color:#1b5e20;font-weight:700">${escHtml(r.erect||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','dismantle',this.textContent)" style="text-align:center;background:#ffebee;color:#b71c1c;font-weight:700">${escHtml(r.dismantle||'')}</td>
+        <td contenteditable="true" oninput="hrArchEditField(${wi},'${idA}','modify',this.textContent)" style="text-align:center;background:#e3f2fd;color:#0d47a1;font-weight:700">${escHtml(r.modify||'')}</td>
+        <td style="text-align:center">
+          <select onchange="hrArchEditField(${wi},'${idA}','day',this.value)" style="font-size:11px;font-weight:700;border:0;background:transparent;cursor:pointer">${dayOpts}</select>
+        </td>
+        <td style="text-align:center">
+          <span onclick="hrArchTogglePlanned(${wi},'${idA}')" style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;cursor:pointer;user-select:none" title="Click to toggle Planned / Break-in">${r.planned?'PLAN':'BREAK'}</span>
+        </td>
+        <td style="text-align:center"><button class="edit-btn" onclick="hrArchDeleteRow(${wi},'${idA}')" style="color:var(--err);border-color:var(--err);font-size:10px;padding:2px 6px" title="Delete this archived row">×</button></td>
       </tr>`;
     });
     html += '</tbody></table></div></div>';
   });
   if (!anyShown) html = '<div style="padding:30px;text-align:center;color:var(--mute)">No archived rows match that search.</div>';
   wrap.innerHTML = html;
+}
+
+// ---------- Archive row editing ----------
+function hrArchEditField(wi, rowId, field, value) {
+  const archive = hrGetArchive();
+  const wk = archive[wi]; if (!wk) return;
+  const row = (wk.rows || []).find(r => String(r.id) === String(rowId));
+  if (!row) return;
+  row[field] = value;
+  hrSetArchive(archive);
+  // Don't re-render on every keystroke — contenteditable preserves cursor position
+}
+function hrArchCycleStatus(wi, rowId) {
+  const archive = hrGetArchive();
+  const wk = archive[wi]; if (!wk) return;
+  const row = (wk.rows || []).find(r => String(r.id) === String(rowId));
+  if (!row) return;
+  const colours = hrGetColours();
+  const ids = colours.map(c => c.id);
+  const current = row.status || colours[0].id;
+  const idx = ids.indexOf(current);
+  row.status = ids[(idx + 1) % ids.length];
+  hrSetArchive(archive);
+  hrRenderArchive();
+}
+function hrArchTogglePlanned(wi, rowId) {
+  const archive = hrGetArchive();
+  const wk = archive[wi]; if (!wk) return;
+  const row = (wk.rows || []).find(r => String(r.id) === String(rowId));
+  if (!row) return;
+  row.planned = !row.planned;
+  hrSetArchive(archive);
+  hrRenderArchive();
+}
+function hrArchDeleteRow(wi, rowId) {
+  if (!confirm('Delete this row from the archive? This can\'t be undone.')) return;
+  const archive = hrGetArchive();
+  const wk = archive[wi]; if (!wk) return;
+  wk.rows = (wk.rows || []).filter(r => String(r.id) !== String(rowId));
+  if (!wk.rows.length) {
+    if (confirm('That was the last row in "' + (wk.label||'this week') + '". Delete the whole archived week too?')) {
+      archive.splice(wi, 1);
+    }
+  }
+  hrSetArchive(archive);
+  hrRenderArchive();
 }
 
 function hrRestoreArchive(wi) {

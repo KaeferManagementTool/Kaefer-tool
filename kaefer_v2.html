@@ -8264,6 +8264,55 @@ function tsColIdx(letters) {
 function tsRowFromRef(ref) { return parseInt(ref.match(/\d+$/)[0], 10); }
 function tsColFromRef(ref) { return ref.match(/^[A-Z]+/)[0]; }
 
+// Find an Employees record for a Time Sheet assignment, in order of confidence:
+//   1. By personId
+//   2. Exact (case-insensitive) full-name match
+//   3. One name contains the other ("Steve" ↔ "Steve Middleton")
+//   4. Same first name AND same surname somewhere in the record ("Steve Middleton" ↔ "Steven Middleton")
+//   5. First name + first letter of surname match (handles "Chris G" ↔ "Christopher Grotas" too)
+function tsMatchPerson(a) {
+  if (typeof ATT2 === 'undefined' || !Array.isArray(ATT2.persons)) return null;
+  const persons = ATT2.persons;
+  if (a && a.personId) {
+    const byId = persons.find(x => x.id === a.personId);
+    if (byId) return byId;
+  }
+  const name = ((a && a.name) || '').toLowerCase().trim();
+  if (!name) return null;
+  let p = persons.find(x => (x.name||'').toLowerCase().trim() === name);
+  if (p) return p;
+  p = persons.find(x => {
+    const xn = (x.name||'').toLowerCase().trim();
+    return xn && (xn.indexOf(name) >= 0 || name.indexOf(xn) >= 0);
+  });
+  if (p) return p;
+  const parts = name.split(/\s+/);
+  const first = parts[0] || '';
+  const last  = parts[parts.length - 1] || '';
+  if (first && last && first !== last) {
+    // (a) full first + full surname both appear in the Employees entry
+    //     — handles Steve/Steven, Chris/Christopher where the given first-name is a prefix of the official one.
+    p = persons.find(x => {
+      const xn = (x.name||'').toLowerCase();
+      const xParts = xn.split(/\s+/);
+      const xFirst = xParts[0] || '';
+      const xLast  = xParts[xParts.length - 1] || '';
+      if (xLast !== last) return false;
+      return xFirst === first || xFirst.indexOf(first) === 0 || first.indexOf(xFirst) === 0;
+    });
+    if (p) return p;
+  }
+  // Last ditch: unique by surname alone
+  if (last) {
+    const byLast = persons.filter(x => {
+      const xp = (x.name||'').toLowerCase().split(/\s+/);
+      return xp[xp.length-1] === last;
+    });
+    if (byLast.length === 1) return byLast[0];
+  }
+  return null;
+}
+
 async function tsBuildFilledBase64() {
   await tsLoadJsZip();
   const tmplB64 = tsGetTemplate();
@@ -8472,14 +8521,19 @@ async function tsBuildFilledBase64() {
         putCell(r, 'AG', progress, 's');
         putCell(r, 'AH', a.name, 's');
         // PersonnelID: prefer the ID stored on the Employees record (direct, reliable).
-        // Fall back to the template's VLOOKUP formula if we don't have one.
-        const person = (typeof ATT2 !== 'undefined' && ATT2.persons)
-          ? ATT2.persons.find(x => x.id === a.personId || (x.name||'').toLowerCase().trim() === (a.name||'').toLowerCase().trim())
-          : null;
+        // Uses fuzzy matching so "Steve" matches "Steven", "Chris" matches "Christopher" etc.
+        // Also overwrites AH with the canonical Employees name — makes the backup VLOOKUP work too.
+        const person = tsMatchPerson(a);
         if (person && person.rtId) {
           const n = Number(person.rtId);
           putCell(r, 'E', isFinite(n) ? n : person.rtId, isFinite(n) ? 'n' : 's');
+          if (person.name && person.name !== a.name) {
+            putCell(r, 'AH', person.name, 's');  // use the canonical name
+          }
         } else {
+          if (person && person.name && person.name !== a.name) {
+            putCell(r, 'AH', person.name, 's');  // at least give VLOOKUP a fighting chance
+          }
           tsEnsureVlookup(r);
         }
         r++;

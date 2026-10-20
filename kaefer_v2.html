@@ -8267,56 +8267,67 @@ function tsColIdx(letters) {
 function tsRowFromRef(ref) { return parseInt(ref.match(/\d+$/)[0], 10); }
 function tsColFromRef(ref) { return ref.match(/^[A-Z]+/)[0]; }
 
-// Find an Employees record for a Time Sheet assignment, in order of confidence:
-//   1. By personId
-//   2. Exact (case-insensitive) full-name match
-//   3. One name contains the other ("Steve" ↔ "Steve Middleton")
-//   4. Same first name AND same surname somewhere in the record ("Steve Middleton" ↔ "Steven Middleton")
-//   5. First name + first letter of surname match (handles "Chris G" ↔ "Christopher Grotas" too)
+// Find an Employees record for a Time Sheet assignment.
+// Builds a list of ALL plausible candidates, then prefers whichever has an RT ID set.
+// This handles the case where the roster has duplicates like "Chris Grotas" (no ID) and
+// "Christopher Grotas" (with ID) — we always pick the one that'll fill the PersonnelID column.
 function tsMatchPerson(a) {
   if (typeof ATT2 === 'undefined' || !Array.isArray(ATT2.persons)) return null;
   const persons = ATT2.persons;
-  if (a && a.personId) {
-    const byId = persons.find(x => x.id === a.personId);
-    if (byId) return byId;
-  }
+  const candidates = [];
+  const seen = new Set();
+  const add = p => { if (p && !seen.has(p.id)) { seen.add(p.id); candidates.push(p); } };
+
+  // 1. By personId
+  if (a && a.personId) add(persons.find(x => x.id === a.personId));
+
   const name = ((a && a.name) || '').toLowerCase().trim();
-  if (!name) return null;
-  let p = persons.find(x => (x.name||'').toLowerCase().trim() === name);
-  if (p) return p;
-  p = persons.find(x => {
-    const xn = (x.name||'').toLowerCase().trim();
-    return xn && (xn.indexOf(name) >= 0 || name.indexOf(xn) >= 0);
-  });
-  if (p) return p;
-  const parts = name.split(/\s+/);
-  const first = parts[0] || '';
-  const last  = parts[parts.length - 1] || '';
-  if (first && last && first !== last) {
-    // (a) full first + full surname both appear in the Employees entry
-    //     — handles Steve/Steven, Chris/Christopher where the given first-name is a prefix of the official one.
-    p = persons.find(x => {
-      const xn = (x.name||'').toLowerCase();
-      const xParts = xn.split(/\s+/);
-      const xFirst = xParts[0] || '';
-      const xLast  = xParts[xParts.length - 1] || '';
-      if (xLast !== last) return false;
-      return xFirst === first || xFirst.indexOf(first) === 0 || first.indexOf(xFirst) === 0;
-    });
-    if (p) return p;
+  if (name) {
+    // 2. Exact full-name match
+    persons.filter(x => (x.name||'').toLowerCase().trim() === name).forEach(add);
+    // 3. One contains the other ("Steve" ↔ "Steve Middleton")
+    persons.filter(x => {
+      const xn = (x.name||'').toLowerCase().trim();
+      return xn && (xn.indexOf(name) >= 0 || name.indexOf(xn) >= 0);
+    }).forEach(add);
+    const parts = name.split(/\s+/);
+    const first = parts[0] || '';
+    const last  = parts[parts.length - 1] || '';
+    // 4. Surname identical + first-name is prefix of the other (Chris↔Christopher, Steve↔Steven)
+    if (first && last && first !== last) {
+      persons.filter(x => {
+        const xp = (x.name||'').toLowerCase().split(/\s+/);
+        const xFirst = xp[0] || '';
+        const xLast  = xp[xp.length - 1] || '';
+        if (xLast !== last) return false;
+        return xFirst === first || xFirst.indexOf(first) === 0 || first.indexOf(xFirst) === 0;
+      }).forEach(add);
+    }
+    // 5. First + last both appear ANYWHERE in the name ("Rene Santos" ↔ "Rene Delos Santos")
+    if (first && last && first !== last) {
+      persons.filter(x => {
+        const xn = (x.name||'').toLowerCase();
+        return xn.indexOf(first) >= 0 && xn.indexOf(last) >= 0;
+      }).forEach(add);
+    }
+    // 6. Unique surname fallback
+    if (last) {
+      const byLast = persons.filter(x => {
+        const xp = (x.name||'').toLowerCase().split(/\s+/);
+        return xp[xp.length-1] === last;
+      });
+      if (byLast.length === 1) add(byLast[0]);
+    }
   }
-  // Last ditch: unique by surname alone
-  if (last) {
-    const byLast = persons.filter(x => {
-      const xp = (x.name||'').toLowerCase().split(/\s+/);
-      return xp[xp.length-1] === last;
-    });
-    if (byLast.length === 1) return byLast[0];
-  }
-  return null;
+  if (!candidates.length) return null;
+  // Prefer a candidate that actually has an rtId; otherwise fall back to the first match.
+  return candidates.find(c => c.rtId && String(c.rtId).trim()) || candidates[0];
 }
 
 async function tsBuildFilledBase64() {
+  // Make sure the Employees-tab extras (rtId, position etc.) are layered onto ATT2.persons
+  // right before we export — guarantees we read the latest IDs the user has entered.
+  if (typeof empMergeExtras === 'function') empMergeExtras();
   await tsLoadJsZip();
   const tmplB64 = tsGetTemplate();
   if (!tmplB64) throw new Error('No template stored');
@@ -8582,6 +8593,18 @@ async function tsExport() {
   try {
     const b64 = await tsBuildFilledBase64();
     tsDownloadFromBase64(b64, 'Time_sheet_' + TS.weekStart + '.xlsm');
+    // Diagnostic: which crew members had no RT PersonnelID applied?
+    if (typeof empMergeExtras === 'function') empMergeExtras();
+    const missing = new Set();
+    Object.values(TS.jobs).forEach(job => {
+      (job.assignments || []).forEach(a => {
+        const p = tsMatchPerson(a);
+        if (!p || !p.rtId || !String(p.rtId).trim()) missing.add(a.name || '(unnamed)');
+      });
+    });
+    if (missing.size) {
+      alert('✓ Exported.\n\n⚠ These crew still have no RT PersonnelID — their row will show #N/A unless the LINK sheet has them:\n\n  • ' + Array.from(missing).join('\n  • ') + '\n\nOpen Employees tab, find each one, and fill in the RT PersonnelID column.');
+    }
   } catch(e) { alert('Export failed: ' + e.message); }
 }
 

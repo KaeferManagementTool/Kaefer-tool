@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>KAEFER Safety Tool v2</title>
+<!-- SheetJS: loaded on demand by the Time Sheet tab. Deferred so it never blocks initial render. -->
 <style>
 /* ============================================================
    KAEFER SAFETY TOOL V2 — Phase 1 Foundation
@@ -920,6 +921,8 @@ const TABS = [
     desc:'The v2 attendance grid you already have. Click a date cell to cycle through statuses, up/down arrows to reorder, migrate from v1 one-click.' },
   { id:'manning',     label:'Direct Manning',    accent:'var(--t-manning)',     phase:1, status:'in build',
     desc:'Daily baseline vs actual crew count, weekly override, shortfall review, counted/shortfall chart. Reads straight from Attendance.' },
+  { id:'timesheet',   label:'Time Sheet',        accent:'#1565c0',              phase:4, status:'in build',
+    desc:'Rio Tinto time sheet builder — pick jobs + crews, fill the template, archive each week.' },
   { id:'hours',       label:'Hours Register',    accent:'var(--t-hours)',       phase:4, status:'coming',
     desc:'Paste the week\'s Excel register in Monday morning. Colour-coded status (fully editable palette), notes column, MON–SUN tick strip to send jobs to Daily Meeting view. One-click "Copy incomplete jobs" for client email.' },
   { id:'offsite',     label:'Offsite Register',  accent:'var(--t-offsite)',     phase:2, status:'coming',
@@ -2735,6 +2738,7 @@ function render_hours(stage, tabCfg) {
             <th style="background:#1565c0;color:#fff">Modify</th>
             <th style="background:var(--t-scaffold);color:#fff;min-width:100px" title="Link this HR job to a scaffold tag in the register">Scaffold</th>
             <th style="background:#8a0a1f;color:#fff;text-align:center" title="Tick when the scaffold has been dismantled — auto-moves the gear list to Dismantled in the Scaffold Register">Dis</th>
+            <th style="background:#1565c0;color:#fff;text-align:center;min-width:40px" title="Tick to add this job to the Time Sheet tab for Rio Tinto submission">📝 TS</th>
             <th style="min-width:80px">Day</th>
             <th>Plan?</th>
             <th>&nbsp;</th>
@@ -2969,6 +2973,7 @@ function renderHrRow(r, colours, colMap) {
     <td contenteditable="true" oninput="hrEditField('${r.id}','modify',this.textContent)" style="text-align:center;background:#e3f2fd;color:#0d47a1;font-weight:700">${escHtml(r.modify||'')}</td>
     <td style="padding:2px 4px">${hrScaffoldPicker(r)}</td>
     <td style="text-align:center;padding:2px;background:${r.scaffoldDone?'#8a0a1f':'#fafafa'};cursor:${r.scaffoldId?'pointer':'not-allowed'};font-size:16px;user-select:none" onclick="hrToggleDismantleDone('${r.id}')" title="${r.scaffoldDone?'Scaffold marked dismantled — click to un-tick locally':r.scaffoldId?'Tick to dismantle the linked scaffold and move its gear list':'Pick a scaffold tag first'}">${r.scaffoldDone?'<span style="color:#fff;font-weight:900">✓</span>':r.scaffoldId?'<span style="color:var(--mute)">☐</span>':'<span style="color:#ccc">—</span>'}</td>
+    <td style="text-align:center;padding:2px;background:${r.onTs?'#1565c0':'#fafafa'};cursor:pointer;font-size:16px;user-select:none" onclick="hrToggleTs('${r.id}')" title="${r.onTs?'On time sheet — click to remove':'Click to add to Rio Tinto time sheet'}">${r.onTs?'<span style="color:#fff;font-weight:900">✓</span>':'<span style="color:var(--mute)">☐</span>'}</td>
     <td style="text-align:center">${daySel}</td>
     <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
     <td><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
@@ -2998,6 +3003,11 @@ function hrScaffoldPicker(r) {
   </select>`;
 }
 
+function hrToggleTs(id) {
+  const r = HR.rows.find(x => x.id === id); if (!r) return;
+  r.onTs = !r.onTs;
+  hrSave(); hrRender();
+}
 function hrToggleDismantleDone(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
   if (r.scaffoldDone) {
@@ -7607,6 +7617,525 @@ setInterval(() => {
 }, 60000);
 
 /* ============================================================
+   TIME SHEET — Rio Tinto template builder
+   Workflow: upload template once → each week pulls TS-ticked jobs
+   from the Hours Register, assigns crew, fills day sheets, downloads
+   a filled .xlsm (macros preserved). Archive stores past weeks.
+============================================================ */
+const TS = {
+  weekStart: '',       // Monday of the active week (YYYY-MM-DD)
+  jobs: {},            // { [hrRowId]: { workOrder, operation, workCentre, progress, assignments:[{personId,name,hrs:{mon,tue,wed,thu,fri,sat,sun}}] } }
+  _sheetJsLoading: false
+};
+const TS_LS = {
+  TEMPLATE: 'kaefer_v2_ts_template',    // base64 string of the blank Rio Tinto xlsm
+  CURRENT:  'kaefer_v2_ts_current',     // JSON { weekStart, jobs }
+  ARCHIVE:  'kaefer_v2_ts_archive'      // JSON [{weekStart, savedAt, filledBase64}, ...]
+};
+const TS_DAYS      = ['mon','tue','wed','thu','fri','sat','sun'];
+const TS_DAYS_UP   = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'];
+const TS_DAY_COLS  = ['X','Y','Z','AA','AB','AC','AD'];  // Monday..Sunday hour columns in each day sheet
+const TS_WORKCENTRE_DEFAULT = 'MSUPPSCF';
+const TS_PROGRESS_OPTS = ['Cancelled','Complete','Dismantle Complete','Dismantle Ongoing','Erect Complete','Erect Ongoing','Induction','Laydown','Mod Complete','Ongoing','Rio Tinto training'];
+const TS_SHIFT_HRS_DEFAULT = 10;
+
+function tsGetTemplate() { try { return localStorage.getItem(TS_LS.TEMPLATE) || ''; } catch(e) { return ''; } }
+function tsSetTemplate(b64) { localStorage.setItem(TS_LS.TEMPLATE, b64); }
+function tsClearTemplate() { localStorage.removeItem(TS_LS.TEMPLATE); }
+function tsGetArchive() { try { return JSON.parse(localStorage.getItem(TS_LS.ARCHIVE) || '[]'); } catch(e) { return []; } }
+function tsSetArchive(a) { localStorage.setItem(TS_LS.ARCHIVE, JSON.stringify(a)); }
+function tsSaveCurrent() { localStorage.setItem(TS_LS.CURRENT, JSON.stringify({ weekStart: TS.weekStart, jobs: TS.jobs })); }
+function tsLoadCurrent() {
+  try {
+    const d = JSON.parse(localStorage.getItem(TS_LS.CURRENT) || '{}');
+    if (d.weekStart) TS.weekStart = d.weekStart;
+    if (d.jobs) TS.jobs = d.jobs;
+  } catch(e) {}
+}
+
+// Compute the Monday of the week containing a given YYYY-MM-DD (or today)
+function tsMondayOf(dateStr) {
+  const d = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  const day = d.getDay();  // 0=Sun, 1=Mon, ...
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function tsSundayOf(mondayStr) {
+  const d = new Date(mondayStr + 'T00:00:00');
+  d.setDate(d.getDate() + 6);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function tsDateForDay(mondayStr, dayIdx) {  // dayIdx 0..6 = Mon..Sun
+  const d = new Date(mondayStr + 'T00:00:00');
+  d.setDate(d.getDate() + dayIdx);
+  return d;
+}
+function tsFmtDisplay(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
+}
+
+function render_timesheet(stage, tabCfg) {
+  if (!TS.weekStart) {
+    tsLoadCurrent();
+    if (!TS.weekStart) TS.weekStart = tsMondayOf();
+  }
+  const tmpl = tsGetTemplate();
+  if (!tmpl) { tsRenderUpload(stage); return; }
+  tsRenderMain(stage);
+}
+
+function tsRenderUpload(stage) {
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h">
+        <span class="accent" style="--accent:#1565c0"></span>
+        <h2>Time Sheet</h2>
+        <span class="sub">Rio Tinto time sheet builder</span>
+      </div>
+      <div style="padding:40px 30px;text-align:center;background:#fafafa">
+        <div style="font-size:48px;margin-bottom:14px">📄</div>
+        <h3 style="margin:0 0 8px;color:#1565c0">Upload your Rio Tinto template</h3>
+        <p style="color:#555;max-width:520px;margin:0 auto 24px;line-height:1.55">
+          Give me the blank <b>Rio Tinto Time Confirmation .xlsm</b> once — it's stored locally and used as the base for every week.
+          Each export fills a <b>fresh copy</b> from this template, so the blank stays untouched. Macros are preserved.
+        </p>
+        <input type="file" id="ts-upload" accept=".xlsm,.xlsx" style="display:none" onchange="tsHandleTemplateUpload(this)">
+        <button class="btn" style="background:#1565c0;font-size:14px;padding:10px 20px" onclick="document.getElementById('ts-upload').click()">📤 Choose template file</button>
+        <div id="ts-upload-status" style="margin-top:14px;font-size:12px;color:var(--mute)"></div>
+      </div>
+    </div>`;
+}
+
+function tsHandleTemplateUpload(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const status = document.getElementById('ts-upload-status');
+  status.textContent = 'Reading ' + file.name + '…';
+  const r = new FileReader();
+  r.onload = e => {
+    const b64 = (e.target.result.split(',')[1]) || '';
+    try {
+      tsSetTemplate(b64);
+      status.innerHTML = '<b style="color:#2e7d32">✓ Template saved</b> — ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)';
+      setTimeout(() => render_timesheet(document.getElementById('stage')), 600);
+    } catch(err) {
+      status.innerHTML = '<b style="color:#c62828">Save failed</b>: ' + err.message + (err.name==='QuotaExceededError' ? ' — localStorage is full. Clear something, or use a smaller template.' : '');
+    }
+  };
+  r.readAsDataURL(file);
+}
+
+// ---------- Main view ----------
+function tsRenderMain(stage) {
+  const ws = TS.weekStart;
+  const we = tsSundayOf(ws);
+  const hrJobs = tsCollectHrJobs();  // auto-pull from HR with TS tick for this week
+  const archive = tsGetArchive();
+  // Ensure every HR-ticked job has a jobs entry; add new ones with sensible defaults
+  hrJobs.forEach(j => {
+    if (!TS.jobs[j.id]) TS.jobs[j.id] = {
+      hrId: j.id,
+      workOrder: j.order || '',
+      operation: j.op || '',
+      workCentre: TS_WORKCENTRE_DEFAULT,
+      progress: 'Ongoing',
+      description: j.desc || '',
+      assignments: []  // populated by crew picker
+    };
+  });
+  // Remove jobs that no longer have TS ticked
+  const live = new Set(hrJobs.map(j => j.id));
+  Object.keys(TS.jobs).forEach(k => { if (!live.has(k)) delete TS.jobs[k]; });
+
+  tsSaveCurrent();
+
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h">
+        <span class="accent" style="--accent:#1565c0"></span>
+        <h2>Time Sheet</h2>
+        <span class="sub">Rio Tinto — fills day sheets from your Hours Register</span>
+        <div style="flex:1"></div>
+        <button class="btn-ghost" onclick="tsShowArchive()">📦 Archive (${archive.length})</button>
+        <button class="btn-ghost" onclick="tsReplaceTemplate()" title="Upload a new blank template">⟳ Replace template</button>
+      </div>
+
+      <div class="att-ctrls">
+        <div class="field"><label>Week starting (Monday)</label>
+          <input type="date" id="ts-week" value="${ws}" onchange="tsSetWeek(this.value)">
+        </div>
+        <div class="field"><label>&nbsp;</label>
+          <div style="display:flex;gap:4px">
+            <button class="btn-ghost" onclick="tsShiftWeek(-7)">◀ Prev</button>
+            <button class="btn-ghost" onclick="tsSetWeek('${tsMondayOf()}')">This week</button>
+            <button class="btn-ghost" onclick="tsShiftWeek(7)">Next ▶</button>
+          </div>
+        </div>
+        <div class="field" style="flex:1"><label>Range</label>
+          <div style="font-size:13px;font-weight:600;padding:7px 0">${tsFmtDisplay(ws)} — ${tsFmtDisplay(we)}</div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" style="background:#1565c0" onclick="tsExport()">📥 Download filled .xlsm</button>
+        <button class="btn-ghost" onclick="tsArchiveWeek()" title="Save a filled copy to archive and clear the current week — blank template stays">📦 Archive this week</button>
+      </div>
+
+      <div id="ts-body" style="padding:14px"></div>
+    </div>`;
+
+  tsRenderBody();
+}
+
+// Pulls jobs from Hours Register that have the TS tick set, and (if dated) fall in the current week.
+function tsCollectHrJobs() {
+  if (typeof HR === 'undefined') return [];
+  if (!HR.loaded && typeof hrLoad === 'function') { hrLoad(); }
+  const ws = TS.weekStart;
+  const we = tsSundayOf(ws);
+  return (HR.rows || []).filter(r => r && r.onTs).filter(r => {
+    if (!r.date) return true;   // undated → include (user can still assign to a day)
+    return r.date >= ws && r.date <= we;
+  });
+}
+
+function tsSetWeek(dateStr) {
+  TS.weekStart = tsMondayOf(dateStr);
+  tsSaveCurrent();
+  tsRenderMain(document.getElementById('stage'));
+}
+function tsShiftWeek(deltaDays) {
+  const d = new Date(TS.weekStart + 'T00:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  tsSetWeek(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
+}
+
+function tsRenderBody() {
+  const wrap = document.getElementById('ts-body');
+  if (!wrap) return;
+  const jobKeys = Object.keys(TS.jobs);
+  if (!jobKeys.length) {
+    wrap.innerHTML = `<div style="padding:40px 20px;text-align:center;background:#fafafa;border:2px dashed var(--line);border-radius:var(--r-md);color:#555">
+      <div style="font-size:40px;margin-bottom:10px">📝</div>
+      <h3 style="margin:0 0 6px">No jobs ticked for the time sheet</h3>
+      <p style="color:var(--mute);margin:0">Go to the <b>Hours Register</b>, tick the <b>📝 TS</b> box on any job that belongs on the Rio Tinto time sheet for this week.</p>
+    </div>`;
+    return;
+  }
+  const dayHeaders = TS_DAYS_UP.map((d,i) => {
+    const date = tsDateForDay(TS.weekStart, i);
+    return `<th style="text-align:center;font-size:9.5px;padding:5px 3px;background:#1565c0;color:#fff">${d.slice(0,3)}<br><span style="font-weight:400;opacity:.85">${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}</span></th>`;
+  }).join('');
+
+  wrap.innerHTML = jobKeys.map(jk => {
+    const job = TS.jobs[jk];
+    const hr = HR.rows.find(r => r.id === jk);
+    const title = (hr && hr.desc) || job.description || 'Job';
+    const assignRows = (job.assignments || []).map((a, idx) => {
+      const dayCells = TS_DAYS.map(d => {
+        const v = (a.hrs && a.hrs[d] != null) ? a.hrs[d] : '';
+        return `<td style="padding:2px"><input type="number" min="0" step="0.5" value="${v}" oninput="tsSetHrs('${jk}',${idx},'${d}',this.value)" style="width:48px;padding:4px 5px;border:1px solid var(--line);border-radius:3px;font-size:12px;text-align:center;font-variant-numeric:tabular-nums"></td>`;
+      }).join('');
+      return `<tr style="background:#fff">
+        <td style="padding:5px 8px;font-size:12px;font-weight:600">${escHtml(a.name || '')}</td>
+        ${dayCells}
+        <td style="padding:2px;text-align:center"><button onclick="tsRemovePerson('${jk}',${idx})" title="Remove from this job" style="background:transparent;border:0;color:#c62828;font-size:14px;cursor:pointer;padding:2px 6px">×</button></td>
+      </tr>`;
+    }).join('');
+    const teamOpts = TEAMS.filter(t => t.id !== 'UNASSIGNED').map(t => `<option value="${t.id}">${t.label.replace(' TEAM','')}</option>`).join('');
+    const progressOpts = TS_PROGRESS_OPTS.map(p => `<option value="${p}" ${p===job.progress?'selected':''}>${p}</option>`).join('');
+    return `
+      <div style="border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:14px;overflow:hidden;background:#fff">
+        <div style="background:#eff6ff;padding:10px 14px;border-bottom:2px solid #1565c0;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:10px;letter-spacing:1.5px;color:#1565c0;font-weight:800">WORK ORDER</div>
+            <div style="font-weight:700;font-size:14px;font-family:'SF Mono',Menlo,monospace">${escHtml(job.workOrder)} <span style="color:#777;font-weight:400">· OP ${escHtml(job.operation)}</span></div>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">DESCRIPTION</div>
+            <div style="font-size:13px;font-weight:600">${escHtml(title)}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">WORK CENTRE</div>
+            <input type="text" value="${escHtml(job.workCentre)}" oninput="TS.jobs['${jk}'].workCentre=this.value;tsSaveCurrent()" style="padding:4px 7px;border:1px solid var(--line);border-radius:3px;font-size:12px;width:110px;font-weight:600">
+          </div>
+          <div>
+            <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">PROGRESS</div>
+            <select onchange="TS.jobs['${jk}'].progress=this.value;tsSaveCurrent()" style="padding:4px 7px;border:1px solid var(--line);border-radius:3px;font-size:12px">${progressOpts}</select>
+          </div>
+        </div>
+
+        <div style="padding:10px 14px;background:#fafafa;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+          <span style="font-size:11px;font-weight:700;color:#555;letter-spacing:.5px">ADD CREW:</span>
+          <select onchange="tsAddTeamCrew('${jk}',this.value);this.value=''" style="padding:5px 9px;border:1px solid var(--line);border-radius:4px;font-size:12px;font-weight:600;cursor:pointer">
+            <option value="">+ Add a team…</option>${teamOpts}
+          </select>
+          <select onchange="tsAddPerson('${jk}',this.value);this.value=''" style="padding:5px 9px;border:1px solid var(--line);border-radius:4px;font-size:12px;cursor:pointer;max-width:220px">
+            <option value="">+ Add individual…</option>
+            ${((typeof ATT2!=='undefined' && ATT2.persons)||[]).map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
+          </select>
+          <span style="color:#999;font-size:11px">·</span>
+          <button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="tsFillShiftHrs('${jk}')" title="Set ${TS_SHIFT_HRS_DEFAULT}hrs for every day this job runs">⚡ Fill ${TS_SHIFT_HRS_DEFAULT}hrs/day</button>
+          <div style="flex:1"></div>
+          <span style="font-size:11px;color:var(--mute)">${(job.assignments||[]).length} ${((job.assignments||[]).length===1)?'person':'people'}</span>
+        </div>
+
+        ${(job.assignments||[]).length ? `
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#f4f6f9"><th style="text-align:left;padding:6px 8px;font-size:10px;letter-spacing:1px;color:#555">NAME</th>${dayHeaders}<th style="width:30px"></th></tr></thead>
+            <tbody>${assignRows}</tbody>
+          </table>
+        ` : '<div style="padding:14px;text-align:center;color:var(--mute);font-style:italic;font-size:12px">No crew assigned yet — pick a team or add individuals above.</div>'}
+      </div>`;
+  }).join('');
+}
+
+function tsAddTeamCrew(jk, teamId) {
+  if (!teamId || typeof ATT2 === 'undefined' || !ATT2.persons) return;
+  const dmHome = (typeof dmGetHome === 'function') ? dmGetHome() : {};
+  const members = ATT2.persons.filter(p => dmHome[p.id] === teamId);
+  if (!members.length) { alert('Nobody is currently assigned to that team in Daily Meeting.'); return; }
+  const job = TS.jobs[jk];
+  members.forEach(p => {
+    if (!(job.assignments||[]).find(a => a.personId === p.id)) {
+      (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+    }
+  });
+  tsSaveCurrent();
+  tsRenderBody();
+}
+function tsAddPerson(jk, personId) {
+  if (!personId) return;
+  const p = ATT2.persons.find(x => x.id === personId);
+  if (!p) return;
+  const job = TS.jobs[jk];
+  if ((job.assignments||[]).find(a => a.personId === personId)) return;
+  (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+  tsSaveCurrent();
+  tsRenderBody();
+}
+function tsRemovePerson(jk, idx) {
+  TS.jobs[jk].assignments.splice(idx, 1);
+  tsSaveCurrent();
+  tsRenderBody();
+}
+function tsSetHrs(jk, idx, day, v) {
+  const n = parseFloat(v);
+  const job = TS.jobs[jk];
+  if (!job || !job.assignments[idx]) return;
+  job.assignments[idx].hrs = job.assignments[idx].hrs || {};
+  if (isNaN(n) || v === '') delete job.assignments[idx].hrs[day];
+  else job.assignments[idx].hrs[day] = n;
+  tsSaveCurrent();
+}
+function tsFillShiftHrs(jk) {
+  const job = TS.jobs[jk];
+  const hr = HR.rows.find(r => r.id === jk);
+  const days = (hr && hr.days) ? Object.keys(hr.days).filter(k => hr.days[k]) : TS_DAYS;
+  const activeDays = days.length ? days : TS_DAYS;
+  (job.assignments || []).forEach(a => {
+    a.hrs = a.hrs || {};
+    activeDays.forEach(d => { if (a.hrs[d] == null) a.hrs[d] = TS_SHIFT_HRS_DEFAULT; });
+  });
+  tsSaveCurrent();
+  tsRenderBody();
+}
+function tsReplaceTemplate() {
+  if (!confirm('Replace the stored Rio Tinto template with a new blank version?')) return;
+  tsClearTemplate();
+  render_timesheet(document.getElementById('stage'));
+}
+
+// ---------- Archive ----------
+function tsShowArchive() {
+  const archive = tsGetArchive();
+  const stage = document.getElementById('stage');
+  stage.innerHTML = `
+    <div class="card">
+      <div class="card-h">
+        <span class="accent" style="--accent:#1565c0"></span>
+        <h2>Time Sheet · Archive</h2>
+        <div style="flex:1"></div>
+        <button class="btn-ghost" onclick="render_timesheet(document.getElementById('stage'))">← Back to current week</button>
+      </div>
+      <div style="padding:14px">
+        ${archive.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead><tr style="background:#f4f6f9">
+              <th style="text-align:left;padding:8px">Week starting</th>
+              <th style="text-align:left;padding:8px">Saved</th>
+              <th style="text-align:left;padding:8px">Jobs</th>
+              <th style="text-align:left;padding:8px">People</th>
+              <th style="text-align:right;padding:8px">Actions</th>
+            </tr></thead>
+            <tbody>
+              ${archive.map((a,i) => `<tr style="border-top:1px solid var(--line)">
+                <td style="padding:8px;font-weight:700">${tsFmtDisplay(a.weekStart)}</td>
+                <td style="padding:8px;color:#555">${escHtml(a.savedAt || '')}</td>
+                <td style="padding:8px">${a.jobCount || 0}</td>
+                <td style="padding:8px">${a.personCount || 0}</td>
+                <td style="padding:8px;text-align:right">
+                  <button class="btn-ghost" onclick="tsDownloadArchive(${i})">⬇ Download</button>
+                  <button class="btn-ghost" style="color:var(--err);border-color:var(--err)" onclick="tsDeleteArchive(${i})">× Delete</button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        ` : '<div style="padding:40px;text-align:center;color:var(--mute)"><div style="font-size:40px">📦</div><p>No archived weeks yet. Click <b>📦 Archive this week</b> on the main view to save one here.</p></div>'}
+      </div>
+    </div>`;
+}
+function tsDownloadArchive(i) {
+  const archive = tsGetArchive();
+  const a = archive[i]; if (!a) return;
+  tsDownloadFromBase64(a.filledBase64, 'Time_sheet_' + a.weekStart + '.xlsm');
+}
+function tsDeleteArchive(i) {
+  if (!confirm('Delete this archived week?')) return;
+  const archive = tsGetArchive();
+  archive.splice(i,1);
+  tsSetArchive(archive);
+  tsShowArchive();
+}
+
+async function tsArchiveWeek() {
+  if (!Object.keys(TS.jobs).length) { alert('Nothing to archive — add some jobs first.'); return; }
+  if (!confirm('Save this week to archive and clear the current time sheet?\n\nThe blank template stays untouched for next week.')) return;
+  try {
+    const filledB64 = await tsBuildFilledBase64();
+    if (!filledB64) return;
+    const archive = tsGetArchive();
+    archive.unshift({
+      weekStart: TS.weekStart,
+      savedAt: new Date().toLocaleString('en-AU'),
+      jobCount: Object.keys(TS.jobs).length,
+      personCount: Object.values(TS.jobs).reduce((n,j) => n + ((j.assignments||[]).length), 0),
+      filledBase64: filledB64
+    });
+    tsSetArchive(archive);
+    TS.jobs = {};
+    tsSaveCurrent();
+    alert('✓ Archived. Current week cleared.');
+    tsRenderMain(document.getElementById('stage'));
+  } catch(e) { alert('Archive failed: ' + e.message); }
+}
+
+// ---------- Export (SheetJS) ----------
+function tsLoadSheetJs() {
+  return new Promise((resolve, reject) => {
+    if (typeof XLSX !== 'undefined') return resolve();
+    if (TS._sheetJsLoading) {
+      const check = setInterval(() => {
+        if (typeof XLSX !== 'undefined') { clearInterval(check); resolve(); }
+      }, 100);
+      return;
+    }
+    TS._sheetJsLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load SheetJS from CDN. Check internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+
+async function tsBuildFilledBase64() {
+  await tsLoadSheetJs();
+  const tmplB64 = tsGetTemplate();
+  if (!tmplB64) throw new Error('No template stored');
+  // Decode base64 → Uint8Array → workbook
+  const bin = atob(tmplB64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const wb = XLSX.read(buf, { type:'array', cellStyles:true, bookVBA:true });
+
+  // For each day sheet, blank out existing data rows (keeping row 1 headers), then write new rows.
+  TS_DAYS_UP.forEach((daySheet, dayIdx) => {
+    if (!wb.Sheets[daySheet]) return;
+    const ws = wb.Sheets[daySheet];
+    // Build list of (job × person × hours for this day) rows
+    const dayKey = TS_DAYS[dayIdx];
+    const date = tsDateForDay(TS.weekStart, dayIdx);
+    const rows = [];
+    Object.values(TS.jobs).forEach(job => {
+      (job.assignments || []).forEach(a => {
+        const hrs = a.hrs && a.hrs[dayKey];
+        if (hrs == null || hrs === 0 || hrs === '') return;
+        rows.push({ job, assignment: a, hours: hrs, date });
+      });
+    });
+    // Clear existing data rows (row 2 downward) — we leave headers (row 1) alone
+    const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
+    if (ref) {
+      for (let r = 1; r <= ref.e.r; r++) {
+        for (let c = ref.s.c; c <= ref.e.c; c++) {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr]) delete ws[addr];
+        }
+      }
+    }
+    // Write our rows starting at row 2 (0-indexed r=1)
+    rows.forEach((row, i) => {
+      const r = i + 1;  // 0-indexed, so row 2 = r:1
+      // C: WorkOrder, D: Operation, F: WorkCentre, G: SubDate, X-AD: day hours, AG: Progress, AH: Name
+      const set = (col, val, type) => {
+        if (val === '' || val == null) return;
+        const addr = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col(col) });
+        ws[addr] = { v: val, t: type || 's' };
+      };
+      set('C', Number(row.job.workOrder) || row.job.workOrder, isNaN(Number(row.job.workOrder)) ? 's' : 'n');
+      set('D', Number(row.job.operation) || row.job.operation, isNaN(Number(row.job.operation)) ? 's' : 'n');
+      set('F', row.job.workCentre || TS_WORKCENTRE_DEFAULT, 's');
+      // SubDate = this day's date
+      const addrG = XLSX.utils.encode_cell({ r, c: XLSX.utils.decode_col('G') });
+      ws[addrG] = { v: row.date, t: 'd' };
+      // Hours in the right day column
+      const hoursCol = TS_DAY_COLS[dayIdx];
+      set(hoursCol, Number(row.hours), 'n');
+      set('AG', row.job.progress || 'Ongoing', 's');
+      set('AH', row.assignment.name, 's');
+    });
+    // Update sheet range
+    if (rows.length) {
+      ws['!ref'] = XLSX.utils.encode_range({
+        s: { r: 0, c: 0 },
+        e: { r: Math.max(ref ? ref.e.r : rows.length, rows.length), c: ref ? ref.e.c : XLSX.utils.decode_col('AJ') }
+      });
+    }
+  });
+
+  // Write with VBA preserved
+  const outBin = XLSX.write(wb, { bookType: 'xlsm', type: 'base64', bookVBA: true });
+  return outBin;
+}
+
+function tsDownloadFromBase64(b64, filename) {
+  const bin = atob(b64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const blob = new Blob([buf], { type: 'application/vnd.ms-excel.sheet.macroEnabled.12' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+async function tsExport() {
+  if (!Object.keys(TS.jobs).length) { alert('Nothing to export — tick some HR jobs first.'); return; }
+  try {
+    const b64 = await tsBuildFilledBase64();
+    tsDownloadFromBase64(b64, 'Time_sheet_' + TS.weekStart + '.xlsm');
+  } catch(e) { alert('Export failed: ' + e.message); }
+}
+
+
+
+/* ============================================================
    RENDER
 ============================================================ */
 /* Tab order persistence — stored per browser */
@@ -7685,6 +8214,7 @@ function renderStage() {
   if (t.id === 'rr')         { render_rr(stage, t); return; }
   if (t.id === 'inspections'){ render_inspections(stage, t); return; }
   if (t.id === 'hours')      { render_hours(stage, t); return; }
+  if (t.id === 'timesheet')  { render_timesheet(stage, t); return; }
   if (t.id === 'scaffold')   { render_scaffold(stage, t); return; }
   if (t.id === 'ccv')        { render_ccv(stage, t); return; }
   if (t.id === 'registers')  { render_registers(stage, t); return; }

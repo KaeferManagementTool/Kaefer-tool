@@ -8910,17 +8910,46 @@ async function empImportFromTemplate() {
   const linkCount = Object.keys(linkMap).length;
   if (!linkCount) { alert('The LINK sheet seems empty or has no (name, id) rows.'); return; }
 
-  // Match ATT2.persons against the link map
+  // Match ATT2.persons against the link map (full-featured fuzzy — handles Chris↔Christopher, Steve↔Steven etc.)
+  const linkKeys = Object.keys(linkMap);
+  function findInLink(name) {
+    const key = (name || '').toLowerCase().trim();
+    if (!key) return null;
+    // 1. Exact match
+    if (linkMap[key]) return linkMap[key];
+    // 2. One contains the other (handles "Boz" ↔ "Boz Nixon" etc.)
+    for (const k of linkKeys) {
+      if (k === key || k.indexOf(key) >= 0 || key.indexOf(k) >= 0) return linkMap[k];
+    }
+    // 3. Surname + first-name prefix (handles Chris↔Christopher, Steve↔Steven, Mathew↔Matthew)
+    const parts = key.split(/\s+/);
+    const first = parts[0] || '';
+    const last  = parts[parts.length - 1] || '';
+    if (first && last && first !== last) {
+      for (const k of linkKeys) {
+        const kp = k.split(/\s+/);
+        const kFirst = kp[0] || '';
+        const kLast  = kp[kp.length - 1] || '';
+        if (kLast !== last) continue;
+        if (kFirst === first || kFirst.indexOf(first) === 0 || first.indexOf(kFirst) === 0) return linkMap[k];
+      }
+      // 4. First-name + surname both appear anywhere in link entry (handles middle names: Rene Santos ↔ Rene Delos Santos)
+      for (const k of linkKeys) {
+        if (k.indexOf(first) >= 0 && k.indexOf(last) >= 0) return linkMap[k];
+      }
+    }
+    // 5. Unique surname
+    if (last) {
+      const bySurname = linkKeys.filter(k => k.split(/\s+/).pop() === last);
+      if (bySurname.length === 1) return linkMap[bySurname[0]];
+    }
+    return null;
+  }
+
   let filled = 0, overwrote = 0, missed = 0;
   const misses = [];
   (ATT2.persons || []).forEach(p => {
-    const key = (p.name || '').toLowerCase().trim();
-    let hit = linkMap[key];
-    // Try first-name + last-name fuzzy: either direction contains the other
-    if (!hit) {
-      const foundKey = Object.keys(linkMap).find(k => k === key || k.indexOf(key) >= 0 || key.indexOf(k) >= 0);
-      if (foundKey) hit = linkMap[foundKey];
-    }
+    const hit = findInLink(p.name);
     if (hit) {
       if (p.rtId && String(p.rtId).trim() === String(hit).trim()) return;
       if (p.rtId) overwrote++; else filled++;

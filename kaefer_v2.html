@@ -2655,8 +2655,9 @@ const HR = {
   weekLabel: ''    // e.g. "WEEK 42 2026"
 };
 const HR_DEFAULT_COLOURS = [
+  { id:'white',  bg:'#ffffff', fg:'#1a1a1a', label:'Ready' },         // default for brand-new jobs in current week
   { id:'green',  bg:'#c8e6c9', fg:'#1b5e20', label:'Complete' },
-  { id:'orange', bg:'#ffe0b2', fg:'#bf360c', label:'Not Ready' },
+  { id:'orange', bg:'#ffe0b2', fg:'#bf360c', label:'Rescheduled' },   // auto-applied on Archive to incomplete jobs; counted as Rescheduled in reports
   { id:'red',    bg:'#ffcdd2', fg:'#b71c1c', label:'Blocked' },
   { id:'yellow', bg:'#fff59d', fg:'#827717', label:'In Progress' },
   { id:'blue',   bg:'#bbdefb', fg:'#0d47a1', label:'Deferred' },
@@ -2790,14 +2791,30 @@ function hrArchiveCurrent() {
   if (!HR.rows.length) { alert('Nothing to archive — the week is empty.'); return; }
   const label = HR.weekLabel || prompt('Give this week a label (e.g. WEEK 42 2026):', 'WEEK ' + new Date().toLocaleDateString('en-AU'));
   if (!label) return;
+  // Auto-flag any planned job that wasn't completed/cancelled (and has no hours) as "Rescheduled" (orange).
+  // These are the ones that will appear in the Rescheduled report metric.
+  let flipped = 0;
+  const archiveRows = HR.rows.map(r => {
+    const copy = Object.assign({}, r);
+    const isComplete  = copy.status === 'green';
+    const isCancelled = copy.status === 'grey';
+    const hasHours    = (parseFloat(copy.hours) || 0) > 0;
+    if (copy.planned && !isComplete && !isCancelled && !hasHours) {
+      copy.status = 'orange';
+      flipped++;
+    }
+    return copy;
+  });
   const archive = hrGetArchive();
-  archive.unshift({ label, archivedAt: new Date().toISOString(), rows: HR.rows });
+  archive.unshift({ label, archivedAt: new Date().toISOString(), rows: archiveRows });
   hrSetArchive(archive);
   HR.rows = []; HR.weekLabel = '';
   hrSave();
-  alert('✓ Archived "' + label + '" (' + archive[0].rows.length + ' rows). You can start a new week now.');
+  const msg = '✓ Archived "' + label + '" (' + archiveRows.length + ' rows).'
+            + (flipped ? '\n' + flipped + ' incomplete planned job' + (flipped===1?'':'s') + ' auto-flagged as Rescheduled.' : '')
+            + '\n\nYou can start a new week now.';
+  alert(msg);
   const el = document.getElementById('hr-wk'); if (el) el.value = '';
-  // Refresh the mode button count by re-rendering the whole tab
   render_hours(document.getElementById('stage'), null);
 }
 
@@ -2856,8 +2873,8 @@ function hrRenderArchive() {
         <thead><tr><th>Status</th><th>Date</th><th>Order</th><th>Op</th><th>Loc</th><th>Description</th><th>Short Text</th><th>Hrs</th><th>Notes</th><th>%</th><th>Erect</th><th>Dismantle</th><th>Modify</th><th>Day</th><th>Plan?</th></tr></thead>
         <tbody>`;
     matched.forEach(r => {
-      const c  = colMap[r.status]      || colours[1];
-      const hc = colMap[r.hoursStatus] || colours[1];
+      const c  = colMap[r.status]      || colours[0];
+      const hc = colMap[r.hoursStatus] || colours[0];
       const rowBg = `background:${c.bg};color:${c.fg}`;
       const dayLbl = r.day ? DAYS_UP[DAYS.indexOf(r.day)] : '';
       html += `<tr>
@@ -2949,8 +2966,8 @@ function hrRender() {
 }
 
 function renderHrRow(r, colours, colMap) {
-  const c  = colMap[r.status]       || colours[1];
-  const hc = colMap[r.hoursStatus]  || colours[1];
+  const c  = colMap[r.status]       || colours[0];
+  const hc = colMap[r.hoursStatus]  || colours[0];
   const rowBg = `background:${c.bg};color:${c.fg}`;
   const dayVal = r.day || '';
   const daySel = `<select onchange="hrEditField('${r.id}','day',this.value);hrRender()" style="padding:3px 6px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;font-weight:700;background:#fff">
@@ -3042,7 +3059,7 @@ function hrToggleDismantleDone(id) {
 function hrCycleHours(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
   const colours = hrGetColours();
-  const current = r.hoursStatus || colours[1].id;
+  const current = r.hoursStatus || colours[0].id;
   const idx = colours.findIndex(c => c.id === current);
   r.hoursStatus = colours[(idx + 1) % colours.length].id;
   hrSave(); hrRender();
@@ -3070,7 +3087,7 @@ function hrAddBlank() {
   HR.rows.unshift({
     id: 'hr_' + Date.now(),
     date: today, planner:'', order:'', op:'', loc:'', desc:'(New break-in job)', short:'',
-    hours:'', status:'orange', hoursStatus:'orange', notes:'', day:'', percent:'', erect:'', dismantle:'', modify:'', planned:false
+    hours:'', status:'white', hoursStatus:'white', notes:'', day:'', percent:'', erect:'', dismantle:'', modify:'', planned:false
   });
   hrSave(); hrRender();
 }
@@ -3162,7 +3179,7 @@ function hrParseRowFromCells(cells, mode, idSeed) {
   const short = vals[orderIdx+4] || vals[6] || '';
   const hoursVal = vals[orderIdx+5] || vals[7] || '';
   if (!order && !desc.trim() && !short.trim() && !hoursVal.trim()) return null;
-  let colour = 'orange';
+  let colour = 'white';
   for (const c of cells) {
     const style = (c.getAttribute('style') || '') + ' ' + (c.getAttribute('bgcolor') || '');
     const m = style.match(/background[^:]*:\s*(rgb\([^)]+\)|#[0-9a-f]{3,6})/i);
@@ -3178,7 +3195,7 @@ function hrParseRowFromCells(cells, mode, idSeed) {
     desc, short, hours: hoursVal,
     notes: vals[orderIdx+6] || vals[8] || '',
     status: colour,
-    hoursStatus: 'orange',
+    hoursStatus: 'white',
     day: '',
     percent: '', erect: '', dismantle: '', modify: '',
     planned: (mode === 'planned')
@@ -3318,7 +3335,7 @@ function hrParsePaste() {
     const hoursVal = vals[orderIdx+5] || vals[7] || '';
     if (!order && !desc.trim() && !short.trim() && !hoursVal.trim()) return;
     // Pick up colour from first non-blank cell's background
-    let colour = 'orange';
+    let colour = 'white';
     for (const c of cells) {
       const style = (c.getAttribute('style') || '') + ' ' + (c.getAttribute('bgcolor') || '');
       const m = style.match(/background[^:]*:\s*(rgb\([^)]+\)|#[0-9a-f]{3,6})/i);
@@ -3339,7 +3356,7 @@ function hrParsePaste() {
       hours: vals[orderIdx+5] || vals[7] || '',
       notes: vals[orderIdx+6] || vals[8] || '',
       status: colour,
-      hoursStatus: 'orange',
+      hoursStatus: 'white',
       day: '',
       percent: '', erect: '', dismantle: '', modify: '',
       planned: (mode === 'planned')
@@ -3382,7 +3399,7 @@ function detectColourBucket(bg) {
   if (b > r && b > g) return 'blue';
   if (r > 150 && g > 150 && b < 100) return 'yellow';
   if (r > 100 && b > 100 && g < 100) return 'purple';
-  return 'orange';
+  return 'white';  // unknown shade — treat as Ready, not Rescheduled
 }
 
 function hrCopyIncomplete() {
@@ -4290,31 +4307,34 @@ function rptMetricsForMonth(monthKey) {
   const unique = rows.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
   const planned   = unique.filter(r =>  r.planned);
   const unplanned = unique.filter(r => !r.planned);
-  // "Executed" = status is green/complete OR hours have been entered (any row with hours > 0 counts)
-  const isCancelled = r => r.status === 'grey';
-  const isExecuted  = r => r.status === 'green' || (parseFloat(r.hours)||0) > 0;
+  const isCancelled   = r => r.status === 'grey';
+  const isExecuted    = r => r.status === 'green' || (parseFloat(r.hours)||0) > 0;
+  const isRescheduled = r => r.status === 'orange';            // explicitly flagged (either manually, or auto on Archive)
   const sumHrs = list => list.reduce((n,r) => n + (parseFloat(r.hours)||0), 0);
+
   const plannedHrs       = sumHrs(planned);
   const executedPlanned  = sumHrs(planned.filter(isExecuted));
   const executedUnplan   = sumHrs(unplanned.filter(isExecuted));
-  const unplannedHrs     = sumHrs(unplanned);                           // raw break-in work regardless of status
-  const actual           = executedPlanned + executedUnplan;            // what actually happened
-  const rescheduled      = sumHrs(planned.filter(r => !isExecuted(r) && !isCancelled(r)));
+  const unplannedHrs     = sumHrs(unplanned);                  // raw break-in work regardless of status
+  const actual           = executedPlanned + executedUnplan;   // what actually happened
+  // Rescheduled = only the explicitly-orange planned rows (set when a week is archived)
+  const rescheduled      = sumHrs(planned.filter(r => isRescheduled(r)));
   const pctUnplanned     = actual > 0 ? Math.round((executedUnplan / actual) * 100) : 0;
   return {
     plannedHrs, executedPlanned, actual, rescheduled, unplannedHrs: executedUnplan, pctUnplanned,
     rawUnplanned: unplannedHrs,
-    counts: { planned: planned.length, unplanned: unplanned.length }
+    counts: { planned: planned.length, unplanned: unplanned.length, rescheduled: planned.filter(isRescheduled).length }
   };
 }
 
 function rptChartSvg(perMonth) {
   // Grouped bar chart: 4 series per month
   const SERIES = [
-    { key:'plannedHrs',      label:'Planned',   col:'#1565c0' },
-    { key:'executedPlanned', label:'Executed',  col:'#2e7d32' },
-    { key:'actual',          label:'Actual',    col:'#607d8b' },
-    { key:'unplannedHrs',    label:'Unplanned', col:'#c62828' }
+    { key:'plannedHrs',      label:'Planned',     col:'#1565c0' },
+    { key:'executedPlanned', label:'Executed',    col:'#2e7d32' },
+    { key:'actual',          label:'Actual',      col:'#607d8b' },
+    { key:'rescheduled',     label:'Rescheduled', col:'#ef6c00' },
+    { key:'unplannedHrs',    label:'Unplanned',   col:'#c62828' }
   ];
   const months = perMonth.map(x => x.key);
   if (!months.length) return '<p style="color:#607d8b;font-style:italic;padding:20px;text-align:center">No data in the selected period.</p>';

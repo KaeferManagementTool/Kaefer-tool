@@ -7783,10 +7783,87 @@ function tsRenderMain(stage) {
         <button class="btn-ghost" onclick="tsArchiveWeek()" title="Save a filled copy to archive and clear the current week — blank template stays">📦 Archive this week</button>
       </div>
 
-      <div id="ts-body" style="padding:14px"></div>
+      <div style="display:grid;grid-template-columns:1fr 260px;gap:0;align-items:start">
+        <div id="ts-body" style="padding:14px;min-width:0"></div>
+        <div id="ts-sidebar" style="padding:14px 14px 14px 0;border-left:1px solid var(--line);background:#fafbfc"></div>
+      </div>
     </div>`;
 
   tsRenderBody();
+  tsRenderSidebar();
+}
+
+// Right-hand running-totals panel: everyone currently active, grouped Office / Yard / Scaffolders,
+// with a per-person total of hours already written on this week's time sheet.
+function tsRenderSidebar() {
+  const wrap = document.getElementById('ts-sidebar');
+  if (!wrap) return;
+  if (typeof ATT2 === 'undefined' || !ATT2.persons) { wrap.innerHTML = '<div style="color:var(--mute);font-size:12px;padding:8px">Attendance not loaded yet.</div>'; return; }
+
+  // Totals per personId AND per lowercase name (so manually-typed names also match)
+  const totalsById = {};
+  const totalsByName = {};
+  Object.values(TS.jobs || {}).forEach(job => {
+    (job.assignments || []).forEach(a => {
+      let total = 0;
+      Object.values(a.hrs || {}).forEach(h => { const n = Number(h); if (isFinite(n)) total += n; });
+      if (!total) return;
+      if (a.personId) totalsById[a.personId] = (totalsById[a.personId] || 0) + total;
+      if (a.name) {
+        const k = a.name.toLowerCase().trim();
+        totalsByName[k] = (totalsByName[k] || 0) + total;
+      }
+    });
+  });
+
+  // Group active people
+  const groupDefs = [
+    { key:'SCAFFOLDERS', label:'Scaffolders', bar:'#2e7d32' },
+    { key:'YARD STAFF',  label:'Yard',        bar:'#ef6c00' },
+    { key:'OFFICE STAFF',label:'Office',      bar:'#1565c0' }
+  ];
+  const groups = {};
+  groupDefs.forEach(g => groups[g.key] = []);
+  ATT2.persons.forEach(p => {
+    if (!p.group || !groups.hasOwnProperty(p.group)) return;
+    if (typeof pIsArchived === 'function' && pIsArchived(p)) return;
+    groups[p.group].push(p);
+  });
+
+  // Grand total for the week
+  const grand = Object.values(totalsById).reduce((s,v)=>s+v, 0)
+              + Object.keys(totalsByName).filter(n => {
+                  // only count name-only entries that didn't also match an id
+                  const match = ATT2.persons.find(p => (p.name||'').toLowerCase().trim() === n);
+                  return !match;
+                }).reduce((s,n)=>s + totalsByName[n], 0);
+
+  wrap.innerHTML = `
+    <div style="position:sticky;top:10px">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #1565c0">
+        <h3 style="margin:0;font-size:11px;letter-spacing:1.5px;color:#1565c0;font-weight:800">RUNNING TOTALS</h3>
+        <div style="flex:1"></div>
+        <div style="font-size:11px;color:var(--mute)"><b style="color:#1565c0;font-size:14px">${grand}</b> hrs</div>
+      </div>
+      ${groupDefs.map(g => {
+        const people = groups[g.key].slice().sort((a,b) => (a.name||'').localeCompare(b.name||''));
+        if (!people.length) return '';
+        return `<div style="margin-bottom:14px">
+          <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;color:#fff;background:${g.bar};padding:4px 10px;border-radius:4px 4px 0 0">${g.label.toUpperCase()} · ${people.length}</div>
+          <div style="background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 4px 4px">
+            ${people.map(p => {
+              const key = (p.name||'').toLowerCase().trim();
+              const total = (totalsById[p.id] || 0) + (!totalsById[p.id] ? (totalsByName[key] || 0) : 0);
+              const hasHrs = total > 0;
+              return `<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-top:1px solid #f0f3f8;font-size:11.5px${hasHrs?';background:#eff6ff':''}">
+                <span style="flex:1;color:#1a1a1a${hasHrs?';font-weight:600':''}">${escHtml(p.name||'')}</span>
+                <span style="font-variant-numeric:tabular-nums;font-weight:${hasHrs?'800':'500'};color:${hasHrs?'#1565c0':'#bbb'};min-width:28px;text-align:right">${hasHrs?total:'·'}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 // Pulls jobs from Hours Register that have the TS tick set, and (if dated) fall in the current week.
@@ -7815,6 +7892,7 @@ function tsShiftWeek(deltaDays) {
 function tsRenderBody() {
   const wrap = document.getElementById('ts-body');
   if (!wrap) return;
+  tsRenderSidebar();  // keep running totals in sync whenever the grid re-renders
   const jobKeys = Object.keys(TS.jobs);
   if (!jobKeys.length) {
     wrap.innerHTML = `<div style="padding:40px 20px;text-align:center;background:#fafafa;border:2px dashed var(--line);border-radius:var(--r-md);color:#555">
@@ -7874,7 +7952,10 @@ function tsRenderBody() {
           </select>
           <select onchange="tsAddPerson('${jk}',this.value);this.value=''" style="padding:5px 9px;border:1px solid var(--line);border-radius:4px;font-size:12px;cursor:pointer;max-width:220px">
             <option value="">+ Add individual…</option>
-            ${((typeof ATT2!=='undefined' && ATT2.persons)||[]).map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
+            ${((typeof ATT2!=='undefined' && ATT2.persons)||[])
+              .filter(p => p.name && (typeof pIsArchived !== 'function' || !pIsArchived(p)))
+              .sort((a,b) => (a.name||'').localeCompare(b.name||''))
+              .map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
           </select>
           <span style="color:#999;font-size:11px">·</span>
           <button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="tsFillShiftHrs('${jk}')" title="Set ${TS_SHIFT_HRS_DEFAULT}hrs for every day this job runs">⚡ Fill ${TS_SHIFT_HRS_DEFAULT}hrs/day</button>
@@ -7929,6 +8010,7 @@ function tsSetHrs(jk, idx, day, v) {
   if (isNaN(n) || v === '') delete job.assignments[idx].hrs[day];
   else job.assignments[idx].hrs[day] = n;
   tsSaveCurrent();
+  tsRenderSidebar();
 }
 function tsFillShiftHrs(jk) {
   const job = TS.jobs[jk];

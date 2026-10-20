@@ -8132,6 +8132,7 @@ function tsShowArchive() {
                 <td style="padding:8px">${a.personCount || 0}</td>
                 <td style="padding:8px;text-align:right">
                   <button class="btn-ghost" onclick="tsDownloadArchive(${i})">⬇ Download</button>
+                  <button class="btn-ghost" style="color:#1565c0;border-color:#1565c0" onclick="tsUnarchive(${i})" title="Bring this week back as the current time sheet">↩ Unarchive</button>
                   <button class="btn-ghost" style="color:var(--err);border-color:var(--err)" onclick="tsDeleteArchive(${i})">× Delete</button>
                 </td>
               </tr>`).join('')}
@@ -8153,6 +8154,26 @@ function tsDeleteArchive(i) {
   tsSetArchive(archive);
   tsShowArchive();
 }
+function tsUnarchive(i) {
+  const archive = tsGetArchive();
+  const a = archive[i];
+  if (!a) return;
+  if (!a.jobs || !Object.keys(a.jobs).length) {
+    alert('This archived week doesn\'t have the editable data — it was saved before Unarchive was added. You can still download it from the Download button.');
+    return;
+  }
+  const curCount = Object.keys(TS.jobs || {}).length;
+  const warn = curCount
+    ? 'You currently have ' + curCount + ' job(s) on this week\'s time sheet.\n\nUnarchiving will OVERWRITE them with the archived week\'s data.\n\nContinue?'
+    : 'Load "' + tsFmtDisplay(a.weekStart) + '" as the current time sheet?';
+  if (!confirm(warn)) return;
+  TS.weekStart = a.weekStart;
+  TS.jobs = JSON.parse(JSON.stringify(a.jobs));
+  tsSaveCurrent();
+  archive.splice(i, 1);
+  tsSetArchive(archive);
+  tsRenderMain(document.getElementById('stage'));
+}
 
 async function tsArchiveWeek() {
   if (!Object.keys(TS.jobs).length) { alert('Nothing to archive — add some jobs first.'); return; }
@@ -8166,7 +8187,8 @@ async function tsArchiveWeek() {
       savedAt: new Date().toLocaleString('en-AU'),
       jobCount: Object.keys(TS.jobs).length,
       personCount: Object.values(TS.jobs).reduce((n,j) => n + ((j.assignments||[]).length), 0),
-      filledBase64: filledB64
+      filledBase64: filledB64,
+      jobs: JSON.parse(JSON.stringify(TS.jobs))   // editable state for Unarchive
     });
     tsSetArchive(archive);
     TS.jobs = {};

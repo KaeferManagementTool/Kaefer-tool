@@ -4041,21 +4041,18 @@ function rptRender() {
         <button class="btn-ghost" style="margin-left:4px" onclick="rptCsv()">⬇ CSV</button>
       </div>
 
-      <div style="display:grid;grid-template-columns:260px 1fr;gap:0;min-height:600px">
-        <!-- Report type sidebar -->
-        <div style="background:var(--surface-2);border-right:1px solid var(--line);padding:10px">
-          ${reportTypes.map(r => `<button onclick="rptPickType('${r.id}')" style="display:block;width:100%;text-align:left;padding:11px 13px;margin-bottom:6px;background:${REPORTS.type===r.id?'#fff':'transparent'};border:1px solid ${REPORTS.type===r.id?'var(--t-reports)':'transparent'};border-radius:var(--r-sm);cursor:pointer;transition:all .15s"
-            <div style="font-weight:800;font-size:12.5px;color:${REPORTS.type===r.id?'var(--t-reports)':'#1a1a1a'};margin-bottom:3px">${r.label}</div>
-            <div style="font-size:10.5px;color:var(--mute);line-height:1.4">${r.desc}</div>
-          </button>`).join('')}
-          <div style="margin-top:14px;padding:10px 11px;background:#fff;border:1px dashed var(--line);border-radius:var(--r-sm);font-size:10.5px;color:var(--mute);line-height:1.5">
-            <b style="color:#333;display:block;margin-bottom:4px">📄 How to export</b>
-            <b>Print / PDF:</b> hit the button → <b>Destination: Save as PDF</b> in the print dialog.<br>
-            <b>CSV:</b> raw rows for the selected report, downloads straight away.
-          </div>
-        </div>
+      <!-- Horizontal sub-tabs for each report type -->
+      <div style="display:flex;gap:2px;padding:10px 14px 0;background:var(--surface-2);border-bottom:1px solid var(--line);align-items:flex-end;flex-wrap:wrap">
+        ${reportTypes.map(r => {
+          const on = REPORTS.type === r.id;
+          return `<button onclick="rptPickType('${r.id}')" title="${escHtml(r.desc)}" style="padding:9px 18px;border:1px solid ${on?'var(--line)':'transparent'};border-bottom:${on?'1px solid #fff':'1px solid var(--line)'};background:${on?'#fff':'transparent'};color:${on?'var(--t-reports)':'#555'};border-radius:var(--r-sm) var(--r-sm) 0 0;cursor:pointer;font-weight:${on?'800':'600'};font-size:12.5px;margin-bottom:-1px">${r.label}</button>`;
+        }).join('')}
+        <div style="flex:1"></div>
+        <div style="padding:8px 10px;font-size:10.5px;color:var(--mute);line-height:1.3;max-width:360px;text-align:right">${escHtml(cur.desc)}</div>
+      </div>
 
-        <!-- Preview -->
+      <div style="min-height:600px">
+        <!-- Preview full width -->
         <div style="padding:0;background:#fafafa;overflow-x:auto">
           <div id="rpt-preview" style="background:#fff;min-height:600px;padding:28px 32px;max-width:860px;margin:14px auto;box-shadow:0 2px 12px rgba(0,0,0,.08);border-radius:var(--r-md)">
             ${rptBuildHtml(REPORTS.type, REPORTS.from, REPORTS.to)}

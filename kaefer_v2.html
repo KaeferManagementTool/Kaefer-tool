@@ -5879,6 +5879,8 @@ const CCV = {
   err: null,
   mon: new Date().getMonth(),
   yr:  new Date().getFullYear(),
+  rangeFrom: '',   // YYYY-MM-DD — if set with rangeTo, overrides mon/yr and loads a custom range
+  rangeTo:   '',
   data: [],       // 12 segments: {inspections:[{type,result,notes,date}]}
   selectedIdx: null,
   modalOpen: false,
@@ -5977,6 +5979,80 @@ function ccvNavMonth(delta) {
   ccvLoad();
 }
 
+// Prompt for a custom date range then load it
+function ccvOpenRange() {
+  const today = new Date();
+  const defaultTo = today.toISOString().slice(0,10);
+  const past = new Date(today.getTime() - 90*86400000);
+  const defaultFrom = past.toISOString().slice(0,10);
+  const from = (prompt('Start date (YYYY-MM-DD):', defaultFrom) || '').trim();
+  if (!from) return;
+  const to = (prompt('End date (YYYY-MM-DD):', defaultTo) || '').trim();
+  if (!to) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) { alert('Use YYYY-MM-DD format.'); return; }
+  ccvSetRange(from, to);
+}
+
+function ccvClearRange() {
+  CCV.rangeFrom = ''; CCV.rangeTo = '';
+  CCV.loaded = false;
+  CCV.data = ccvEmptyData();
+  ccvLoad();
+}
+
+// Load every month that overlaps the given range, merge, then filter inspections to the exact date window
+async function ccvSetRange(fromStr, toStr) {
+  if (!fromStr || !toStr) return;
+  if (fromStr > toStr) { alert('Start date must be before end date.'); return; }
+  CCV.rangeFrom = fromStr; CCV.rangeTo = toStr;
+  CCV.loading = true; CCV.err = null;
+  CCV.data = ccvEmptyData();
+  ccvRender();
+  const u = workerUrl();
+  if (!u) { CCV.err = 'Sync URL not configured'; CCV.loading = false; ccvRender(); return; }
+  const from = new Date(fromStr + 'T00:00:00');
+  const to   = new Date(toStr + 'T23:59:59');
+  // All (year, month) tuples that overlap the range
+  const months = [];
+  let cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (cursor <= to) {
+    months.push({ y: cursor.getFullYear(), m: cursor.getMonth() });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  const merged = ccvEmptyData();
+  try {
+    // Fetch all in parallel for speed
+    const results = await Promise.all(months.map(({y, m}) => {
+      const url = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'action=load_ccv&month=' + m + '&year=' + y + '&t=' + Date.now();
+      return fetch(url, { redirect:'follow' }).then(r => r.json()).catch(() => ({ ok:false }));
+    }));
+    results.forEach(j => {
+      if (!j.ok) return;
+      const payload = j.data || {};
+      Object.keys(payload).forEach(k => {
+        const idx = parseInt(k, 10);
+        if (idx < 0 || idx >= 12) return;
+        const seg = ccvMigrateSegment(payload[k]);
+        (seg.inspections || []).forEach(it => {
+          if (it.date) {
+            const dt = new Date(it.date + 'T00:00:00');
+            if (dt < from || dt > to) return;
+          }
+          merged[idx].inspections.push(it);
+        });
+      });
+    });
+    CCV.data = merged;
+    CCV.loaded = true;
+    CCV.loading = false;
+    ccvRender();
+  } catch(e) {
+    CCV.loading = false;
+    CCV.err = e.message;
+    ccvRender();
+  }
+}
+
 function render_ccv(stage, tabCfg) {
   if (!CCV.loaded && !CCV.loading && !CCV.err) ccvLoad();
   if (!CCV.data.length) CCV.data = ccvEmptyData();
@@ -5998,11 +6074,22 @@ function ccvRender() {
       <div class="card-h">
         <span class="accent" style="--accent:var(--t-ccv)"></span>
         <h2>CCV Wheel</h2>
-        <div style="display:flex;align-items:center;gap:4px;margin-left:14px">
-          <button class="btn-ghost" onclick="ccvNavMonth(-1)" title="Previous month">◀</button>
-          <div style="min-width:150px;text-align:center;padding:6px 12px;background:var(--t-ccv);color:#fff;border-radius:var(--r-sm);font-weight:800;font-size:13px;letter-spacing:.5px">${CCV_MONTHS[CCV.mon]} ${CCV.yr}</div>
-          <button class="btn-ghost" onclick="ccvNavMonth(1)" title="Next month">▶</button>
-          <button class="btn-ghost" style="margin-left:6px" onclick="CCV.mon=new Date().getMonth();CCV.yr=new Date().getFullYear();CCV.loaded=false;ccvLoad()">This month</button>
+        <div style="display:flex;align-items:center;gap:4px;margin-left:14px;flex-wrap:wrap">
+          ${CCV.rangeFrom && CCV.rangeTo ? `
+            <!-- Custom range mode -->
+            <input type="date" value="${CCV.rangeFrom}" onchange="ccvSetRange(this.value, CCV.rangeTo)" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px">
+            <span style="color:var(--mute);font-weight:700">→</span>
+            <input type="date" value="${CCV.rangeTo}" onchange="ccvSetRange(CCV.rangeFrom, this.value)" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px">
+            <div style="padding:6px 10px;background:var(--t-ccv);color:#fff;border-radius:var(--r-sm);font-weight:800;font-size:12px;letter-spacing:.3px">${fdDisplay(CCV.rangeFrom)} — ${fdDisplay(CCV.rangeTo)}</div>
+            <button class="btn-ghost" style="margin-left:6px" onclick="ccvClearRange()" title="Back to monthly view">× Clear range</button>
+          ` : `
+            <!-- Monthly mode -->
+            <button class="btn-ghost" onclick="ccvNavMonth(-1)" title="Previous month">◀</button>
+            <div style="min-width:150px;text-align:center;padding:6px 12px;background:var(--t-ccv);color:#fff;border-radius:var(--r-sm);font-weight:800;font-size:13px;letter-spacing:.5px">${CCV_MONTHS[CCV.mon]} ${CCV.yr}</div>
+            <button class="btn-ghost" onclick="ccvNavMonth(1)" title="Next month">▶</button>
+            <button class="btn-ghost" style="margin-left:6px" onclick="CCV.mon=new Date().getMonth();CCV.yr=new Date().getFullYear();CCV.loaded=false;ccvLoad()">This month</button>
+            <button class="btn-ghost" style="margin-left:6px" onclick="ccvOpenRange()" title="Load inspections across a custom date range">📅 Custom range…</button>
+          `}
         </div>
         <div style="flex:1"></div>
         <span style="font-size:11px;color:var(--mute);margin-right:8px" title="${CCV.err?escHtml(CCV.err):''}">${CCV.loading?'⟳ syncing…':CCV.err?'<span style="color:var(--err);font-weight:700">⚠ '+escHtml(CCV.err.slice(0,80))+'</span>':CCV.loaded?'✓ synced · '+CCV.data.reduce((n,s)=>n+(s.inspections||[]).length,0)+' entries':''}</span>

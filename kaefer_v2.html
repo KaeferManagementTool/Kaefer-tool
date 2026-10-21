@@ -9534,9 +9534,12 @@ function tabsInjectSubBar(t) {
   if (!children.length) return;  // not a nested group
   // Build siblings = parent + its children
   const siblings = [topLevel, ...children];
+  // Measure the top chrome (main tab bar) so our sub-bar can stick right below it
+  const tabwrap = document.querySelector('.tabwrap');
+  const stickyTop = tabwrap ? Math.ceil(tabwrap.getBoundingClientRect().height) : 44;
   const bar = document.createElement('div');
   bar.id = 'tabs-sub-bar';
-  bar.style.cssText = 'display:flex;gap:2px;padding:8px 14px 0;background:var(--surface-2);border-bottom:1px solid var(--line);align-items:flex-end;flex-wrap:wrap;position:sticky;top:0;z-index:5';
+  bar.style.cssText = `display:flex;gap:2px;padding:8px 14px 0;background:var(--surface-2);border:1px solid var(--line);border-top:none;border-radius:0 0 var(--r-md) var(--r-md);align-items:flex-end;flex-wrap:wrap;position:sticky;top:${stickyTop}px;z-index:9;margin:0 0 14px;box-shadow:0 2px 6px rgba(0,0,0,.08)`;
   bar.innerHTML = siblings.map(s => {
     const on = s.id === t.id;
     return `<button onclick="setSubTab('${s.id}')" title="${escHtml(s.desc||'')}" style="padding:8px 16px;border:1px solid ${on?'var(--line)':'transparent'};border-bottom:${on?'1px solid var(--surface)':'1px solid var(--line)'};background:${on?'var(--surface)':'transparent'};color:${on?s.accent:'#555'};border-radius:var(--r-sm) var(--r-sm) 0 0;cursor:pointer;font-weight:${on?'800':'600'};font-size:12.5px;margin-bottom:-1px;letter-spacing:.3px">${s.id===topLevel.id?'⬆ ':''}${s.label}</button>`;

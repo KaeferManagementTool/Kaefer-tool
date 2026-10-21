@@ -8119,6 +8119,7 @@ function tsRenderBody() {
               .sort((a,b) => (a.name||'').localeCompare(b.name||''))
               .map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
           </select>
+          <button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;font-weight:700;color:#1565c0;border-color:#1565c0" onclick="tsAddOfficeYard('${jk}')" title="Add all current Office + Yard staff to this job in one click">+ Office/Yard</button>
           <span style="color:#999;font-size:11px">·</span>
           <button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="tsFillShiftHrs('${jk}')" title="Set ${TS_SHIFT_HRS_DEFAULT}hrs for every day this job runs">⚡ Fill ${TS_SHIFT_HRS_DEFAULT}hrs/day</button>
           <div style="flex:1"></div>
@@ -8156,6 +8157,24 @@ function tsAddPerson(jk, personId) {
   const job = TS.jobs[jk];
   if ((job.assignments||[]).find(a => a.personId === personId)) return;
   (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+  tsSaveCurrent();
+  tsRenderBody();
+}
+// One-click: adds every active Office Staff + Yard Staff to the given job
+function tsAddOfficeYard(jk) {
+  if (typeof ATT2 === 'undefined' || !ATT2.persons) return;
+  const job = TS.jobs[jk];
+  if (!job) return;
+  const existing = new Set((job.assignments||[]).map(a => a.personId));
+  const picks = ATT2.persons.filter(p =>
+    (p.group === 'OFFICE STAFF' || p.group === 'YARD STAFF')
+    && !(typeof pIsArchived === 'function' && pIsArchived(p))
+    && !existing.has(p.id)
+  );
+  if (!picks.length) { alert('No active Office or Yard staff to add — everyone already on this job.'); return; }
+  picks.forEach(p => {
+    (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+  });
   tsSaveCurrent();
   tsRenderBody();
 }

@@ -2740,7 +2740,8 @@ function render_hours(stage, tabCfg) {
         <button class="btn-ghost" style="margin-left:12px" onclick="hrOpenPaste()">📋 Paste from Excel</button>
         <button class="btn-ghost" style="margin-left:4px" onclick="hrOpenBulkPaste()" title="Backfill a year of history — paste multiple weeks in one go">📚 Bulk paste (year)</button>
         <button class="btn-ghost" onclick="hrOpenColours()" style="margin-left:6px">🎨 Colours</button>
-        <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy incomplete</button>
+        <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy Rescheduled</button>
+        <button class="btn-ghost" style="margin-left:4px;font-size:11px" title="Reset every Rescheduled (orange) flag back to Ready — use after a bad paste" onclick="hrResetRescheduled()">↺ Reset orange</button>
       </div>
       <div class="att-ctrls" id="hr-ctrls-current">
         <div class="field" style="flex:1 1 220px"><label>Week label</label><input type="text" id="hr-wk" placeholder="e.g. WEEK 42 2026" value="${escHtml(HR.weekLabel)}"></div>
@@ -3485,29 +3486,46 @@ function detectColourBucket(bg) {
   else if (/^#[0-9a-f]{6}$/i.test(bg)) { r=parseInt(bg.slice(1,3),16); g=parseInt(bg.slice(3,5),16); b=parseInt(bg.slice(5,7),16); }
   else if (/^#[0-9a-f]{3}$/i.test(bg)) { r=parseInt(bg[1]+bg[1],16); g=parseInt(bg[2]+bg[2],16); b=parseInt(bg[3]+bg[3],16); }
   else return null;
-  // Ignore white/near-white
-  if (r > 240 && g > 240 && b > 240) return null;
-  // Dominant hue bucketing
+  // Ignore white / near-white (plus Excel's subtle row-banding creams and beiges that are visually white)
+  if (r > 230 && g > 230 && b > 230) return null;
   const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  // Low saturation — treat barely-tinted colours as unset so we don't mis-tag them
+  if (max > 0 && (max - min) / max < 0.18) return null;
   if (max - min < 25) return 'grey';
-  if (g > r && g > b) return 'green';
-  if (r > g && r > b && g > b - 20 && g > 100) return 'orange';
-  if (r > g && r > b) return 'red';
-  if (b > r && b > g) return 'blue';
-  if (r > 150 && g > 150 && b < 100) return 'yellow';
-  if (r > 100 && b > 100 && g < 100) return 'purple';
+  // Real green: g clearly beats both r and b
+  if (g > r + 15 && g > b + 15) return 'green';
+  // Real orange / amber: r > g > b with proper spread (not a cream or a yellow)
+  if (r > g + 10 && g > b + 20 && r - b > 50 && g > 120 && g < 230) return 'orange';
+  // Yellow: r and g both high, b much lower
+  if (r > 180 && g > 180 && b < g - 60) return 'yellow';
+  // Red: r clearly dominant, g and b low-ish
+  if (r > g + 30 && r > b + 30) return 'red';
+  // Blue
+  if (b > r + 15 && b > g + 15) return 'blue';
+  // Purple
+  if (r > 100 && b > 100 && g < Math.min(r, b) - 20) return 'purple';
   return 'white';  // unknown shade — treat as Ready, not Rescheduled
+}
+
+function hrResetRescheduled() {
+  const n = HR.rows.filter(r => r.status === 'orange').length;
+  if (!n) { alert('No rows are currently flagged as Rescheduled.'); return; }
+  if (!confirm('Reset ' + n + ' row' + (n===1?'':'s') + ' flagged as Rescheduled back to Ready?\n\nUse this to clean up a bad paste. Rows you WANT marked Rescheduled will need to be re-clicked.')) return;
+  HR.rows.forEach(r => { if (r.status === 'orange') r.status = 'white'; });
+  hrSave(); hrRender();
+  alert('✓ Reset ' + n + ' row' + (n===1?'':'s') + ' back to Ready.');
 }
 
 function hrCopyIncomplete() {
   const colours = hrGetColours();
   const colMap = Object.fromEntries(colours.map(c => [c.id, c]));
-  // "Incomplete" = anything NOT the first colour (default: not Complete / green)
-  const completeId = colours[0].id;
-  const incomplete = HR.rows.filter(r => r.status !== completeId);
-  if (!incomplete.length) { alert('No incomplete jobs — nothing to copy.'); return; }
+  // Only pick up jobs flagged as Rescheduled — find the id by label (so palette reorders don't break it)
+  const resched = colours.find(c => (c.label||'').toLowerCase() === 'rescheduled');
+  const reschedId = resched ? resched.id : 'orange';
+  const incomplete = HR.rows.filter(r => r.status === reschedId);
+  if (!incomplete.length) { alert('No Rescheduled jobs — nothing to copy.'); return; }
   // Build an HTML table and plain-text table, copy both as rich clipboard
-  const title = `Outstanding jobs — ${HR.weekLabel || new Date().toLocaleDateString('en-AU')}`;
+  const title = `Rescheduled jobs — ${HR.weekLabel || new Date().toLocaleDateString('en-AU')}`;
   const hdr = ['Status','Date','Work Order','Description','Hours','Notes'];
   const rows = incomplete.map(r => [ (colMap[r.status]||{}).label||r.status, fdDisplay(r.date), r.order, r.desc, r.hours, r.notes ]);
   const htmlRows = rows.map(cells =>
@@ -3520,10 +3538,10 @@ function hrCopyIncomplete() {
   const textTable = title + '\n' + hdr.join('\t') + '\n' + rows.map(r => r.map(c => (c||'').replace(/\t/g,' ')).join('\t')).join('\n');
   if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
     const item = new ClipboardItem({ 'text/html': new Blob([htmlTable], {type:'text/html'}), 'text/plain': new Blob([textTable], {type:'text/plain'}) });
-    navigator.clipboard.write([item]).then(() => alert('✓ Copied ' + incomplete.length + ' incomplete jobs. Paste into your email.'));
+    navigator.clipboard.write([item]).then(() => alert('✓ Copied ' + incomplete.length + ' Rescheduled job' + (incomplete.length===1?'':'s') + '. Paste into your email.'));
   } else {
     // Fallback: copy plain text
-    navigator.clipboard.writeText(textTable).then(() => alert('✓ Copied ' + incomplete.length + ' incomplete jobs (plain text).'));
+    navigator.clipboard.writeText(textTable).then(() => alert('✓ Copied ' + incomplete.length + ' Rescheduled job' + (incomplete.length===1?'':'s') + ' (plain text).'));
   }
 }
 

@@ -7892,7 +7892,7 @@ function tsRenderMain(stage) {
         })()}
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 260px;gap:0;align-items:start">
+      <div style="display:grid;grid-template-columns:1fr 360px;gap:0;align-items:start">
         <div id="ts-body" style="padding:14px;min-width:0"></div>
         <div id="ts-sidebar" style="padding:14px 14px 14px 0;border-left:1px solid var(--line);background:#fafbfc"></div>
       </div>
@@ -7909,18 +7909,26 @@ function tsRenderSidebar() {
   if (!wrap) return;
   if (typeof ATT2 === 'undefined' || !ATT2.persons) { wrap.innerHTML = '<div style="color:var(--mute);font-size:12px;padding:8px">Attendance not loaded yet.</div>'; return; }
 
-  // Totals per personId AND per lowercase name (so manually-typed names also match)
-  const totalsById = {};
-  const totalsByName = {};
+  // Totals per personId AND per lowercase name — stored as per-day objects so the sidebar can show the breakdown
+  const totalsById = {};    // id → {mon,tue,wed,thu,fri,sat,sun, total}
+  const totalsByName = {};  // nameLower → {same shape}
+  const blankDays = () => ({ mon:0, tue:0, wed:0, thu:0, fri:0, sat:0, sun:0, total:0 });
   Object.values(TS.jobs || {}).forEach(job => {
     (job.assignments || []).forEach(a => {
+      const hrs = a.hrs || {};
       let total = 0;
-      Object.values(a.hrs || {}).forEach(h => { const n = Number(h); if (isFinite(n)) total += n; });
-      if (!total) return;
-      if (a.personId) totalsById[a.personId] = (totalsById[a.personId] || 0) + total;
+      TS_DAYS.forEach(d => { const n = Number(hrs[d]); if (isFinite(n)) total += n; });
+      if (!total && !Object.keys(hrs).length) return;
+      if (a.personId) {
+        const b = totalsById[a.personId] = totalsById[a.personId] || blankDays();
+        TS_DAYS.forEach(d => { const n = Number(hrs[d]); if (isFinite(n)) b[d] += n; });
+        b.total += total;
+      }
       if (a.name) {
         const k = a.name.toLowerCase().trim();
-        totalsByName[k] = (totalsByName[k] || 0) + total;
+        const b = totalsByName[k] = totalsByName[k] || blankDays();
+        TS_DAYS.forEach(d => { const n = Number(hrs[d]); if (isFinite(n)) b[d] += n; });
+        b.total += total;
       }
     });
   });
@@ -7939,17 +7947,22 @@ function tsRenderSidebar() {
     groups[p.group].push(p);
   });
 
-  // Grand total for the week
-  const grand = Object.values(totalsById).reduce((s,v)=>s+v, 0)
+  // Grand total for the week — sum of all person totals
+  const sumBreakdown = (b) => (b ? b.total : 0);
+  const grand = Object.values(totalsById).reduce((s,b)=>s+sumBreakdown(b), 0)
               + Object.keys(totalsByName).filter(n => {
-                  // only count name-only entries that didn't also match an id
                   const match = ATT2.persons.find(p => (p.name||'').toLowerCase().trim() === n);
                   return !match;
-                }).reduce((s,n)=>s + totalsByName[n], 0);
+                }).reduce((s,n)=>s + sumBreakdown(totalsByName[n]), 0);
+
+  const dayHdr = TS_DAYS.map((d,i) => {
+    const isSel = TS.selectedDay === d;
+    return `<th style="padding:3px 2px;font-size:9px;font-weight:800;letter-spacing:.5px;color:${isSel?'#1565c0':'#777'};text-align:center;width:26px;background:${isSel?'#eff6ff':'transparent'}">${TS_DAYS_UP[i].slice(0,1)}</th>`;
+  }).join('');
 
   wrap.innerHTML = `
     <div style="position:sticky;top:10px">
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #1565c0">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:2px solid #1565c0">
         <h3 style="margin:0;font-size:11px;letter-spacing:1.5px;color:#1565c0;font-weight:800">RUNNING TOTALS</h3>
         <div style="flex:1"></div>
         <div style="font-size:11px;color:var(--mute)"><b style="color:#1565c0;font-size:14px">${grand}</b> hrs</div>
@@ -7959,17 +7972,30 @@ function tsRenderSidebar() {
         if (!people.length) return '';
         return `<div style="margin-bottom:14px">
           <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;color:#fff;background:${g.bar};padding:4px 10px;border-radius:4px 4px 0 0">${g.label.toUpperCase()} · ${people.length}</div>
-          <div style="background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 4px 4px">
-            ${people.map(p => {
-              const key = (p.name||'').toLowerCase().trim();
-              const total = (totalsById[p.id] || 0) + (!totalsById[p.id] ? (totalsByName[key] || 0) : 0);
-              const hasHrs = total > 0;
-              return `<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-top:1px solid #f0f3f8;font-size:11.5px${hasHrs?';background:#eff6ff':''}">
-                <span style="flex:1;color:#1a1a1a${hasHrs?';font-weight:600':''}">${escHtml(p.name||'')}</span>
-                <span style="font-variant-numeric:tabular-nums;font-weight:${hasHrs?'800':'500'};color:${hasHrs?'#1565c0':'#bbb'};min-width:28px;text-align:right">${hasHrs?total:'·'}</span>
-              </div>`;
-            }).join('')}
-          </div>
+          <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 4px 4px;overflow:hidden;table-layout:fixed">
+            <thead><tr style="background:#f4f6f9">
+              <th style="padding:4px 8px;text-align:left;font-size:9px;font-weight:800;letter-spacing:.5px;color:#777;text-transform:uppercase">Name</th>
+              ${dayHdr}
+              <th style="padding:4px 2px;text-align:right;font-size:9px;font-weight:800;letter-spacing:.5px;color:#777;width:30px">∑</th>
+            </tr></thead>
+            <tbody>
+              ${people.map(p => {
+                const key = (p.name||'').toLowerCase().trim();
+                const b = totalsById[p.id] || totalsByName[key] || null;
+                const total = b ? b.total : 0;
+                const hasHrs = total > 0;
+                return `<tr style="border-top:1px solid #f0f3f8${hasHrs?';background:#eff6ff':''}">
+                  <td style="padding:4px 8px;font-size:11.5px;color:#1a1a1a;${hasHrs?'font-weight:600;':''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.name||'')}</td>
+                  ${TS_DAYS.map(d => {
+                    const v = b && b[d] ? b[d] : 0;
+                    const isSel = TS.selectedDay === d;
+                    return `<td style="padding:3px 2px;text-align:center;font-size:10.5px;font-variant-numeric:tabular-nums;color:${v?'#1565c0':'#d0d7e2'};font-weight:${v?'800':'400'};background:${isSel && v?'#dbeafe':'transparent'}">${v||'·'}</td>`;
+                  }).join('')}
+                  <td style="padding:3px 4px;text-align:right;font-size:11.5px;font-variant-numeric:tabular-nums;font-weight:${hasHrs?'800':'400'};color:${hasHrs?'#1565c0':'#bbb'}">${total||'·'}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
         </div>`;
       }).join('')}
     </div>`;

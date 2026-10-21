@@ -2689,7 +2689,11 @@ function hrSave() {
 function hrGetColours() {
   try {
     const c = JSON.parse(localStorage.getItem('kaefer_v2_hr_colours') || 'null');
-    if (Array.isArray(c) && c.length) return c;
+    // Legacy data may lack the 'white' Ready status or have the old order.
+    // Force the canonical order (Ready → Complete → Rescheduled → ...) so clicking cycles the way you expect.
+    if (Array.isArray(c) && c.length && c[0] && c[0].id === 'white' && c[1] && c[1].id === 'green' && c[2] && c[2].id === 'orange') {
+      return c;
+    }
   } catch(e) {}
   return HR_DEFAULT_COLOURS;
 }

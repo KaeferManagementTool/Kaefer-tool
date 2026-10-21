@@ -3081,6 +3081,14 @@ function hrScaffoldPicker(r) {
 
 function hrToggleTs(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
+  // When ticking ON, make sure the Day column is set — that's what drives the Time Sheet day tabs
+  if (!r.onTs && !r.day) {
+    const pick = (prompt('Which day of the week is this job for?\n\nType MON / TUE / WED / THU / FRI / SAT / SUN (or leave blank to leave the day unset):', DAYS_UP[(new Date().getDay()+6)%7]) || '').trim().toLowerCase();
+    if (pick) {
+      const idx = DAYS.indexOf(pick.slice(0,3));
+      if (idx >= 0) r.day = DAYS[idx];
+    }
+  }
   r.onTs = !r.onTs;
   hrSave(); hrRender();
 }
@@ -7704,6 +7712,7 @@ setInterval(() => {
 const TS = {
   weekStart: '',       // Monday of the active week (YYYY-MM-DD)
   jobs: {},            // { [hrRowId]: { workOrder, operation, workCentre, progress, assignments:[{personId,name,hrs:{mon,tue,wed,thu,fri,sat,sun}}] } }
+  selectedDay: '',     // '' = all days, or one of mon/tue/wed/thu/fri/sat/sun
   _sheetJsLoading: false
 };
 const TS_LS = {
@@ -7761,6 +7770,10 @@ function render_timesheet(stage, tabCfg) {
   if (!TS.weekStart) {
     tsLoadCurrent();
     if (!TS.weekStart) TS.weekStart = tsMondayOf();
+  }
+  // Default the day filter to today (so you land straight on today's jobs)
+  if (TS.selectedDay === undefined || TS.selectedDay === null) {
+    TS.selectedDay = TS_DAYS[(new Date().getDay() + 6) % 7];
   }
   const tmpl = tsGetTemplate();
   if (!tmpl) { tsRenderUpload(stage); return; }
@@ -7862,6 +7875,23 @@ function tsRenderMain(stage) {
         <button class="btn-ghost" onclick="tsArchiveWeek()" title="Save a filled copy to archive and clear the current week — blank template stays">📦 Archive this week</button>
       </div>
 
+      <!-- Day switcher — shows only jobs tagged to that day, with just that day's hour column -->
+      <div style="display:flex;gap:4px;padding:0 14px 10px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:10px;font-weight:800;letter-spacing:1.5px;color:#777;text-transform:uppercase;margin-right:6px">DAY:</span>
+        ${(() => {
+          const dayCounts = tsJobCountsByDay();
+          const total = Object.values(dayCounts).reduce((s,v) => s+v, 0);
+          const allOn = TS.selectedDay === '';
+          const tabs = ['', ...TS_DAYS];
+          return tabs.map(d => {
+            const on  = TS.selectedDay === d;
+            const lbl = d ? (TS_DAYS_UP[TS_DAYS.indexOf(d)].slice(0,3) + ' ' + tsFmtDisplay(tsDateForDay(ws, TS_DAYS.indexOf(d)).toISOString().slice(0,10)).slice(0,5)) : 'ALL';
+            const cnt = d ? (dayCounts[d] || 0) : total;
+            return `<button onclick="tsSelectDay('${d}')" style="padding:6px 12px;border:2px solid ${on?'#1565c0':'var(--line)'};background:${on?'#1565c0':'#fff'};color:${on?'#fff':'#333'};border-radius:6px;font-size:11.5px;font-weight:800;cursor:pointer;letter-spacing:.3px">${lbl} <span style="opacity:.8;font-size:10px;font-weight:600">· ${cnt}</span></button>`;
+          }).join('');
+        })()}
+      </div>
+
       <div style="display:grid;grid-template-columns:1fr 260px;gap:0;align-items:start">
         <div id="ts-body" style="padding:14px;min-width:0"></div>
         <div id="ts-sidebar" style="padding:14px 14px 14px 0;border-left:1px solid var(--line);background:#fafbfc"></div>
@@ -7957,6 +7987,19 @@ function tsCollectHrJobs() {
   });
 }
 
+// How many ticked jobs sit on each day? Used to badge the day tabs.
+function tsJobCountsByDay() {
+  const out = { mon:0, tue:0, wed:0, thu:0, fri:0, sat:0, sun:0 };
+  (HR.rows || []).filter(r => r && r.onTs).forEach(r => { if (r.day && out[r.day] != null) out[r.day]++; });
+  return out;
+}
+
+function tsSelectDay(d) {
+  TS.selectedDay = d || '';
+  tsSaveCurrent();
+  tsRenderMain(document.getElementById('stage'));
+}
+
 function tsSetWeek(dateStr) {
   TS.weekStart = tsMondayOf(dateStr);
   tsSaveCurrent();
@@ -7972,18 +8015,31 @@ function tsRenderBody() {
   const wrap = document.getElementById('ts-body');
   if (!wrap) return;
   tsRenderSidebar();  // keep running totals in sync whenever the grid re-renders
-  const jobKeys = Object.keys(TS.jobs);
+  let jobKeys = Object.keys(TS.jobs);
+  // Filter to only the jobs on the selected day (if any)
+  if (TS.selectedDay) {
+    jobKeys = jobKeys.filter(jk => {
+      const hr = HR.rows.find(r => r.id === jk);
+      return hr && hr.day === TS.selectedDay;
+    });
+  }
   if (!jobKeys.length) {
+    const msg = TS.selectedDay
+      ? 'No jobs tagged for ' + TS_DAYS_UP[TS_DAYS.indexOf(TS.selectedDay)] + '. In Hours Register, set the Day column on each ticked job to one of MON..SUN.'
+      : 'Go to the <b>Hours Register</b>, tick the <b>📝 TS</b> box on any job that belongs on the Rio Tinto time sheet for this week.';
     wrap.innerHTML = `<div style="padding:40px 20px;text-align:center;background:#fafafa;border:2px dashed var(--line);border-radius:var(--r-md);color:#555">
       <div style="font-size:40px;margin-bottom:10px">📝</div>
-      <h3 style="margin:0 0 6px">No jobs ticked for the time sheet</h3>
-      <p style="color:var(--mute);margin:0">Go to the <b>Hours Register</b>, tick the <b>📝 TS</b> box on any job that belongs on the Rio Tinto time sheet for this week.</p>
+      <h3 style="margin:0 0 6px">No jobs ${TS.selectedDay ? 'for this day' : 'ticked for the time sheet'}</h3>
+      <p style="color:var(--mute);margin:0">${msg}</p>
     </div>`;
     return;
   }
-  const dayHeaders = TS_DAYS_UP.map((d,i) => {
+  // Day columns to render per crew row: all 7 if ALL selected, or just one
+  const dayList = TS.selectedDay ? [TS.selectedDay] : TS_DAYS;
+  const dayHeaders = dayList.map(d => {
+    const i = TS_DAYS.indexOf(d);
     const date = tsDateForDay(TS.weekStart, i);
-    return `<th style="text-align:center;font-size:9.5px;padding:5px 3px;background:#1565c0;color:#fff">${d.slice(0,3)}<br><span style="font-weight:400;opacity:.85">${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}</span></th>`;
+    return `<th style="text-align:center;font-size:11px;padding:7px 10px;background:#1565c0;color:#fff">${TS_DAYS_UP[i].slice(0,3)}<br><span style="font-weight:400;opacity:.85">${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}</span></th>`;
   }).join('');
 
   wrap.innerHTML = jobKeys.map(jk => {
@@ -7991,9 +8047,10 @@ function tsRenderBody() {
     const hr = HR.rows.find(r => r.id === jk);
     const title = (hr && hr.desc) || job.description || 'Job';
     const assignRows = (job.assignments || []).map((a, idx) => {
-      const dayCells = TS_DAYS.map(d => {
+      const dayCells = dayList.map(d => {
         const v = (a.hrs && a.hrs[d] != null) ? a.hrs[d] : '';
-        return `<td style="padding:2px"><input type="number" min="0" step="0.5" value="${v}" oninput="tsSetHrs('${jk}',${idx},'${d}',this.value)" style="width:48px;padding:4px 5px;border:1px solid var(--line);border-radius:3px;font-size:12px;text-align:center;font-variant-numeric:tabular-nums"></td>`;
+        const w = TS.selectedDay ? '80' : '48';
+        return `<td style="padding:2px"><input type="number" min="0" step="0.5" value="${v}" oninput="tsSetHrs('${jk}',${idx},'${d}',this.value)" style="width:${w}px;padding:5px;border:1px solid var(--line);border-radius:3px;font-size:13px;text-align:center;font-variant-numeric:tabular-nums;font-weight:700"></td>`;
       }).join('');
       return `<tr style="background:#fff">
         <td style="padding:5px 8px;font-size:12px;font-weight:600">${escHtml(a.name || '')}</td>

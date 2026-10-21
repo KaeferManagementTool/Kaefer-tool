@@ -9406,13 +9406,58 @@ function saveTabOrder() {
   try { localStorage.setItem('kaefer_v2_tab_order', JSON.stringify(TABS.map(t => t.id))); } catch(e) {}
 }
 
+/* ----- Nested tabs: user-defined parent-child relationships ----- */
+function tabGetParents() {
+  try { return JSON.parse(localStorage.getItem('kaefer_v2_tab_parents') || '{}'); }
+  catch(e) { return {}; }
+}
+function tabSetParent(childId, parentId) {
+  const map = tabGetParents();
+  if (!parentId || parentId === childId) delete map[childId];
+  else {
+    // Prevent cycles: walk up from parentId; if we hit childId, refuse
+    let cur = parentId, hops = 0;
+    while (cur && hops < 50) { if (cur === childId) return false; cur = map[cur]; hops++; }
+    map[childId] = parentId;
+  }
+  localStorage.setItem('kaefer_v2_tab_parents', JSON.stringify(map));
+  return true;
+}
+function tabParentOf(id) { return tabGetParents()[id] || ''; }
+function tabChildrenOf(parentId) {
+  const map = tabGetParents();
+  return TABS.filter(t => map[t.id] === parentId);
+}
+function tabTopLevel() {
+  const map = tabGetParents();
+  return TABS.filter(t => !map[t.id] || !TABS.find(x => x.id === map[t.id]));
+}
+// For a given tab, return the chain [topLevelAncestor, ..., tab]
+function tabChain(id) {
+  const chain = [];
+  let cur = id, hops = 0;
+  while (cur && hops < 50) {
+    const t = TABS.find(x => x.id === cur);
+    if (!t) break;
+    chain.unshift(t);
+    cur = tabParentOf(cur); hops++;
+  }
+  return chain;
+}
+
 function renderTabs() {
   const el = document.getElementById('tabs');
-  el.innerHTML = TABS.map((t, i) =>
-    `<button class="tab" draggable="true" data-idx="${i}" style="--accent:${t.accent}" aria-current="${t.id===ACTIVE}" onclick="setTab('${t.id}')">
-       <span class="dot"></span>${t.label}
-     </button>`
-  ).join('');
+  const chain = tabChain(ACTIVE);
+  const activeTopId = chain.length ? chain[0].id : ACTIVE;
+  const top = tabTopLevel();
+  el.innerHTML = top.map((t, i) => {
+    const childCount = tabChildrenOf(t.id).length;
+    const marker = childCount ? '<span style="opacity:.65;margin-left:4px;font-size:10px">▾</span>' : '';
+    return `<button class="tab" draggable="true" data-idx="${i}" data-id="${t.id}" style="--accent:${t.accent}" aria-current="${t.id===activeTopId}" onclick="setTab('${t.id}')">
+       <span class="dot"></span>${t.label}${marker}
+     </button>`;
+  }).join('')
+    + `<button class="tab" title="Organize tabs — nest tabs under others" onclick="tabsOpenNestingSettings()" style="--accent:#607d8b;margin-left:auto;opacity:.75"><span class="dot"></span>⚙</button>`;
   wireTabDrag();
 }
 
@@ -9440,17 +9485,142 @@ function wireTabDrag() {
 }
 
 function setTab(id) {
+  // If a parent tab was clicked, drop into its remembered sub-tab (or first child)
+  const children = tabChildrenOf(id);
+  if (children.length) {
+    const remembered = (() => { try { return JSON.parse(localStorage.getItem('kaefer_v2_tab_lastchild') || '{}')[id] || ''; } catch(e) { return ''; } })();
+    if (remembered && children.find(c => c.id === remembered)) id = remembered;
+    else id = children[0].id;
+  }
   ACTIVE = id;
-  document.querySelectorAll('.tab').forEach((b,i)=>{
-    b.setAttribute('aria-current', TABS[i].id===id);
-  });
+  // Remember this as the active child for every ancestor
+  const chain = tabChain(id);
+  if (chain.length > 1) {
+    try {
+      const last = JSON.parse(localStorage.getItem('kaefer_v2_tab_lastchild') || '{}');
+      for (let i = 0; i < chain.length - 1; i++) last[chain[i].id] = id;
+      localStorage.setItem('kaefer_v2_tab_lastchild', JSON.stringify(last));
+    } catch(e) {}
+  }
+  renderTabs();  // repaint main bar so the active top-level pill updates
   renderStage();
-  // auto-collapse mobile nav after a pick
   if (window.innerWidth <= 820) document.getElementById('tabwrap').classList.add('collapsed');
+}
+// Called by sub-tab buttons — picks a specific child without the "remember & redirect" dance
+function setSubTab(id) {
+  ACTIVE = id;
+  const chain = tabChain(id);
+  if (chain.length > 1) {
+    try {
+      const last = JSON.parse(localStorage.getItem('kaefer_v2_tab_lastchild') || '{}');
+      for (let i = 0; i < chain.length - 1; i++) last[chain[i].id] = id;
+      localStorage.setItem('kaefer_v2_tab_lastchild', JSON.stringify(last));
+    } catch(e) {}
+  }
+  renderTabs();
+  renderStage();
+}
+
+// Prepend a sub-tab strip to #stage when the active tab is nested or has children
+function tabsInjectSubBar(t) {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  // Remove any existing sub bar first
+  const old = document.getElementById('tabs-sub-bar');
+  if (old) old.remove();
+  const chain = tabChain(t.id);
+  const topLevel = chain[0];
+  const children = tabChildrenOf(topLevel.id);
+  if (!children.length) return;  // not a nested group
+  // Build siblings = parent + its children
+  const siblings = [topLevel, ...children];
+  const bar = document.createElement('div');
+  bar.id = 'tabs-sub-bar';
+  bar.style.cssText = 'display:flex;gap:2px;padding:8px 14px 0;background:var(--surface-2);border-bottom:1px solid var(--line);align-items:flex-end;flex-wrap:wrap;position:sticky;top:0;z-index:5';
+  bar.innerHTML = siblings.map(s => {
+    const on = s.id === t.id;
+    return `<button onclick="setSubTab('${s.id}')" title="${escHtml(s.desc||'')}" style="padding:8px 16px;border:1px solid ${on?'var(--line)':'transparent'};border-bottom:${on?'1px solid var(--surface)':'1px solid var(--line)'};background:${on?'var(--surface)':'transparent'};color:${on?s.accent:'#555'};border-radius:var(--r-sm) var(--r-sm) 0 0;cursor:pointer;font-weight:${on?'800':'600'};font-size:12.5px;margin-bottom:-1px;letter-spacing:.3px">${s.id===topLevel.id?'⬆ ':''}${s.label}</button>`;
+  }).join('');
+  stage.insertBefore(bar, stage.firstChild);
+}
+
+// Settings modal — assign a parent for every tab
+function tabsOpenNestingSettings() {
+  const existing = document.getElementById('tab-nest-ml');
+  if (existing) existing.remove();
+  const parents = tabGetParents();
+  const ml = document.createElement('div');
+  ml.id = 'tab-nest-ml';
+  ml.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ml.innerHTML = `
+    <div style="background:#fff;border-radius:var(--r-md);max-width:720px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="background:#607d8b;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-weight:800;font-size:14px;letter-spacing:.5px">⚙ ORGANIZE TABS</span>
+        <div style="flex:1"></div>
+        <button onclick="document.getElementById('tab-nest-ml').remove()" style="background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:14px 20px;background:#fafbfc;border-bottom:1px solid var(--line);font-size:12px;color:#555;line-height:1.5">
+        Pick a <b>parent</b> for any tab to tuck it inside another. Nested tabs disappear from the top bar — a sub-tab strip appears above the content of their parent. Leave as <b>— none (top-level) —</b> to keep a tab in the main bar.
+        <button class="btn-ghost btn-danger" style="margin-left:10px;padding:3px 10px;font-size:11px" onclick="tabsClearAllNesting()">Reset all</button>
+      </div>
+      <div style="padding:14px 20px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:#f4f6f9">
+            <th style="text-align:left;padding:8px;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase">Tab</th>
+            <th style="text-align:left;padding:8px;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase">Parent</th>
+          </tr></thead>
+          <tbody>
+            ${TABS.slice().sort((a,b)=>a.label.localeCompare(b.label)).map(t => {
+              const curParent = parents[t.id] || '';
+              const options = TABS.filter(x => x.id !== t.id && !tabWouldCycle(t.id, x.id, parents))
+                                  .sort((a,b)=>a.label.localeCompare(b.label))
+                                  .map(x => `<option value="${x.id}" ${curParent===x.id?'selected':''}>${escHtml(x.label)}</option>`).join('');
+              return `<tr style="border-top:1px solid #f0f3f8">
+                <td style="padding:7px 8px;font-size:12.5px;font-weight:600"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${t.accent};margin-right:7px;vertical-align:middle"></span>${escHtml(t.label)}</td>
+                <td style="padding:4px 8px">
+                  <select onchange="tabsSetParentUi('${t.id}', this.value)" style="padding:5px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;min-width:220px">
+                    <option value="">— none (top-level) —</option>
+                    ${options}
+                  </select>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:12px 20px;background:#fafbfc;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn" style="background:#607d8b" onclick="document.getElementById('tab-nest-ml').remove()">Done</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ml);
+}
+function tabWouldCycle(childId, candidateParentId, parentsMap) {
+  // Walk upwards from candidateParentId — if we'd land on childId, that's a cycle
+  let cur = candidateParentId, hops = 0;
+  while (cur && hops < 50) { if (cur === childId) return true; cur = parentsMap[cur]; hops++; }
+  return false;
+}
+function tabsSetParentUi(childId, parentId) {
+  const ok = tabSetParent(childId, parentId);
+  if (!ok) { alert('That would create a cycle (parent of parent eventually points back to this tab). Pick a different parent.'); return; }
+  renderTabs();
+  // Reopen the modal so the dropdowns refresh with new cycle constraints
+  tabsOpenNestingSettings();
+}
+function tabsClearAllNesting() {
+  if (!confirm('Clear all nesting and return every tab to the top-level bar?')) return;
+  localStorage.removeItem('kaefer_v2_tab_parents');
+  renderTabs();
+  tabsOpenNestingSettings();
 }
 
 function renderStage() {
   const t = TABS.find(x => x.id === ACTIVE);
+  // Wrap the real dispatcher so we can always inject the sub-tab bar after rendering.
+  _renderStageInner(t);
+  tabsInjectSubBar(t);
+}
+function _renderStageInner(t) {
   const stage = document.getElementById('stage');
   if (t.id === 'dashboard') {
     stage.innerHTML = renderDashboard();

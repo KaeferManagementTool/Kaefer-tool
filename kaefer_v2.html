@@ -8105,6 +8105,10 @@ function tsRenderBody() {
             <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">PROGRESS</div>
             <select onchange="TS.jobs['${jk}'].progress=this.value;tsSaveCurrent()" style="padding:4px 7px;border:1px solid var(--line);border-radius:3px;font-size:12px">${progressOpts}</select>
           </div>
+          <div>
+            <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">&nbsp;</div>
+            <button class="btn" style="background:#2e7d32;padding:5px 12px;font-size:12px;font-weight:800" onclick="tsConfirmToHr('${jk}')" title="Push the scaffolder hours back to the Hours Register — fills hours total, Erect/Dismantle/Modify column based on Progress, and marks hours complete">✓ Confirm to HR</button>
+          </div>
         </div>
 
         <div style="padding:10px 14px;background:#fafafa;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);flex-wrap:wrap">
@@ -8160,6 +8164,65 @@ function tsAddPerson(jk, personId) {
   tsSaveCurrent();
   tsRenderBody();
 }
+// Push the time sheet entry back into the Hours Register:
+//   - sum scaffolder-only hours (office/yard excluded)
+//   - drop total into Erect / Dismantle / Modify column based on the Progress dropdown
+//   - mark hours cell green
+//   - set Percent to 100 if Progress ends with "Complete"
+function tsConfirmToHr(jk) {
+  if (typeof HR === 'undefined' || !HR.rows) { alert('Hours Register not loaded.'); return; }
+  const job = TS.jobs[jk]; if (!job) return;
+  const hr = HR.rows.find(r => r.id === jk);
+  if (!hr) { alert('Can\'t find the Hours Register row for this job (it may have been archived).'); return; }
+
+  // Scaffolder-only hours
+  let scaffHrs = 0;
+  let scaffCount = 0;
+  (job.assignments || []).forEach(a => {
+    const person = (typeof tsMatchPerson === 'function') ? tsMatchPerson(a) : null;
+    const group = person ? person.group : '';
+    // Default to counting them as a scaffolder when we can't match (safer for the register)
+    const isScaff = !group || group === 'SCAFFOLDERS';
+    if (!isScaff) return;
+    let t = 0;
+    Object.values(a.hrs || {}).forEach(h => { const n = Number(h); if (isFinite(n)) t += n; });
+    if (t > 0) { scaffHrs += t; scaffCount++; }
+  });
+
+  if (!scaffHrs) {
+    if (!confirm('No scaffolder hours on this job yet. Still mark the Hours Register row as complete?')) return;
+  }
+
+  // Decide which bucket based on Progress
+  const prog = (job.progress || '').toLowerCase();
+  let bucket = 'erect';
+  if (prog.indexOf('dismantle') >= 0)      bucket = 'dismantle';
+  else if (prog.indexOf('mod') >= 0)       bucket = 'modify';
+  else if (prog.indexOf('erect') >= 0)     bucket = 'erect';
+  // Everything else (Ongoing, Complete, Laydown etc.) defaults to erect — adjust manually if needed
+
+  const prevBucket = hr[bucket];
+  const prevHours  = hr.hours;
+  const prevStatus = hr.hoursStatus;
+  const prevPct    = hr.percent;
+
+  hr[bucket] = scaffHrs > 0 ? String(scaffHrs) : hr[bucket];
+  hr.hours = scaffHrs > 0 ? String(scaffHrs) : hr.hours;
+  hr.hoursStatus = 'green';
+  if (prog.indexOf('complete') >= 0) hr.percent = '100';
+
+  hrSave();
+  if (ACTIVE === 'hours' && typeof hrRender === 'function') hrRender();
+
+  const bucketLabel = bucket.charAt(0).toUpperCase() + bucket.slice(1);
+  alert('✓ Pushed to Hours Register:\n\n'
+    + '  • ' + bucketLabel + ' hours: ' + prevBucket + ' → ' + hr[bucket] + '\n'
+    + '  • Total hours: ' + prevHours + ' → ' + hr.hours + '\n'
+    + '  • Hours status: ' + (prevStatus||'(blank)') + ' → green\n'
+    + (prog.indexOf('complete') >= 0 ? '  • Percent: ' + (prevPct||'(blank)') + ' → 100%\n' : '')
+    + '  • Scaffolders counted: ' + scaffCount + '  (Office/Yard excluded)');
+}
+
 // One-click: adds every active Office Staff + Yard Staff to the given job
 function tsAddOfficeYard(jk) {
   if (typeof ATT2 === 'undefined' || !ATT2.persons) return;

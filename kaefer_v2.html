@@ -6697,8 +6697,15 @@ function subParseDate(v) {
   if (!v) return null;
   if (v instanceof Date) return isNaN(v) ? null : v;
   const s = String(v).trim();
-  // ISO yyyy-mm-dd (optionally with time)
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  // Full ISO timestamp with Z (UTC) — e.g. "2026-10-19T14:00:00.000Z" is actually 20 Oct 00:00 Brisbane.
+  // Parse as a UTC moment, then rebuild using the LOCAL wall-clock date so the user sees the day they picked.
+  if (/^\d{4}-\d{1,2}-\d{1,2}T.*Z$/.test(s)) {
+    const utc = new Date(s);
+    if (isNaN(utc)) return null;
+    return new Date(utc.getFullYear(), utc.getMonth(), utc.getDate());
+  }
+  // Plain ISO yyyy-mm-dd (no time) — treat as a calendar date in local time
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) { const d = new Date(+m[1], +m[2]-1, +m[3]); return isNaN(d) ? null : d; }
   // dd/mm/yyyy or dd-mm-yyyy (also 2-digit yr)
   m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
@@ -6706,8 +6713,10 @@ function subParseDate(v) {
     let y = +m[3]; if (y < 100) y += (y < 50 ? 2000 : 1900);
     const d = new Date(y, +m[2]-1, +m[1]); return isNaN(d) ? null : d;
   }
-  // Last resort: let JS try
-  const d = new Date(s); return isNaN(d) ? null : d;
+  // Last resort: let JS parse, then normalise to local wall-clock date
+  const d = new Date(s);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
 // Fuzzy roster match: exact → startsWith → first-name match → surname match

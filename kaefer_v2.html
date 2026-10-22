@@ -3893,14 +3893,12 @@ function render_daily(stage, tabCfg) {
   }
   // Resolve the source of jobs for this view
   let dailySource;
-  if (DAILY.weekSource === 'archive') {
-    const archive = hrGetArchive();
-    const entry = archive[DAILY.archiveIdx] || archive[0];
+  if (DAILY.weekSource === 'last') {
+    // "Last week" = the most recent archived week — rolls over every Monday when Next is promoted
+    const entry = hrGetArchive()[0];
     dailySource = (entry && Array.isArray(entry.rows)) ? entry.rows : [];
-    // Pick dates present in this archived week so the day picker works naturally
     if (entry && Array.isArray(entry.rows)) {
       const dates = [...new Set(entry.rows.map(r => r.date).filter(Boolean))].sort();
-      // If current DAILY.date isn't inside this archived week, snap to the week's first date
       if (dates.length && !dates.includes(DAILY.date)) DAILY.date = dates[0];
     }
   } else {
@@ -3908,7 +3906,7 @@ function render_daily(stage, tabCfg) {
   }
   const todayJobs = dailySource.filter(r =>
     r.day === dayShort || r.day2 === dayShort
-    || (DAILY.weekSource === 'archive' && r.date === dateKey) // in archive, let plain date-match also show the row
+    || (DAILY.weekSource === 'last' && r.date === dateKey) // in last-week, let plain date-match also show the row
   );
   const d0 = new Date(dateKey+'T00:00:00');
   const activePeople = ATT2.persons.filter(p => {
@@ -3941,20 +3939,13 @@ function render_daily(stage, tabCfg) {
     <div class="card" id="daily-card" ${DAILY.bigScreen?'style="box-shadow:none;border:0"':''}>
       <div class="card-h" style="background:${DAILY.bigScreen?'#1a1a1a':'var(--surface-2)'}">
         <span class="accent" style="--accent:${KAEFER_RED}"></span>
-        <h2 style="${DAILY.bigScreen?'color:#fff;font-size:20px':''}">Daily Meeting · <span style="color:${KAEFER_RED}">${dayUp}</span>${DAILY.weekSource==='next'?' <span style="background:#f57c00;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">NEXT WEEK</span>':''}${DAILY.weekSource==='archive'?' <span style="background:#546e7a;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">ARCHIVE · READ ONLY</span>':''}</h2>
+        <h2 style="${DAILY.bigScreen?'color:#fff;font-size:20px':''}">Daily Meeting · <span style="color:${KAEFER_RED}">${dayUp}</span>${DAILY.weekSource==='next'?' <span style="background:#f57c00;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">NEXT WEEK</span>':''}${DAILY.weekSource==='last'?' <span style="background:#546e7a;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">LAST WEEK · READ ONLY</span>':''}</h2>
         <!-- Week source toggle -->
         <div style="display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;border:1px solid var(--line);margin-left:12px">
+          <button onclick="dmSetWeekSource('last')"    style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='last'?'#546e7a':'transparent'};color:${DAILY.weekSource==='last'?'#fff':'var(--mute)'}" title="Read-only snapshot of last week — who was on which crew, which jobs ran. Gets replaced each Monday when Next → Current.">Last week${(hrGetArchive()[0]?.rows?.length)?` (${hrGetArchive()[0].rows.length})`:''}</button>
           <button onclick="dmSetWeekSource('current')" style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='current'?'var(--t-daily)':'transparent'};color:${DAILY.weekSource==='current'?'#fff':'var(--mute)'}">Current</button>
           <button onclick="dmSetWeekSource('next')"    style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='next'?'#f57c00':'transparent'};color:${DAILY.weekSource==='next'?'#fff':'var(--mute)'}" title="Prep next week's crew assignments without affecting the live current week">Next week${(HR.next&&HR.next.length)?` (${HR.next.length})`:''}</button>
-          <button onclick="dmSetWeekSource('archive')" style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='archive'?'#546e7a':'transparent'};color:${DAILY.weekSource==='archive'?'#fff':'var(--mute)'}" title="Browse past weeks — who was on which crew, which jobs ran">Archive (${hrGetArchive().length})</button>
         </div>
-        ${DAILY.weekSource==='archive' ? (() => {
-          const arch = hrGetArchive();
-          if (!arch.length) return '<div style="margin-left:10px;font-size:11px;color:#999;font-style:italic">No archived weeks yet</div>';
-          return `<select onchange="DAILY.archiveIdx=+this.value;render_daily(document.getElementById('stage'))" style="margin-left:10px;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;font-weight:600;background:#fff;min-width:180px">
-            ${arch.map((a,i) => `<option value="${i}" ${i===DAILY.archiveIdx?'selected':''}>${escHtml(a.label||'(unlabelled)')} · ${a.rows.length} jobs</option>`).join('')}
-          </select>`;
-        })() : ''}
         <input type="date" value="${dateKey}" onchange="DAILY.date=this.value;render_daily(document.getElementById('stage'))" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;margin-left:12px">
         <button class="btn-ghost" style="margin-left:6px" onclick="DAILY.date=new Date().toISOString().slice(0,10);render_daily(document.getElementById('stage'))">Today</button>
         <div style="flex:1"></div>
@@ -4173,11 +4164,9 @@ function dmSetWeekSource(src) {
     const nextMon = new Date(now);
     nextMon.setDate(now.getDate() + daysUntilNextMon);
     DAILY.date = nextMon.getFullYear() + '-' + String(nextMon.getMonth()+1).padStart(2,'0') + '-' + String(nextMon.getDate()).padStart(2,'0');
-  } else if (src === 'archive') {
-    // Default to the most recent archived week and its first date
-    DAILY.archiveIdx = 0;
-    const arch = hrGetArchive();
-    const first = arch[0];
+  } else if (src === 'last') {
+    // Jump to the first date of the most recently archived (= last) week
+    const first = hrGetArchive()[0];
     if (first && Array.isArray(first.rows)) {
       const dates = [...new Set(first.rows.map(r => r.date).filter(Boolean))].sort();
       if (dates.length) DAILY.date = dates[0];

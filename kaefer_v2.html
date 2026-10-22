@@ -2683,10 +2683,18 @@ async function inspDelete(id) {
    HOURS REGISTER — paste from Excel, edit through the week
 ============================================================ */
 const HR = {
-  rows: [],        // {id, date, planner, order, op, loc, desc, short, hours, status, notes, days:{mon:bool,tue:bool,...}}
+  rows: [],         // ACTIVE week rows — aliased to either HR.current or HR.next by hrSetActiveSet()
+  current: [],      // Current week rows (visible when viewMode='current')
+  next: [],         // Next week rows prepped ahead of time (visible when viewMode='next')
   loaded: false,
-  weekLabel: ''    // e.g. "WEEK 42 2026"
+  weekLabel: '',    // current week label e.g. "WEEK 42 2026"
+  weekLabelNext: '',// label of the next week being prepped
+  viewMode: 'current'
 };
+// Point HR.rows at the right backing array for the current view mode.
+function hrSetActiveSet() {
+  HR.rows = (HR.viewMode === 'next') ? HR.next : HR.current;
+}
 const HR_DEFAULT_COLOURS = [
   { id:'white',  bg:'#ffffff', fg:'#1a1a1a', label:'Ready' },         // default for brand-new jobs in current week
   { id:'green',  bg:'#c8e6c9', fg:'#1b5e20', label:'Complete' },
@@ -2703,14 +2711,22 @@ const DAYS_UP = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 function hrLoad() {
   try {
     const saved = JSON.parse(localStorage.getItem('kaefer_v2_hours') || '{}');
-    HR.rows = Array.isArray(saved.rows) ? saved.rows : [];
+    HR.current = Array.isArray(saved.rows) ? saved.rows : [];
     HR.weekLabel = saved.weekLabel || '';
-  } catch(e) { HR.rows = []; HR.weekLabel = ''; }
+  } catch(e) { HR.current = []; HR.weekLabel = ''; }
+  try {
+    const nextSaved = JSON.parse(localStorage.getItem('kaefer_v2_hours_next') || '{}');
+    HR.next = Array.isArray(nextSaved.rows) ? nextSaved.rows : [];
+    HR.weekLabelNext = nextSaved.weekLabel || '';
+  } catch(e) { HR.next = []; HR.weekLabelNext = ''; }
   HR.loaded = true;
+  hrSetActiveSet();
   if (ACTIVE === 'hours') hrRender();
 }
 function hrSave() {
-  localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.rows, weekLabel: HR.weekLabel }));
+  // Write back whichever set is active (HR.rows is an alias) and persist both to their own keys
+  if (HR.viewMode === 'next') { HR.next = HR.rows; localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next, weekLabel: HR.weekLabelNext })); }
+  else { HR.current = HR.rows; localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel })); }
 }
 function hrGetColours() {
   try {
@@ -2734,8 +2750,9 @@ function render_hours(stage, tabCfg) {
         <h2>Hours Register</h2>
         <span class="sub" id="hr-sub">Weekly plan · pasted from your Excel register</span>
         <div style="margin-left:auto;display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;border:1px solid var(--line)">
-          <button id="hr-mode-cur"  onclick="hrSetMode('current')"  style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:var(--t-hours);color:#fff">Current week</button>
-          <button id="hr-mode-arch" onclick="hrSetMode('archive')"  style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--mute)">Archive (${archive.length})</button>
+          <button id="hr-mode-cur"  onclick="hrSetMode('current')" style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:var(--t-hours);color:#fff">Current week</button>
+          <button id="hr-mode-next" onclick="hrSetMode('next')"    style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--mute)" title="Prep next week's plan ahead of time — paste it in on Thu/Fri, then promote it to Current on Monday">Next week${(HR.next&&HR.next.length)?` (${HR.next.length})`:''}</button>
+          <button id="hr-mode-arch" onclick="hrSetMode('archive')" style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--mute)">Archive (${archive.length})</button>
         </div>
         <button class="btn-ghost" style="margin-left:12px" onclick="hrOpenPaste()">📋 Paste from Excel</button>
         <button class="btn-ghost" style="margin-left:4px" onclick="hrOpenBulkPaste()" title="Backfill a year of history — paste multiple weeks in one go">📚 Bulk paste (year)</button>
@@ -2751,6 +2768,16 @@ function render_hours(stage, tabCfg) {
         <div class="spacer"></div>
         <button class="btn-ghost" onclick="hrArchiveCurrent()">📦 Archive this week</button>
         <button class="btn-ghost btn-danger" onclick="hrReset()">Reset week</button>
+      </div>
+      <div class="att-ctrls" id="hr-ctrls-next" style="display:none;background:#fff3e0;border-left:4px solid #f57c00">
+        <div class="field" style="flex:1 1 220px"><label>Next week label</label><input type="text" id="hr-wk-next" placeholder="e.g. WEEK 43 2026" value="${escHtml(HR.weekLabelNext||'')}"></div>
+        <div class="field"><label>Add ad-hoc job</label>
+          <button class="btn" style="background:#f57c00" onclick="hrAddBlank()">+ New break-in</button>
+        </div>
+        <div class="spacer"></div>
+        <div style="font-size:11px;color:#555;align-self:center;margin-right:8px;max-width:280px;line-height:1.3"><b>Staging area</b> — these jobs don't appear in Daily Meeting or Time Sheet yet. Promote to Current when ready.</div>
+        <button class="btn" style="background:#f57c00" onclick="hrPromoteNext()" title="Archive the current week and move this next-week plan into Current">→ Promote to Current week</button>
+        <button class="btn-ghost btn-danger" onclick="hrResetNext()">Clear next week</button>
       </div>
       <div class="att-ctrls" id="hr-ctrls-archive" style="display:none">
         <div class="field" style="flex:1 1 360px"><label>Search archive</label><input type="text" id="hr-arch-filter" placeholder="Work order, description, week label, date..." oninput="hrRenderArchive()"></div>
@@ -2789,35 +2816,103 @@ function render_hours(stage, tabCfg) {
   `;
   const wkEl = document.getElementById('hr-wk');
   wkEl.onchange = () => { HR.weekLabel = wkEl.value.trim(); hrSave(); };
+  const wkNextEl = document.getElementById('hr-wk-next');
+  if (wkNextEl) wkNextEl.onchange = () => { HR.weekLabelNext = wkNextEl.value.trim(); hrSave(); };
   HR.viewMode = HR.viewMode || 'current';
   hrSetMode(HR.viewMode);
 }
 
 function hrSetMode(mode) {
   HR.viewMode = mode;
-  const cur = document.getElementById('hr-mode-cur');
-  const arc = document.getElementById('hr-mode-arch');
-  const curCtrls = document.getElementById('hr-ctrls-current');
-  const arcCtrls = document.getElementById('hr-ctrls-archive');
+  hrSetActiveSet();
+  const cur  = document.getElementById('hr-mode-cur');
+  const nxt  = document.getElementById('hr-mode-next');
+  const arc  = document.getElementById('hr-mode-arch');
+  const curCtrls  = document.getElementById('hr-ctrls-current');
+  const nextCtrls = document.getElementById('hr-ctrls-next');
+  const arcCtrls  = document.getElementById('hr-ctrls-archive');
   const sub = document.getElementById('hr-sub');
   if (!cur || !arc) return;
+  // Reset all three buttons to inactive-look
+  const off = b => { if (b) { b.style.background = 'transparent'; b.style.color = 'var(--mute)'; } };
+  off(cur); off(nxt); off(arc);
+  if (curCtrls)  curCtrls.style.display = 'none';
+  if (nextCtrls) nextCtrls.style.display = 'none';
+  if (arcCtrls)  arcCtrls.style.display = 'none';
   if (mode === 'archive') {
-    cur.style.background = 'transparent'; cur.style.color = 'var(--mute)';
     arc.style.background = 'var(--t-hours)'; arc.style.color = '#fff';
-    curCtrls.style.display = 'none'; arcCtrls.style.display = '';
+    if (arcCtrls) arcCtrls.style.display = '';
     sub.textContent = 'Browse all historical weeks';
     hrRenderArchive();
+    return;
+  }
+  if (mode === 'next') {
+    nxt.style.background = '#f57c00'; nxt.style.color = '#fff';
+    if (nextCtrls) nextCtrls.style.display = '';
+    sub.textContent = 'Next week — staging area (paste it in Thu/Fri, promote to Current on Monday)';
   } else {
     cur.style.background = 'var(--t-hours)'; cur.style.color = '#fff';
-    arc.style.background = 'transparent'; arc.style.color = 'var(--mute)';
-    curCtrls.style.display = ''; arcCtrls.style.display = 'none';
+    if (curCtrls) curCtrls.style.display = '';
     sub.textContent = 'Weekly plan · pasted from your Excel register';
-    const archWrap = document.getElementById('hr-arch-wrap');
-    if (archWrap) archWrap.style.display = 'none';
-    const tbl = document.querySelector('#hr-table');
-    if (tbl) tbl.style.display = '';
-    hrRender();
   }
+  const archWrap = document.getElementById('hr-arch-wrap');
+  if (archWrap) archWrap.style.display = 'none';
+  const tbl = document.querySelector('#hr-table');
+  if (tbl) tbl.style.display = '';
+  hrRender();
+}
+
+// Reset the next-week staging area
+function hrResetNext() {
+  if (!HR.next.length) { alert('Next-week staging is already empty.'); return; }
+  if (!confirm('Clear the next-week plan (' + HR.next.length + ' rows)?')) return;
+  HR.next = []; HR.weekLabelNext = '';
+  if (HR.viewMode === 'next') HR.rows = HR.next;
+  hrSave(); hrRender();
+  render_hours(document.getElementById('stage'), null);
+}
+
+// Promote: archive current (if any), then move next → current. One confirm, one alert.
+function hrPromoteNext() {
+  if (!HR.next.length) { alert('Nothing in Next week to promote.'); return; }
+  const curCount = (HR.current||[]).length;
+  const msg = 'Promote Next week to Current?\n\n'
+    + (curCount ? '• Current week (' + curCount + ' rows) will be ARCHIVED first\n' : '• Current week is empty — nothing to archive\n')
+    + '• Next week (' + HR.next.length + ' rows) becomes the new Current\n'
+    + '• Next-week staging is cleared\n\nContinue?';
+  if (!confirm(msg)) return;
+  // Silently archive current if it has rows — reuse the same rescheduled-flagging logic
+  let flipped = 0;
+  if (curCount) {
+    const label = HR.weekLabel || 'WEEK ' + new Date().toLocaleDateString('en-AU');
+    const archiveRows = HR.current.map(r => {
+      const copy = Object.assign({}, r);
+      const isComplete = copy.status === 'green';
+      const isCancelled = copy.status === 'grey';
+      const hasHrs = (parseFloat(copy.hours)||0) > 0;
+      if (copy.planned && !isComplete && !isCancelled && !hasHrs && copy.status !== 'orange') {
+        copy.status = 'orange';
+        flipped++;
+      }
+      return copy;
+    });
+    const archive = hrGetArchive();
+    archive.unshift({ label, archivedAt: new Date().toISOString(), rows: archiveRows });
+    hrSetArchive(archive);
+  }
+  // Move next → current
+  HR.current = HR.next.slice();
+  HR.weekLabel = HR.weekLabelNext || '';
+  HR.next = [];
+  HR.weekLabelNext = '';
+  // Save both buckets explicitly
+  localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel }));
+  localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next, weekLabel: HR.weekLabelNext }));
+  HR.viewMode = 'current';
+  hrSetActiveSet();
+  render_hours(document.getElementById('stage'), null);
+  const flipMsg = flipped ? '\n' + flipped + ' incomplete planned job' + (flipped===1?'':'s') + ' from the archived week auto-flagged as Rescheduled.' : '';
+  alert('✓ Promoted. Current week is now "' + (HR.weekLabel || '(unlabelled)') + '".' + flipMsg);
 }
 
 function hrGetArchive() {
@@ -2846,12 +2941,32 @@ function hrArchiveCurrent() {
   const archive = hrGetArchive();
   archive.unshift({ label, archivedAt: new Date().toISOString(), rows: archiveRows });
   hrSetArchive(archive);
-  HR.rows = []; HR.weekLabel = '';
+  // Clear ONLY the current week (keep Next Week untouched)
+  HR.current.length = 0;
+  HR.weekLabel = '';
+  // If we're currently viewing the current set, re-point HR.rows at the fresh empty one
+  if (HR.viewMode !== 'next') HR.rows = HR.current;
   hrSave();
-  const msg = '✓ Archived "' + label + '" (' + archiveRows.length + ' rows).'
-            + (flipped ? '\n' + flipped + ' incomplete planned job' + (flipped===1?'':'s') + ' auto-flagged as Rescheduled.' : '')
-            + '\n\nYou can start a new week now.';
-  alert(msg);
+  let msg = '✓ Archived "' + label + '" (' + archiveRows.length + ' rows).'
+          + (flipped ? '\n' + flipped + ' incomplete planned job' + (flipped===1?'':'s') + ' auto-flagged as Rescheduled.' : '');
+  // Offer to promote Next Week into Current if it has rows
+  if (HR.next && HR.next.length) {
+    const nextLbl = HR.weekLabelNext || '(unlabelled)';
+    if (confirm(msg + '\n\nPromote Next Week ("' + nextLbl + '", ' + HR.next.length + ' rows) into Current Week?\n\nThe Next Week slot will be cleared after promotion.')) {
+      HR.current = HR.next.slice();
+      HR.weekLabel = HR.weekLabelNext || '';
+      HR.next = [];
+      HR.weekLabelNext = '';
+      HR.viewMode = 'current';
+      hrSetActiveSet();
+      hrSave();
+      alert('✓ Promoted. Current Week is now "' + (HR.weekLabel || '(unlabelled)') + '".');
+    } else {
+      alert(msg + '\n\nNext Week left as-is.');
+    }
+  } else {
+    alert(msg + '\n\nStart next week with Paste from Excel, or prep it in advance via the Next Week tab.');
+  }
   const el = document.getElementById('hr-wk'); if (el) el.value = '';
   render_hours(document.getElementById('stage'), null);
 }
@@ -3184,7 +3299,8 @@ function hrEditField(id, field, val) {
 }
 function hrDelete(id) {
   if (!confirm('Delete this row?')) return;
-  HR.rows = HR.rows.filter(x => x.id !== id);
+  const idx = HR.rows.findIndex(x => x.id === id);
+  if (idx >= 0) HR.rows.splice(idx, 1);
   hrSave(); hrRender();
 }
 function hrAddBlank() {
@@ -3197,10 +3313,14 @@ function hrAddBlank() {
   hrSave(); hrRender();
 }
 function hrReset() {
-  if (!confirm('Clear the whole week? (Rows will be deleted.)')) return;
-  HR.rows = []; HR.weekLabel = '';
+  const which = HR.viewMode === 'next' ? 'Next Week' : 'Current Week';
+  if (!confirm('Clear the whole ' + which + '? (Rows will be deleted.)')) return;
+  HR.rows.length = 0;
+  if (HR.viewMode === 'next') HR.weekLabelNext = '';
+  else HR.weekLabel = '';
   hrSave();
-  document.getElementById('hr-wk').value = '';
+  const wkEl = document.getElementById('hr-wk');
+  if (wkEl) wkEl.value = '';
   hrRender();
 }
 

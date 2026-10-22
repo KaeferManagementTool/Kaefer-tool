@@ -3703,7 +3703,8 @@ function hrSaveColours() {
 const DAILY = {
   date: new Date().toISOString().slice(0,10),
   bigScreen: false,
-  todayOnly: false
+  todayOnly: false,
+  weekSource: 'current'  // 'current' uses HR.current, 'next' uses HR.next — lets you plan next Monday without touching live
 };
 // Base built-in teams — can't be deleted. Custom teams added by Steve live in localStorage and get appended at runtime.
 // Brighter palette tuned to KAEFER site-safety signage saturation.
@@ -3884,7 +3885,9 @@ function render_daily(stage, tabCfg) {
   const dayUp = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
   const focus = dmGetFocus()[dateKey] || '';
 
-  const todayJobs = HR.rows.filter(r => r.day === dayShort || r.day2 === dayShort);
+  // Draw jobs from either the live Current week or the staged Next week — doesn't disturb HR's active mode
+  const dailySource = (DAILY.weekSource === 'next' ? (HR.next || []) : (HR.current || []));
+  const todayJobs = dailySource.filter(r => r.day === dayShort || r.day2 === dayShort);
   const d0 = new Date(dateKey+'T00:00:00');
   const activePeople = ATT2.persons.filter(p => {
     if (!p.group) return false;
@@ -3916,7 +3919,12 @@ function render_daily(stage, tabCfg) {
     <div class="card" id="daily-card" ${DAILY.bigScreen?'style="box-shadow:none;border:0"':''}>
       <div class="card-h" style="background:${DAILY.bigScreen?'#1a1a1a':'var(--surface-2)'}">
         <span class="accent" style="--accent:${KAEFER_RED}"></span>
-        <h2 style="${DAILY.bigScreen?'color:#fff;font-size:20px':''}">Daily Meeting · <span style="color:${KAEFER_RED}">${dayUp}</span></h2>
+        <h2 style="${DAILY.bigScreen?'color:#fff;font-size:20px':''}">Daily Meeting · <span style="color:${KAEFER_RED}">${dayUp}</span>${DAILY.weekSource==='next'?' <span style="background:#f57c00;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">NEXT WEEK</span>':''}</h2>
+        <!-- Week source toggle -->
+        <div style="display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;border:1px solid var(--line);margin-left:12px">
+          <button onclick="dmSetWeekSource('current')" style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='current'?'var(--t-daily)':'transparent'};color:${DAILY.weekSource==='current'?'#fff':'var(--mute)'}">Current</button>
+          <button onclick="dmSetWeekSource('next')"    style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='next'?'#f57c00':'transparent'};color:${DAILY.weekSource==='next'?'#fff':'var(--mute)'}" title="Prep next week's crew assignments without affecting the live current week">Next week${(HR.next&&HR.next.length)?` (${HR.next.length})`:''}</button>
+        </div>
         <input type="date" value="${dateKey}" onchange="DAILY.date=this.value;render_daily(document.getElementById('stage'))" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;margin-left:12px">
         <button class="btn-ghost" style="margin-left:6px" onclick="DAILY.date=new Date().toISOString().slice(0,10);render_daily(document.getElementById('stage'))">Today</button>
         <div style="flex:1"></div>
@@ -4123,6 +4131,23 @@ function renderDailyTeamCards(peopleByTeam, away, dateKey) {
   });
 
   return html;
+}
+
+function dmSetWeekSource(src) {
+  DAILY.weekSource = src;
+  // When flipping to Next week, auto-jump the date to next Monday (if we're currently on this week)
+  if (src === 'next') {
+    const now = new Date();
+    const dow = now.getDay(); // 0=Sun..6=Sat
+    const daysUntilNextMon = ((8 - dow) % 7) || 7;
+    const nextMon = new Date(now);
+    nextMon.setDate(now.getDate() + daysUntilNextMon);
+    DAILY.date = nextMon.getFullYear() + '-' + String(nextMon.getMonth()+1).padStart(2,'0') + '-' + String(nextMon.getDate()).padStart(2,'0');
+  } else {
+    // Back to current — jump to today
+    DAILY.date = new Date().toISOString().slice(0,10);
+  }
+  render_daily(document.getElementById('stage'));
 }
 
 function dailyToggleBigScreen() {

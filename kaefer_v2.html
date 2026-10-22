@@ -8084,8 +8084,9 @@ function tsRenderMain(stage) {
 
 // Right-hand running-totals panel: everyone currently active, grouped Office / Yard / Scaffolders,
 // with a per-person total of hours already written on this week's time sheet.
-// For a weekday index (0=mon..6=sun), return the YYYY-MM-DD matching that day in the currently selected week
-function tsDateForDay(dayIdx) {
+// For a weekday index (0=mon..6=sun), return the YYYY-MM-DD matching that day in the currently selected week.
+// Renamed from tsDateForDay to tsDateIsoForDay to avoid clashing with the existing tsDateForDay (which takes two args and returns a Date).
+function tsDateIsoForDay(dayIdx) {
   if (!TS.weekStart) return '';
   const d = new Date(TS.weekStart + 'T00:00:00');
   d.setDate(d.getDate() + dayIdx);
@@ -8179,7 +8180,7 @@ function tsRenderSidebar() {
                     const v = b && b[d] ? b[d] : 0;
                     const isSel = TS.selectedDay === d;
                     // Resolve the date for this weekday so we can look up the attendance tick
-                    const dayDate = tsDateForDay(di);
+                    const dayDate = tsDateIsoForDay(di);
                     const leaveCode = dayDate ? (pTicks[dayDate] || '') : '';
                     // Colours per leave type — AL amber, SL red, X grey, OFFSITE blue, anything else grey
                     const codeColours = { AL:'#f57c00', SL:'#c62828', X:'#546e7a', OFFSITE:'#1565c0' };

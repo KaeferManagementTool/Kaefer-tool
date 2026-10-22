@@ -8180,17 +8180,26 @@ function tsRenderMain(stage) {
   const we = tsSundayOf(ws);
   const hrJobs = tsCollectHrJobs();  // auto-pull from HR with TS tick for this week
   const archive = tsGetArchive();
-  // Ensure every HR-ticked job has a jobs entry; add new ones with sensible defaults
+  // Ensure every HR-ticked job has a jobs entry — AND re-mirror the HR fields each render so that
+  // editing a break-in's OP # or description in the Hours Register flows through to the Time Sheet
+  // without having to untick and re-tick.
   hrJobs.forEach(j => {
-    if (!TS.jobs[j.id]) TS.jobs[j.id] = {
-      hrId: j.id,
-      workOrder: j.order || '',
-      operation: j.op || '',
-      workCentre: TS_WORKCENTRE_DEFAULT,
-      progress: 'Ongoing',
-      description: j.desc || '',
-      assignments: []  // populated by crew picker
-    };
+    if (!TS.jobs[j.id]) {
+      TS.jobs[j.id] = {
+        hrId: j.id,
+        workOrder: j.order || '',
+        operation: j.op || '',
+        workCentre: TS_WORKCENTRE_DEFAULT,
+        progress: 'Ongoing',
+        description: j.desc || '',
+        assignments: []  // populated by crew picker
+      };
+    } else {
+      // Keep crew assignments and progress untouched; just refresh the mirrored HR fields
+      TS.jobs[j.id].workOrder   = j.order || '';
+      TS.jobs[j.id].operation   = j.op    || '';
+      TS.jobs[j.id].description = j.desc  || '';
+    }
   });
   // Remove jobs that no longer have TS ticked
   const live = new Set(hrJobs.map(j => j.id));

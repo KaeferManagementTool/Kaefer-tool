@@ -9579,13 +9579,8 @@ function wireTabDrag() {
 }
 
 function setTab(id) {
-  // If a parent tab was clicked, drop into its remembered sub-tab (or first child)
-  const children = tabChildrenOf(id);
-  if (children.length) {
-    const remembered = (() => { try { return JSON.parse(localStorage.getItem('kaefer_v2_tab_lastchild') || '{}')[id] || ''; } catch(e) { return ''; } })();
-    if (remembered && children.find(c => c.id === remembered)) id = remembered;
-    else id = children[0].id;
-  }
+  // Clicking a parent tab lands on the parent itself — the sub-tab bar below gives access to its children.
+  // (Earlier builds auto-redirected to the last visited child, which hid the parent view.)
   ACTIVE = id;
   // Remember this as the active child for every ancestor
   const chain = tabChain(id);

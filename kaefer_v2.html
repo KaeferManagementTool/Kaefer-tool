@@ -3839,22 +3839,26 @@ function renderDailyJobsTable(jobs, peopleByTeam) {
   if (!jobs.length) {
     return '<div style="padding:30px;text-align:center;color:var(--mute);font-style:italic;border:2px dashed var(--line);border-radius:var(--r-md);background:#eef1f5">No jobs for this day. Open Hours Register and set the Day column for each job you want on today\'s meeting.</div>';
   }
+  // Pull live HR colour palette so Complete / Rescheduled / etc read the same here as in the Hours Register
+  const colours = (typeof hrGetColours === 'function') ? hrGetColours() : [{id:'white',bg:'#fff',fg:'#1a1a1a',label:'Ready'}];
+  const colMap = Object.fromEntries(colours.map(c => [c.id, c]));
+
   // Group by team order
   const byTeam = {};
   TEAMS.forEach(t => byTeam[t.id] = []);
   jobs.forEach(j => { const t = j.team || 'UNASSIGNED'; (byTeam[t] = byTeam[t] || []).push(j); });
 
-  // Soft-grey wrapper; teams get bold full-colour divider bars.
-  let html = `<div style="background:#eef1f5;padding:14px;border-radius:var(--r-md);border:1px solid #d8dde5">
-    <table style="width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid #d8dde5;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04);font-size:12.5px">
+  // HR-register-matched table: compact, with black team bars that mirror the HR day bars.
+  let html = `<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #d8dde5;font-size:12.5px">
       <thead>
-        <tr style="background:#f9fafb">
-          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Func Loc</th>
-          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">OP</th>
-          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Description</th>
-          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Operation Short Text</th>
-          <th style="padding:11px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb">Crew</th>
-          <th style="padding:11px 8px;text-align:center;font-size:10px;letter-spacing:1.5px;color:#6b7280;font-weight:800;text-transform:uppercase;border-bottom:1px solid #e5e7eb;width:40px"></th>
+        <tr style="background:#1a2a4a;color:#fff">
+          <th style="padding:9px 10px;text-align:left;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase">Func Loc</th>
+          <th style="padding:9px 10px;text-align:left;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase">Work Order</th>
+          <th style="padding:9px 10px;text-align:left;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase;width:60px">OP</th>
+          <th style="padding:9px 10px;text-align:left;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase">Description</th>
+          <th style="padding:9px 10px;text-align:left;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase">Operation Short Text</th>
+          <th style="padding:9px 10px;text-align:left;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase">Crew</th>
+          <th style="padding:9px 6px;text-align:center;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase;width:90px">Team</th>
         </tr>
       </thead>
       <tbody>`;
@@ -3862,18 +3866,18 @@ function renderDailyJobsTable(jobs, peopleByTeam) {
   TEAMS.forEach(team => {
     const list = byTeam[team.id] || [];
     if (!list.length) return;
-    // Match the team-composition card header: use the team's bright colour directly
-    const headerBg = team.colour;
-    const rowBg    = team.bg;        // soft shaded tint for each job row
     const leaderLabel = dmLeaderLabel(team.id);
     const leadBit = leaderLabel
-      ? `<span style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:none;padding-left:14px;border-left:2px solid rgba(255,255,255,.4);margin-left:10px">★ Lead: <b style="font-weight:900">${escHtml(leaderLabel)}</b></span>`
-      : `<span style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:none;padding-left:14px;border-left:2px solid rgba(255,255,255,.4);margin-left:10px;opacity:.75;font-style:italic">★ no leader assigned</span>`;
-    const jobsPill = `<span style="background:rgba(0,0,0,.2);padding:5px 12px;border-radius:14px;font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:none"><b style="font-size:14px;font-weight:900;margin-right:3px">${list.length}</b>${list.length===1?'job':'jobs'}</span>`;
+      ? `<span style="font-weight:700;font-size:11.5px;opacity:.95">★ Lead: <b style="font-weight:900">${escHtml(leaderLabel)}</b></span>`
+      : `<span style="font-weight:700;font-size:11.5px;opacity:.6;font-style:italic">★ no leader assigned</span>`;
+    const jobsPill = `<span style="background:rgba(255,255,255,.18);padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800">${list.length} ${list.length===1?'job':'jobs'}</span>`;
 
-    html += `<tr><td colspan="6" style="padding:0;background:${headerBg};border-top:3px solid rgba(0,0,0,.18);border-bottom:3px solid rgba(0,0,0,.18)">
-      <div style="display:flex;align-items:center;padding:12px 18px;color:#fff">
-        <span style="font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,.35)">${escHtml(team.label)}</span>
+    // Black team divider bar, modelled on the HR day bar — team colour shown as a bold left stripe + swatch
+    html += `<tr><td colspan="7" style="padding:0;background:#1a1a1a;color:#fff;border-top:3px solid #000">
+      <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-left:6px solid ${team.colour}">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${team.colour};box-shadow:0 0 0 2px rgba(255,255,255,.15)"></span>
+        <span style="font-size:12px;font-weight:900;letter-spacing:1.6px;text-transform:uppercase">${escHtml(team.label)}</span>
+        <span style="opacity:.4">·</span>
         ${leadBit}
         <div style="flex:1"></div>
         ${jobsPill}
@@ -3887,16 +3891,19 @@ function renderDailyJobsTable(jobs, peopleByTeam) {
           `<span style="display:inline-block;padding:3px 8px;margin:2px 3px 2px 0;background:#fff;color:#1a1a1a;border-left:3px solid ${team.colour};border-radius:3px;font-size:11px;font-weight:600;line-height:1.5;box-shadow:0 1px 1px rgba(0,0,0,.04)">${escHtml(p.name)}</span>`
         ).join('') || '<span style="color:#64748b;font-size:11px;font-style:italic">no crew on this team</span>';
 
-    // Subtle row divider that reads on top of the soft tint background
-    const rowBorder = '1px solid rgba(0,0,0,.06)';
     list.forEach((j, idx) => {
-      html += `<tr style="background:${rowBg}">
-        <td style="padding:12px 14px;font-family:'SF Mono','Consolas',monospace;font-size:11px;color:#1e3a8a;border-bottom:${rowBorder}">${escHtml(j.loc||'')}</td>
-        <td style="padding:12px 14px;border-bottom:${rowBorder};width:50px"><span style="background:#111827;color:#fff;padding:4px 8px;border-radius:4px;font-weight:800;font-size:11px;font-variant-numeric:tabular-nums;display:inline-block">${escHtml(j.op||'')}</span></td>
-        <td style="padding:12px 14px;border-bottom:${rowBorder}"><div style="font-weight:700;font-size:13px;color:#111827">${escHtml(j.desc||'')}</div></td>
-        <td style="padding:12px 14px;color:#374151;font-size:12.5px;border-bottom:${rowBorder}">${escHtml(j.short||'')}</td>
-        <td style="padding:10px 14px;border-bottom:${rowBorder};max-width:280px">${idx===0?crewForTeam:''}</td>
-        <td style="padding:8px 6px;border-bottom:${rowBorder};text-align:center">
+      // Use the job's HR status colour — so marking Complete in the register turns the row green here, Rescheduled → orange, etc.
+      const c = colMap[j.status] || colours[0];
+      const rowStyle = `background:${c.bg};color:${c.fg}`;
+      const rowBorder = '1px solid rgba(0,0,0,.08)';
+      html += `<tr style="${rowStyle}">
+        <td style="padding:10px 10px;font-family:'SF Mono','Consolas',monospace;font-size:11px;border-bottom:${rowBorder};color:inherit">${escHtml(j.loc||'')}</td>
+        <td style="padding:10px 10px;font-family:'SF Mono','Consolas',monospace;font-size:11px;border-bottom:${rowBorder};color:inherit;font-weight:700">${escHtml(j.order||'')}</td>
+        <td style="padding:10px 10px;border-bottom:${rowBorder}"><span style="background:#111827;color:#fff;padding:3px 8px;border-radius:4px;font-weight:800;font-size:11px;font-variant-numeric:tabular-nums;display:inline-block">${escHtml(j.op||'')}</span></td>
+        <td style="padding:10px 10px;border-bottom:${rowBorder};color:inherit"><div style="font-weight:700;font-size:12.5px">${escHtml(j.desc||'')}</div></td>
+        <td style="padding:10px 10px;font-size:12px;border-bottom:${rowBorder};color:inherit">${escHtml(j.short||'')}</td>
+        <td style="padding:8px 10px;border-bottom:${rowBorder};max-width:260px;background:#fff;color:#1a1a1a">${idx===0?crewForTeam:''}</td>
+        <td style="padding:6px;border-bottom:${rowBorder};text-align:center;background:#fff">
           <select onchange="dmSetJobTeam('${j.id}',this.value);render_daily(document.getElementById('stage'))" title="Change team" style="padding:3px 5px;border:1px solid rgba(0,0,0,.15);border-radius:4px;font-size:10px;font-weight:700;background:#fff;color:${team.colour};cursor:pointer">
             ${TEAMS.map(t=>`<option value="${t.id}" ${t.id===team.id?'selected':''}>${t.label.replace(' TEAM','')}</option>`).join('')}
           </select>
@@ -3904,7 +3911,7 @@ function renderDailyJobsTable(jobs, peopleByTeam) {
       </tr>`;
     });
   });
-  html += '</tbody></table></div>';
+  html += '</tbody></table>';
   return html;
 }
 

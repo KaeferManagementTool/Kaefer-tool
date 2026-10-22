@@ -6494,6 +6494,7 @@ function subLoad() {
       SUB.loading = false;
       if (!j.ok) throw new Error(j.error || 'Load failed');
       SUB.items = Array.isArray(j.data) ? j.data : [];
+      subMergeLocalEdits();
       SUB.loaded = true;
       if (ACTIVE === 'submissions') subRender();
     })
@@ -7230,31 +7231,50 @@ function subSaveEdit(id) {
   });
   const stEl = document.getElementById('sub-edit-status');
   if (stEl) updates.status = stEl.value;
-  // Try the richer update_submission endpoint first; fall back to update_submission_status (status only)
+
+  // Save locally FIRST so the edit never disappears, even if the backend is unreachable or doesn't support the action
+  Object.assign(s, updates);
+  subSaveLocalEdits(s.id, updates);
+  document.getElementById('sub-edit-ml').remove();
+  subRender();
+
+  // Then push to backend as best-effort — status update is always supported; full edit is tried but tolerated if the backend rejects it
   const payload = { action:'update_submission', sheetName: s.sheetName, rowNum: s.rowNum, updates: updates };
   fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) })
     .then(r => r.json())
     .then(j => {
-      if (!j.ok) {
-        // Backend doesn't support full edit — at least save the status if it changed
-        if (updates.status && updates.status !== s.status) {
-          return fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
-            body: JSON.stringify({ action:'update_submission_status', sheetName: s.sheetName, rowNum: s.rowNum, status: updates.status }) })
-            .then(r=>r.json()).then(j2 => {
-              if (!j2.ok) throw new Error(j2.error || 'Status update failed');
-              Object.assign(s, updates);  // local only — backend didn't accept full edit
-              alert('⚠ Backend doesn\'t support full submission edits yet.\n\nStatus saved to backend; other field changes are local to this browser only.\n\nTo add full edit support, add an "update_submission" action to your Apps Script worker.');
-              document.getElementById('sub-edit-ml').remove();
-              subRender();
-            });
-        }
-        throw new Error(j.error || 'Update failed');
+      if (j.ok) {
+        // Backend accepted the full edit — clear local overlay for this one so we don't double-apply
+        subClearLocalEdits(s.id);
+        return;
       }
-      Object.assign(s, updates);
-      document.getElementById('sub-edit-ml').remove();
-      subRender();
+      // Backend doesn't know the action — at least sync status if it changed
+      if (updates.status) {
+        return fetch(u, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({ action:'update_submission_status', sheetName: s.sheetName, rowNum: s.rowNum, status: updates.status }) })
+          .then(r=>r.json()).catch(()=>null);
+      }
     })
-    .catch(e => alert('Save failed: ' + e.message));
+    .catch(() => { /* offline or backend down — local save still stands */ });
+}
+
+// Local overlay for submission edits — keyed by submission id, merged on top of backend data after every reload
+function subGetLocalEdits() {
+  try { return JSON.parse(localStorage.getItem('kaefer_v2_sub_edits') || '{}'); } catch(e) { return {}; }
+}
+function subSaveLocalEdits(id, updates) {
+  if (!id) return;
+  const all = subGetLocalEdits();
+  all[id] = Object.assign(all[id] || {}, updates);
+  localStorage.setItem('kaefer_v2_sub_edits', JSON.stringify(all));
+}
+function subClearLocalEdits(id) {
+  const all = subGetLocalEdits();
+  if (all[id]) { delete all[id]; localStorage.setItem('kaefer_v2_sub_edits', JSON.stringify(all)); }
+}
+function subMergeLocalEdits() {
+  const all = subGetLocalEdits();
+  SUB.items.forEach(s => { if (all[s.id]) Object.assign(s, all[s.id]); });
 }
 
 function subExportCsv() {

@@ -3060,10 +3060,17 @@ function renderHrRow(r, colours, colMap) {
   const hc = colMap[r.hoursStatus]  || colours[0];
   const rowBg = `background:${c.bg};color:${c.fg}`;
   const dayVal = r.day || '';
-  const daySel = `<select onchange="hrEditField('${r.id}','day',this.value);hrRender()" style="padding:3px 6px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;font-weight:700;background:#fff">
-    <option value="">—</option>
-    ${DAYS_UP.map((d,i)=>`<option value="${DAYS[i]}" ${DAYS[i]===dayVal?'selected':''}>${d}</option>`).join('')}
-  </select>`;
+  const dayVal2 = r.day2 || '';
+  const daySel = `<div style="display:flex;flex-direction:column;gap:2px;align-items:stretch">
+    <select onchange="hrEditField('${r.id}','day',this.value);hrRender()" title="Day this job appears on" style="padding:3px 6px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;font-weight:700;background:#fff">
+      <option value="">—</option>
+      ${DAYS_UP.map((d,i)=>`<option value="${DAYS[i]}" ${DAYS[i]===dayVal?'selected':''}>${d}</option>`).join('')}
+    </select>
+    <select onchange="hrEditField('${r.id}','day2',this.value);hrRender()" title="Optional 2nd day — tick if the job carries over" style="padding:2px 6px;border:1px dashed var(--line);border-radius:var(--r-sm);font-size:10px;font-weight:600;background:#fafbfc;color:${dayVal2?'#1a1a1a':'#999'}">
+      <option value="">+ day</option>
+      ${DAYS_UP.map((d,i)=>`<option value="${DAYS[i]}" ${DAYS[i]===dayVal2?'selected':''}>${d}</option>`).join('')}
+    </select>
+  </div>`;
   return `<tr>
     <td style="${rowBg};padding:4px 6px;cursor:pointer;font-weight:700;font-size:10px;text-align:center;user-select:none" onclick="hrCycleStatus('${r.id}')" title="Click to cycle job status colour">${c.label.toUpperCase()}</td>
     <td style="${rowBg};font-size:11px;white-space:nowrap"><input type="date" value="${r.date||''}" onchange="hrEditField('${r.id}','date',this.value);hrRender()" style="background:transparent;border:0;font-size:11px;color:inherit;font-weight:600;width:100%"></td>
@@ -3757,7 +3764,7 @@ function render_daily(stage, tabCfg) {
   const dayUp = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
   const focus = dmGetFocus()[dateKey] || '';
 
-  const todayJobs = HR.rows.filter(r => r.day === dayShort);
+  const todayJobs = HR.rows.filter(r => r.day === dayShort || r.day2 === dayShort);
   const d0 = new Date(dateKey+'T00:00:00');
   const activePeople = ATT2.persons.filter(p => {
     if (!p.group) return false;
@@ -8186,10 +8193,13 @@ function tsCollectHrJobs() {
   });
 }
 
-// How many ticked jobs sit on each day? Used to badge the day tabs.
+// How many ticked jobs sit on each day? Used to badge the day tabs. A job with a 2nd day counts on both.
 function tsJobCountsByDay() {
   const out = { mon:0, tue:0, wed:0, thu:0, fri:0, sat:0, sun:0 };
-  (HR.rows || []).filter(r => r && r.onTs).forEach(r => { if (r.day && out[r.day] != null) out[r.day]++; });
+  (HR.rows || []).filter(r => r && r.onTs).forEach(r => {
+    if (r.day && out[r.day] != null) out[r.day]++;
+    if (r.day2 && r.day2 !== r.day && out[r.day2] != null) out[r.day2]++;
+  });
   return out;
 }
 
@@ -8219,7 +8229,7 @@ function tsRenderBody() {
   if (TS.selectedDay) {
     jobKeys = jobKeys.filter(jk => {
       const hr = HR.rows.find(r => r.id === jk);
-      return hr && hr.day === TS.selectedDay;
+      return hr && (hr.day === TS.selectedDay || hr.day2 === TS.selectedDay);
     });
   }
   if (!jobKeys.length) {

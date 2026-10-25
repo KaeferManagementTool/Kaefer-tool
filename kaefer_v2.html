@@ -7440,6 +7440,23 @@ function subEditEntry(id) {
             ${['Pending','Approved','Rejected','Applied','Added'].map(x => `<option value="${x}" ${((s.status||'Pending')===x)?'selected':''}>${x}</option>`).join('')}
           </select>
         </div>
+
+        <!-- Supervisor signature -->
+        <div style="margin:14px 0 12px;padding:12px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fafbfc">
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--mute);letter-spacing:.3px;text-transform:uppercase;margin-bottom:6px">Supervisor sign-off</label>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <select id="sub-edit-supname" style="padding:6px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px;flex:1">
+              <option value="">— pick signer —</option>
+              <option value="Steve Middleton" ${(s.supervisorName==='Steve Middleton')?'selected':''}>Steve Middleton</option>
+              <option value="Boz Nixon" ${(s.supervisorName==='Boz Nixon')?'selected':''}>Boz Nixon</option>
+            </select>
+            <button type="button" class="btn-ghost" style="font-size:11px;padding:5px 10px" onclick="subSigClear()">Clear</button>
+          </div>
+          <canvas id="sub-sig-pad" width="500" height="130" style="width:100%;max-width:500px;height:130px;background:#fff;border:1px dashed var(--line);border-radius:4px;cursor:crosshair;touch-action:none;display:block"></canvas>
+          <div style="font-size:10.5px;color:var(--mute);margin-top:4px;font-style:italic">Draw with finger / mouse / stylus. Appears on the printed form.</div>
+          ${s.supervisorSignature ? `<div style="font-size:10.5px;color:#2e7d32;margin-top:4px"><b>✓ Signed</b> by ${escHtml(s.supervisorName||'')} ${s.supervisorSignedAt?('on '+fdDisplay(s.supervisorSignedAt.slice(0,10))):''}</div>` : ''}
+        </div>
+
         <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--line);margin-top:8px">
           <button class="btn-ghost" onclick="document.getElementById('sub-edit-ml').remove()">Cancel</button>
           <button class="btn" onclick="subSaveEdit('${String(id).replace(/'/g,"\\'")}')">Save</button>
@@ -7447,6 +7464,65 @@ function subEditEntry(id) {
       </div>
     </div>`;
   document.body.appendChild(ml);
+  // Wire up the signature pad — pre-fill with existing signature if present, else leave blank
+  setTimeout(() => subSigInit(s.supervisorSignature||''), 30);
+}
+
+// Signature pad helpers — pointer events cover mouse/touch/stylus uniformly
+let _SUB_SIG_CTX = null, _SUB_SIG_DRAWING = false, _SUB_SIG_HAS_INK = false, _SUB_SIG_LAST = null;
+function subSigInit(dataUrl) {
+  const c = document.getElementById('sub-sig-pad');
+  if (!c) return;
+  _SUB_SIG_CTX = c.getContext('2d');
+  // Scale for retina so lines stay crisp
+  const rect = c.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(rect.width * dpr);
+  c.height = Math.round(rect.height * dpr);
+  _SUB_SIG_CTX.scale(dpr, dpr);
+  _SUB_SIG_CTX.lineWidth = 2;
+  _SUB_SIG_CTX.lineCap = 'round';
+  _SUB_SIG_CTX.lineJoin = 'round';
+  _SUB_SIG_CTX.strokeStyle = '#111';
+  _SUB_SIG_HAS_INK = false;
+  // Load existing signature if any
+  if (dataUrl) {
+    const img = new Image();
+    img.onload = () => {
+      _SUB_SIG_CTX.drawImage(img, 0, 0, rect.width, rect.height);
+      _SUB_SIG_HAS_INK = true;
+    };
+    img.src = dataUrl;
+  }
+  const pos = e => {
+    const r = c.getBoundingClientRect();
+    return { x: (e.clientX||0) - r.left, y: (e.clientY||0) - r.top };
+  };
+  c.onpointerdown = e => { e.preventDefault(); c.setPointerCapture(e.pointerId); _SUB_SIG_DRAWING = true; _SUB_SIG_LAST = pos(e); };
+  c.onpointermove = e => {
+    if (!_SUB_SIG_DRAWING) return;
+    const p = pos(e);
+    _SUB_SIG_CTX.beginPath();
+    _SUB_SIG_CTX.moveTo(_SUB_SIG_LAST.x, _SUB_SIG_LAST.y);
+    _SUB_SIG_CTX.lineTo(p.x, p.y);
+    _SUB_SIG_CTX.stroke();
+    _SUB_SIG_LAST = p;
+    _SUB_SIG_HAS_INK = true;
+  };
+  c.onpointerup = c.onpointercancel = c.onpointerleave = e => { _SUB_SIG_DRAWING = false; };
+}
+function subSigClear() {
+  const c = document.getElementById('sub-sig-pad');
+  if (!c || !_SUB_SIG_CTX) return;
+  _SUB_SIG_CTX.clearRect(0, 0, c.width, c.height);
+  _SUB_SIG_HAS_INK = false;
+}
+function subSigDataUrl() {
+  const c = document.getElementById('sub-sig-pad');
+  if (!c) return '';
+  // If the user didn't draw anything new AND we didn't load an existing one, return empty
+  if (!_SUB_SIG_HAS_INK) return '';
+  return c.toDataURL('image/png');
 }
 
 function subSaveEdit(id) {
@@ -7467,6 +7543,26 @@ function subSaveEdit(id) {
   });
   const stEl = document.getElementById('sub-edit-status');
   if (stEl) updates.status = stEl.value;
+
+  // Capture the supervisor signature (and signer name) if drawn / picked.
+  // Writes to BOTH supervisor* (new fields) AND approver* (what the PDF already prints).
+  const supNameEl = document.getElementById('sub-edit-supname');
+  const supName = supNameEl ? supNameEl.value : '';
+  const sigPng = subSigDataUrl();
+  if (sigPng) {
+    const nowIso = new Date().toISOString();
+    const today = todayIso();
+    updates.supervisorSignature = sigPng;
+    updates.supervisorName = supName;
+    updates.supervisorSignedAt = nowIso;
+    // Mirror into fields the printed form already uses
+    updates.approverSignature = sigPng;
+    updates.approvedBy = supName;
+    updates.approvedDate = today;
+  } else if (supName && supName !== s.supervisorName) {
+    updates.supervisorName = supName;
+    updates.approvedBy = supName;
+  }
 
   // Save locally FIRST so the edit never disappears, even if the backend is unreachable or doesn't support the action
   Object.assign(s, updates);

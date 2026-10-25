@@ -4202,12 +4202,12 @@ function dmSetWeekSource(src) {
     if (d) DAILY.date = d;
   } else {
     // Current — prefer today if it falls inside the current week's rows, else first row date, else today
-    const todayIso = todayIso();
+    const today = todayIso();
     const curDates = (HR.current||[]).map(r => r.date).filter(Boolean);
-    if (curDates.includes(todayIso)) DAILY.date = todayIso;
+    if (curDates.includes(today)) DAILY.date = today;
     else {
       const d = dateFromRows(HR.current);
-      DAILY.date = d || todayIso;
+      DAILY.date = d || today;
     }
   }
   render_daily(document.getElementById('stage'));

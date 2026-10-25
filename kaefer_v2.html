@@ -1018,6 +1018,11 @@ function fdISO(s) {
 function escHtml(s) {
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// Local YYYY-MM-DD for "today" — never UTC. toISOString() rolls Brisbane dates back a day in the AM.
+function todayIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
 
 /* ============================================================
    ATTENDANCE 2 — persistent state across tab switches
@@ -1638,7 +1643,7 @@ function actSetStatus(msg, isErr) {
 }
 
 function render_actions(stage, tabCfg) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayIso();
   stage.innerHTML = `
     <div class="card">
       <div class="card-h"><span class="accent" style="--accent:var(--t-actions)"></span>
@@ -1724,7 +1729,7 @@ async function actAdd() {
   if (!resp) { alert('Enter a responsible person.'); return; }
   ACT.items.unshift({
     id: Date.now(),
-    date: document.getElementById('act-date').value || new Date().toISOString().slice(0,10),
+    date: document.getElementById('act-date').value || todayIso(),
     desc, resp,
     due: document.getElementById('act-due').value,
     pri: document.getElementById('act-pri').value,
@@ -1825,7 +1830,7 @@ function render_offsite(stage, tabCfg) {
   if (!ATT2.loaded && !ATT2.loading && typeof attReload === 'function') {
     attReload(true).then(() => { if (ACTIVE === 'offsite') render_offsite(document.getElementById('stage'), tabCfg); });
   }
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayIso();
   const people = ATT2.loaded ? ATT2.persons.filter(p => !pIsArchived(p)).sort((a,b)=> a.name.localeCompare(b.name)) : [];
   stage.innerHTML = `
     <div class="card">
@@ -2233,7 +2238,7 @@ function rrSetStatus(msg, isErr) {
 }
 
 function render_rr(stage, tabCfg) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayIso();
   const thisYr = new Date().getFullYear();
   const thisMo = new Date().getMonth();
   stage.innerHTML = `
@@ -2524,7 +2529,7 @@ function inspSetStatus(msg, isErr) {
 }
 
 function render_inspections(stage, tabCfg) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayIso();
   INSP_FORM.answers = {}; INSP_FORM.comments = {};
   let checklist = '';
   INSP_CHECKLIST.forEach((sec, si) => {
@@ -3275,7 +3280,7 @@ function hrToggleDismantleDone(id) {
   if (typeof SCF === 'undefined' || !SCF.loaded) { alert('Scaffold register not loaded yet. Try the Scaffold Register tab first.'); return; }
   const scaff = (SCF.active || []).find(s => s.id === r.scaffoldId);
   if (!scaff) { alert('That scaffold is no longer in the Active register.'); return; }
-  const date = prompt('Dismantle date (YYYY-MM-DD):', new Date().toISOString().slice(0,10));
+  const date = prompt('Dismantle date (YYYY-MM-DD):', todayIso());
   if (!date) return;
   const nd = new Date(date+'T00:00:00');
   if (isNaN(nd)) { alert('Invalid date.'); return; }
@@ -3322,7 +3327,7 @@ function hrDelete(id) {
   hrSave(); hrRender();
 }
 function hrAddBlank() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayIso();
   HR.rows.unshift({
     id: 'hr_' + Date.now(),
     date: today, planner:'', order:'', op:'', loc:'', desc:'(New break-in job)', short:'',
@@ -3719,7 +3724,7 @@ function hrSaveColours() {
    DAILY MEETING VIEW
 ============================================================ */
 const DAILY = {
-  date: new Date().toISOString().slice(0,10),
+  date: todayIso(),
   bigScreen: false,
   todayOnly: false,
   weekSource: 'current',  // 'current' uses HR.current, 'next' uses HR.next, 'archive' uses a chosen archived HR week
@@ -3907,7 +3912,7 @@ function render_daily(stage, tabCfg) {
   // Auto-flip back to Current the moment the Next-week staging empties (e.g. after Promote on Monday)
   if (DAILY.weekSource === 'next' && !(HR.next && HR.next.length)) {
     DAILY.weekSource = 'current';
-    DAILY.date = new Date().toISOString().slice(0,10);
+    DAILY.date = todayIso();
   }
   // Resolve the source of jobs for this view
   let dailySource;
@@ -3965,7 +3970,7 @@ function render_daily(stage, tabCfg) {
           <button onclick="dmSetWeekSource('next')"    style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='next'?'#f57c00':'transparent'};color:${DAILY.weekSource==='next'?'#fff':'var(--mute)'}" title="Prep next week's crew assignments without affecting the live current week">Next week${(HR.next&&HR.next.length)?` (${HR.next.length})`:''}</button>
         </div>
         <input type="date" value="${dateKey}" onchange="DAILY.date=this.value;render_daily(document.getElementById('stage'))" style="padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;margin-left:12px">
-        <button class="btn-ghost" style="margin-left:6px" onclick="DAILY.date=new Date().toISOString().slice(0,10);render_daily(document.getElementById('stage'))">Today</button>
+        <button class="btn-ghost" style="margin-left:6px" onclick="DAILY.date=todayIso();render_daily(document.getElementById('stage'))">Today</button>
         <div style="flex:1"></div>
         <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#555;cursor:pointer;margin-right:12px;font-weight:600" title="When ticked, team changes apply ONLY to the selected date. When unticked, team changes save as the person's home team and carry over.">
           <input type="checkbox" ${DAILY.todayOnly?'checked':''} onchange="DAILY.todayOnly=this.checked;render_daily(document.getElementById('stage'))"> Today only
@@ -4197,7 +4202,7 @@ function dmSetWeekSource(src) {
     if (d) DAILY.date = d;
   } else {
     // Current — prefer today if it falls inside the current week's rows, else first row date, else today
-    const todayIso = new Date().toISOString().slice(0,10);
+    const todayIso = todayIso();
     const curDates = (HR.current||[]).map(r => r.date).filter(Boolean);
     if (curDates.includes(todayIso)) DAILY.date = todayIso;
     else {
@@ -4529,7 +4534,7 @@ function rptGatherCcvAcrossMonths(from, to) {
 function rptBuildHtml(type, from, to, opts) {
   opts = opts || {};
   const header = `<h1>${rptTitle(type)}</h1>
-    <div class="meta">KAEFER Yarwun · ${fdDisplay(from)} to ${fdDisplay(to)} · generated ${fdDisplay(new Date().toISOString().slice(0,10))} by ${escHtml(localStorage.getItem('kaefer_supervisor')||'Supervisor')}</div>`;
+    <div class="meta">KAEFER Yarwun · ${fdDisplay(from)} to ${fdDisplay(to)} · generated ${fdDisplay(todayIso())} by ${escHtml(localStorage.getItem('kaefer_supervisor')||'Supervisor')}</div>`;
   if (type === 'weekly')  return header + rptWeekly(from, to);
   if (type === 'planned') return header + rptPlanned(from, to);
   if (type === 'scaffold')return header + rptScaffold(from, to);
@@ -5419,7 +5424,7 @@ function regExportCsv() {
   const csv = rows.map(r => r.map(v => { let s = String(v==null?'':v); if (/[,"\n]/.test(s)) s = '"'+s.replace(/"/g,'""')+'"'; return s; }).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
-  a.download = 'register-'+REG.activeType+'-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.download = 'register-'+REG.activeType+'-'+todayIso()+'.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
@@ -6656,7 +6661,7 @@ function ccvAddInspection() {
     type: CCV.inspType,
     result: CCV.inspResult,
     notes,
-    date: new Date().toISOString().slice(0,10)
+    date: todayIso()
   });
   CCV.inspType = ''; CCV.inspResult = '';
   ccvSave();
@@ -7076,7 +7081,7 @@ function subApplyPpe(id) {
   if (typeof ATT2 !== 'undefined' && ATT2.persons) {
     ATT2.persons.forEach(p => { peopleByName[(p.name||'').toLowerCase().trim()] = p.id; });
   }
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayIso();
   parts.forEach(p => {
     if (!p.desc) return;
     REG.items.ppe.unshift({
@@ -7523,7 +7528,7 @@ function subExportCsv() {
   const csv = '﻿' + header + '\n' + rows.join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
-  a.download = 'submissions-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'submissions-' + todayIso() + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
@@ -7963,7 +7968,7 @@ function scfAction(action) {
 function scfOpenDismantle() {
   const scaff = SCF.openDetail && SCF.openDetail.scaffold;
   if (!scaff) return;
-  const date = prompt('Dismantle date (YYYY-MM-DD):', new Date().toISOString().slice(0,10));
+  const date = prompt('Dismantle date (YYYY-MM-DD):', todayIso());
   if (!date) return;
   const nd = new Date(date+'T00:00:00');
   if (isNaN(nd)) { alert('Invalid date.'); return; }
@@ -8072,7 +8077,7 @@ function scfExportCsv() {
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'scaffold-register-'+SCF.tab+'-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.download = 'scaffold-register-'+SCF.tab+'-'+todayIso()+'.csv';
   a.click();
 }
 
@@ -9534,7 +9539,7 @@ function empAddBlank() {
                   : 'SCAFFOLDERS';
   // Mint a client-side id. The backend will accept and persist it on first save.
   const newId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-  const person = { id: newId, name, group: groupFull, start: new Date().toISOString().slice(0,10), end: '', rtId:'', position:'', phone:'', notes:'' };
+  const person = { id: newId, name, group: groupFull, start: todayIso(), end: '', rtId:'', position:'', phone:'', notes:'' };
   ATT2.persons = (ATT2.persons || []).concat([person]);
   empPersistPerson(person);
   empRenderRows();
@@ -9685,7 +9690,7 @@ function empExportCsv() {
   const csv = '﻿' + cols.join(',') + '\n' + rows.join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
-  a.download = 'employees-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'employees-' + todayIso() + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }

@@ -1054,6 +1054,8 @@ async function attReload(silent) {
     const j = await apiCall('att2_load');
     ATT2.persons = (j.persons || []).sort((a,b)=> (a.order||0)-(b.order||0));
     ATT2.ticks   = j.ticks || {};
+    // Apply the local manual re-order so Steve's drag-free move stays after refresh
+    attApplyLocalOrder();
     // Merge in locally-stored Employees-tab extras (rtId, position, phone, notes).
     // The backend doesn't know those columns yet, so we persist them locally and layer them in.
     if (typeof empMergeExtras === 'function') empMergeExtras();
@@ -1232,13 +1234,48 @@ function attRender() {
         row += `<td class="${cls}" ${click}>${inner}</td>`;
       });
       row += `<td class="sum" style="color:var(--ok)">${P}</td><td class="sum" style="color:var(--err)">${sl}</td><td class="sum" style="color:var(--info)">${al}</td><td class="sum" style="color:#880e4f">${x}</td>`;
-      row += `<td><button class="edit-btn" onclick="attOpenEdit('${p.id}')">Edit</button></td></tr>`;
+      row += `<td style="white-space:nowrap"><button class="edit-btn" title="Move up" onclick="attMovePerson('${p.id}',-1)" style="padding:2px 5px;font-size:11px;min-width:0">▲</button><button class="edit-btn" title="Move down" onclick="attMovePerson('${p.id}',1)" style="padding:2px 5px;font-size:11px;min-width:0;margin-left:2px">▼</button><button class="edit-btn" onclick="attOpenEdit('${p.id}')" style="margin-left:3px">Edit</button></td></tr>`;
       h += row;
     });
   });
   h += '</tbody></table>';
   if (!shown) h += '<div style="padding:30px;text-align:center;color:var(--mute)">No one matches these filters. <a href="javascript:attOpenAdd()" style="color:var(--t-attendance);font-weight:600">Add a person</a> or widen the search.</div>';
   grid.innerHTML = h;
+}
+
+// Local order overlay — per-person position within their group, persisted to localStorage.
+// Written on move, read on every render so the manual order sticks across refreshes.
+function attGetOrderMap()   { try { return JSON.parse(localStorage.getItem('kaefer_v2_att_order') || '{}'); } catch(e) { return {}; } }
+function attSetOrderMap(m)  { localStorage.setItem('kaefer_v2_att_order', JSON.stringify(m)); }
+function attApplyLocalOrder() {
+  // Rewrite .order on each person using the stored map, so the same sort key everything else uses
+  const map = attGetOrderMap();
+  ATT2.persons.forEach(p => { if (map[p.id] != null) p.order = map[p.id]; });
+  ATT2.persons.sort((a,b) => (a.order||0) - (b.order||0));
+}
+// Move a person up (-1) or down (+1) within THEIR OWN GROUP, then persist
+function attMovePerson(pid, delta) {
+  const p = ATT2.persons.find(x => x.id === pid);
+  if (!p) return;
+  // Build the list of people in the same group as currently displayed (sorted by order)
+  const peers = ATT2.persons.filter(x => x.group === p.group).sort((a,b) => (a.order||0) - (b.order||0));
+  const idx = peers.findIndex(x => x.id === pid);
+  if (idx < 0) return;
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= peers.length) return;  // already at the end
+  // Swap positions in-place
+  const other = peers[newIdx];
+  const tmpOrder = p.order;
+  p.order = other.order;
+  other.order = tmpOrder;
+  // Persist both to the local overlay
+  const map = attGetOrderMap();
+  map[p.id] = p.order;
+  map[other.id] = other.order;
+  attSetOrderMap(map);
+  // Re-sort the master array and re-render
+  ATT2.persons.sort((a,b) => (a.order||0) - (b.order||0));
+  attRender();
 }
 
 function attCycle(pid, dk) {

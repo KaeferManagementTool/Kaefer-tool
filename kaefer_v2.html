@@ -2719,14 +2719,28 @@ function hrLoad() {
     HR.next = Array.isArray(nextSaved.rows) ? nextSaved.rows : [];
     HR.weekLabelNext = nextSaved.weekLabel || '';
   } catch(e) { HR.next = []; HR.weekLabelNext = ''; }
+  // Self-heal from the pre-v96 promote bug: if Next and Current share row IDs, Next is stale from
+  // an old promote that didn't persist the clear — wipe Next so Daily Meeting doesn't double-show them.
+  if (HR.current.length && HR.next.length) {
+    const curIds = new Set(HR.current.map(r => r.id));
+    const sharedCount = HR.next.filter(r => curIds.has(r.id)).length;
+    if (sharedCount > 0 && sharedCount === HR.next.length) {
+      // Every Next row also lives in Current — Next is a leftover copy, clear it
+      HR.next = []; HR.weekLabelNext = '';
+      localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: [], weekLabel: '' }));
+    }
+  }
   HR.loaded = true;
   hrSetActiveSet();
   if (ACTIVE === 'hours') hrRender();
 }
 function hrSave() {
-  // Write back whichever set is active (HR.rows is an alias) and persist both to their own keys
-  if (HR.viewMode === 'next') { HR.next = HR.rows; localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next, weekLabel: HR.weekLabelNext })); }
-  else { HR.current = HR.rows; localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel })); }
+  // Keep the active alias pointing at the right backing array
+  if (HR.viewMode === 'next') HR.next = HR.rows;
+  else HR.current = HR.rows;
+  // Always persist BOTH buckets — otherwise the inactive one goes stale and reappears on refresh
+  localStorage.setItem('kaefer_v2_hours',      JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel }));
+  localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next,    weekLabel: HR.weekLabelNext }));
 }
 function hrGetColours() {
   try {
@@ -4160,24 +4174,36 @@ function renderDailyTeamCards(peopleByTeam, away, dateKey) {
 
 function dmSetWeekSource(src) {
   DAILY.weekSource = src;
+  const dateFromRows = (rows) => {
+    if (!rows || !rows.length) return '';
+    const dates = [...new Set(rows.map(r => r.date).filter(Boolean))].sort();
+    return dates[0] || '';
+  };
   if (src === 'next') {
-    // Auto-jump the date to next Monday
-    const now = new Date();
-    const dow = now.getDay(); // 0=Sun..6=Sat
-    const daysUntilNextMon = ((8 - dow) % 7) || 7;
-    const nextMon = new Date(now);
-    nextMon.setDate(now.getDate() + daysUntilNextMon);
-    DAILY.date = nextMon.getFullYear() + '-' + String(nextMon.getMonth()+1).padStart(2,'0') + '-' + String(nextMon.getDate()).padStart(2,'0');
-  } else if (src === 'last') {
-    // Jump to the first date of the most recently archived (= last) week
-    const first = hrGetArchive()[0];
-    if (first && Array.isArray(first.rows)) {
-      const dates = [...new Set(first.rows.map(r => r.date).filter(Boolean))].sort();
-      if (dates.length) DAILY.date = dates[0];
+    // Prefer the actual first date in Next's rows; fall back to next Monday
+    const d = dateFromRows(HR.next);
+    if (d) DAILY.date = d;
+    else {
+      const now = new Date();
+      const dow = now.getDay();
+      const daysUntilNextMon = ((8 - dow) % 7) || 7;
+      const nextMon = new Date(now);
+      nextMon.setDate(now.getDate() + daysUntilNextMon);
+      DAILY.date = nextMon.getFullYear() + '-' + String(nextMon.getMonth()+1).padStart(2,'0') + '-' + String(nextMon.getDate()).padStart(2,'0');
     }
+  } else if (src === 'last') {
+    const first = hrGetArchive()[0];
+    const d = first ? dateFromRows(first.rows) : '';
+    if (d) DAILY.date = d;
   } else {
-    // Back to current — jump to today
-    DAILY.date = new Date().toISOString().slice(0,10);
+    // Current — prefer today if it falls inside the current week's rows, else first row date, else today
+    const todayIso = new Date().toISOString().slice(0,10);
+    const curDates = (HR.current||[]).map(r => r.date).filter(Boolean);
+    if (curDates.includes(todayIso)) DAILY.date = todayIso;
+    else {
+      const d = dateFromRows(HR.current);
+      DAILY.date = d || todayIso;
+    }
   }
   render_daily(document.getElementById('stage'));
 }

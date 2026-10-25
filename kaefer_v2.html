@@ -450,6 +450,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cs-p   { background: #c8e6c9; color: #1b5e20; }
 .cs-SL  { background: #ffcdd2; color: #b71c1c; }
 .cs-AL  { background: #bbdefb; color: #0d47a1; }
+.cs-NR  { background: #eceff1; color: #546e7a; }
 .cs-X   { background: #f8bbd0; color: #880e4f; }
 .cs-PH  { background: #ffe0b2; color: #bf360c; }
 .cs-LATE{ background: #fff59d; color: #827717; }
@@ -1035,7 +1036,7 @@ const ATT2 = {
   yr:  new Date().getFullYear(),
   filter: '', group: '', showArch: false
 };
-const STATUSES = ['','SL','AL','X','PH','LATE','BL'];
+const STATUSES = ['','NR','SL','AL','X','PH','LATE','BL'];  // NR = Not Rostered — for casual on-call people who aren't expected that day
 const PENDING = {}; let INFLIGHT = 0;
 
 function updateStatus(msg, isErr) {
@@ -1496,7 +1497,7 @@ function dmCompute() {
     yards.forEach(p => {
       if (dmTermPast(p, dk) || dmPreStart(p, dk)) return;
       const v = dmStat(p, dk);
-      if (v === 'AL' || v === 'SL' || v === 'X' || v === 'PH') return;
+      if (v === 'AL' || v === 'SL' || v === 'X' || v === 'PH' || v === 'NR') return;
       yP++;
     });
 
@@ -3950,6 +3951,8 @@ function render_daily(stage, tabCfg) {
   activePeople.forEach(p => {
     const status = (ATT2.ticks[p.id] || {})[dateKey] || '';
     const offsite = offsiteByPerson[p.id];
+    // NR = Not Rostered — casual/on-call people who weren't needed today. Hide from team comp AND leave list.
+    if (status === 'NR') return;
     if (status === 'AL') { away.AL.push({p, status, offsite}); return; }
     if (status === 'SL') { away.SL.push({p, status, offsite}); return; }
     if (status === 'X')  { away.X.push({p, status, offsite}); return; }
@@ -8496,7 +8499,7 @@ function tsRenderSidebar() {
                     const dayDate = tsDateIsoForDay(di);
                     const leaveCode = dayDate ? (pTicks[dayDate] || '') : '';
                     // Colours per leave type — AL amber, SL red, X grey, OFFSITE blue, anything else grey
-                    const codeColours = { AL:'#f57c00', SL:'#c62828', X:'#546e7a', OFFSITE:'#1565c0' };
+                    const codeColours = { AL:'#f57c00', SL:'#c62828', X:'#546e7a', OFFSITE:'#1565c0', NR:'#90a4ae' };
                     const codeColour = codeColours[leaveCode] || '#546e7a';
                     let cellHtml;
                     if (v) {

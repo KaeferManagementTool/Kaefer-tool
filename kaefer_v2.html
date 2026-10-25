@@ -2946,7 +2946,9 @@ function hrArchiveCurrent() {
   HR.weekLabel = '';
   // If we're currently viewing the current set, re-point HR.rows at the fresh empty one
   if (HR.viewMode !== 'next') HR.rows = HR.current;
-  hrSave();
+  // Save BOTH buckets explicitly — hrSave() only writes the active one and would leave the other key stale
+  localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel }));
+  localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next, weekLabel: HR.weekLabelNext }));
   let msg = '✓ Archived "' + label + '" (' + archiveRows.length + ' rows).'
           + (flipped ? '\n' + flipped + ' incomplete planned job' + (flipped===1?'':'s') + ' auto-flagged as Rescheduled.' : '');
   // Offer to promote Next Week into Current if it has rows
@@ -2959,7 +2961,9 @@ function hrArchiveCurrent() {
       HR.weekLabelNext = '';
       HR.viewMode = 'current';
       hrSetActiveSet();
-      hrSave();
+      // Save BOTH buckets explicitly so Daily Meeting (which reads HR.next directly) sees the cleared next-week
+      localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel }));
+      localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next, weekLabel: HR.weekLabelNext }));
       alert('✓ Promoted. Current Week is now "' + (HR.weekLabel || '(unlabelled)') + '".');
     } else {
       alert(msg + '\n\nNext Week left as-is.');

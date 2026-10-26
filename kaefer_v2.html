@@ -3649,20 +3649,40 @@ function hrParsePaste() {
     });
   });
   if (!newRows.length) { alert('Nothing recognised as a job row. Make sure you copied the data rows from Excel (including the section headers like WEEK 42 or BREAK IN WORK).'); return; }
-  // Offer to archive the current week first (if any)
+  // Three-outcome prompt when there's existing data: Append / Replace+Archive / Abort.
+  // Pasting a couple of break-in rows should ADD to the week, not wipe it.
   if (HR.rows.length) {
-    const archiveFirst = confirm('You have ' + HR.rows.length + ' rows in the current week ("' + (HR.weekLabel||'unnamed') + '").\n\nOK = archive it first, then load the new week.\nCancel = discard current and load new.');
-    if (archiveFirst) {
-      const archive = hrGetArchive();
-      archive.unshift({ label: HR.weekLabel || '(unnamed)', archivedAt: new Date().toISOString(), rows: HR.rows });
-      hrSetArchive(archive);
+    const appendFirst = confirm(
+      'Append ' + newRows.length + ' new row' + (newRows.length===1?'':'s') + ' to the current week ("' + (HR.weekLabel||'unnamed') + '", ' + HR.rows.length + ' rows)?\n\n'
+      + 'OK = APPEND (add to current week — use this for break-in jobs)\n'
+      + 'Cancel = see the Replace option next'
+    );
+    if (appendFirst) {
+      HR.rows = HR.rows.concat(newRows);
+      hrSave();
+      hrClosePaste();
+      document.getElementById('hr-wk').value = HR.weekLabel;
+      render_hours(document.getElementById('stage'), null);
+      return;
     }
+    // User said Cancel to Append — now ask if they want to Replace (which archives current)
+    const replace = confirm(
+      'REPLACE the current week with the ' + newRows.length + ' pasted row' + (newRows.length===1?'':'s') + '?\n\n'
+      + 'OK = archive current and load pasted rows as the new week.\n'
+      + 'Cancel = do nothing (keep current, discard paste).'
+    );
+    if (!replace) {
+      hrClosePaste();
+      return;
+    }
+    const archive = hrGetArchive();
+    archive.unshift({ label: HR.weekLabel || '(unnamed)', archivedAt: new Date().toISOString(), rows: HR.rows });
+    hrSetArchive(archive);
   }
   HR.rows = newRows;
   hrSave();
   hrClosePaste();
   document.getElementById('hr-wk').value = HR.weekLabel;
-  // Full re-render so archive button count updates
   render_hours(document.getElementById('stage'), null);
 }
 

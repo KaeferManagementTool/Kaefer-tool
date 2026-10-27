@@ -8677,7 +8677,15 @@ function tsRenderBody() {
           </div>
           <div style="flex:1;min-width:200px">
             <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">DESCRIPTION</div>
-            <div style="font-size:13px;font-weight:600">${escHtml(title)}</div>
+            <div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span>${escHtml(title)}</span>
+              ${(() => {
+                const hrRow = (HR.rows||[]).find(r => r.id === jk);
+                const planned = hrRow ? (hrRow.hours||'') : '';
+                if (!planned) return '';
+                return `<span style="background:#fff3e0;color:#bf360c;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.3px;border:1px solid #ffcc80;white-space:nowrap" title="Planned hours from Hours Register">PLANNED: ${escHtml(String(planned))} hrs</span>`;
+              })()}
+            </div>
           </div>
           <div>
             <div style="font-size:10px;letter-spacing:1.5px;color:#777;font-weight:800">WORK CENTRE</div>

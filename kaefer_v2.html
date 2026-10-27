@@ -3733,11 +3733,11 @@ function hrCopyIncomplete() {
   const incomplete = HR.rows.filter(r => r.status === reschedId);
   if (!incomplete.length) { alert('No Rescheduled jobs — nothing to copy.'); return; }
   // Build an HTML table and plain-text table, copy both as rich clipboard
-  const title = `Rescheduled jobs — ${HR.weekLabel || new Date().toLocaleDateString('en-AU')}`;
-  const hdr = ['Status','Date','Work Order','Description','Hours','Notes'];
-  const rows = incomplete.map(r => [ (colMap[r.status]||{}).label||r.status, fdDisplay(r.date), r.order, r.desc, r.hours, r.notes ]);
+  const title = `Jobs not complete — ${HR.weekLabel || new Date().toLocaleDateString('en-AU')}`;
+  const hdr = ['Date','Work Order','OP','Description','Hours','Notes'];
+  const rows = incomplete.map(r => [ fdDisplay(r.date), r.order, r.op, r.desc, r.hours, r.notes ]);
   const htmlRows = rows.map(cells =>
-    '<tr>' + cells.map((c,i)=>`<td style="padding:4px 8px;border:1px solid #ccc${i===0?';background:'+(colMap[incomplete[rows.indexOf(cells)].status]||{}).bg+';font-weight:bold':''}">${escHtml(c||'')}</td>`).join('') + '</tr>'
+    '<tr>' + cells.map(c => `<td style="padding:4px 8px;border:1px solid #ccc">${escHtml(c||'')}</td>`).join('') + '</tr>'
   ).join('');
   const htmlTable = `<p><b>${title}</b></p><table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px">
     <tr>${hdr.map(h=>`<th style="padding:4px 8px;border:1px solid #ccc;background:#1a2a4a;color:#fff;text-align:left">${h}</th>`).join('')}</tr>

@@ -218,9 +218,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   max-width: 1400px;
   margin: 0 auto;
 }
-/* Wide-table tabs benefit from full window width — drop the max cap when inside them */
+/* Wide-table tabs benefit from full window width — drop the max cap when inside them.
+   #reg-table-wrap covers EVERY Registers tab including the wide-pivot Training view (which has no #reg-table). */
 .stage:has(#hr-table),
-.stage:has(#reg-table) {
+.stage:has(#reg-table-wrap) {
   max-width: none;
 }
 .card {

@@ -218,8 +218,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   max-width: 1400px;
   margin: 0 auto;
 }
-/* Hours Register benefits from the full window width — drop the max cap when inside it */
-.stage:has(#hr-table) {
+/* Wide-table tabs benefit from full window width — drop the max cap when inside them */
+.stage:has(#hr-table),
+.stage:has(#reg-table) {
   max-width: none;
 }
 .card {

@@ -3401,8 +3401,9 @@ function hrOpenBanked() {
         <div style="flex:1"></div>
         <button onclick="document.getElementById('hr-banked-ml').remove()" style="background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">×</button>
       </div>
-      <div style="padding:14px 20px;background:#fff8e1;border-bottom:1px solid #ffe0b2;font-size:12px;color:#555;line-height:1.5">
-        Jobs you've banked instead of running the hours. Click <b>+ Pull back</b> to drop one into the current week as a break-in.
+      <div style="padding:14px 20px;background:#fff8e1;border-bottom:1px solid #ffe0b2;font-size:12px;color:#555;line-height:1.5;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:260px">Jobs you've banked instead of running the hours. Click <b>+ Pull back</b> to drop one into the current week as a break-in.</div>
+        <button class="btn" style="background:#1565c0;padding:5px 12px;font-size:12px;font-weight:800" onclick="hrOpenBankedPaste()">📋 Paste from Excel</button>
       </div>
       <div style="padding:12px">
         ${banked.length ? `
@@ -3437,6 +3438,131 @@ function hrOpenBanked() {
       </div>
     </div>`;
   document.body.appendChild(ml);
+}
+
+function hrOpenBankedPaste() {
+  const existing = document.getElementById('hr-banked-paste-ml');
+  if (existing) existing.remove();
+  const ml = document.createElement('div');
+  ml.id = 'hr-banked-paste-ml';
+  ml.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9100;display:flex;align-items:center;justify-content:center;padding:20px';
+  ml.innerHTML = `
+    <div style="background:#fff;border-radius:var(--r-md);max-width:860px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="background:#1565c0;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-weight:800;font-size:13px;letter-spacing:.5px">📋 PASTE BANKED JOBS</span>
+        <div style="flex:1"></div>
+        <button onclick="document.getElementById('hr-banked-paste-ml').remove()" style="background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:14px 18px;background:#e3f2fd;border-bottom:1px solid #90caf9;font-size:12.5px;color:#0d47a1;line-height:1.5">
+        Copy the <b>COMPLETED BANKED JOBS</b> rows from your Excel register (any columns are fine — the tool picks out order #, OP, functional location, description, short text, hours). Paste below then click <b>Import</b>.
+      </div>
+      <div style="padding:14px 18px">
+        <div id="hr-banked-paste-area" contenteditable="true" style="min-height:180px;max-height:40vh;overflow:auto;border:2px dashed var(--line);border-radius:var(--r-md);padding:10px;background:var(--surface-2);font-size:11px"></div>
+        <div id="hr-banked-paste-status" style="margin-top:8px;font-size:12px;color:var(--mute);min-height:16px"></div>
+      </div>
+      <div style="padding:12px 18px;background:#fafbfc;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn-ghost" onclick="document.getElementById('hr-banked-paste-ml').remove()">Cancel</button>
+        <button class="btn" style="background:#1565c0" onclick="hrImportBankedPaste()">Import</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ml);
+  const area = document.getElementById('hr-banked-paste-area');
+  area.addEventListener('paste', ev => {
+    ev.preventDefault();
+    const cb = ev.clipboardData || window.clipboardData;
+    const html = cb.getData('text/html') || '';
+    const text = cb.getData('text/plain') || '';
+    area._rawHtml = html;
+    area._rawText = text;
+    const trCount = (html.match(/<tr[\s>]/gi) || []).length;
+    const lineCount = text.split(/\n/).filter(l => l.trim()).length;
+    area.innerHTML = '<div style="text-align:center;padding:32px;color:#2e7d32;font-weight:700;font-size:14px">✓ Paste captured — ' + (trCount || lineCount) + ' rows detected</div>';
+    document.getElementById('hr-banked-paste-status').innerHTML = '<span style="color:#2e7d32">Ready — click <b>Import</b> to add to Banked</span>';
+  });
+  setTimeout(() => area.focus(), 60);
+}
+
+function hrImportBankedPaste() {
+  const area = document.getElementById('hr-banked-paste-area');
+  if (!area) return;
+  const html = area._rawHtml || '';
+  const text = area._rawText || '';
+  const parsed = [];
+  if (html.trim()) {
+    // HTML table — parse rows
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('tr').forEach(tr => {
+      const cells = Array.from(tr.querySelectorAll('td,th')).map(c => c.textContent.trim());
+      const row = hrParseBankedCells(cells);
+      if (row) parsed.push(row);
+    });
+  } else if (text.trim()) {
+    // Plain text — assume tab-separated
+    text.split(/\n/).forEach(line => {
+      const cells = line.split(/\t/).map(c => c.trim());
+      const row = hrParseBankedCells(cells);
+      if (row) parsed.push(row);
+    });
+  }
+  if (!parsed.length) {
+    alert('Nothing recognised. Make sure you pasted rows that have at least a description or short text.');
+    return;
+  }
+  if (!confirm('Add ' + parsed.length + ' job' + (parsed.length===1?'':'s') + ' to the Banked list?')) return;
+  const banked = hrGetBanked();
+  parsed.forEach(p => banked.push(p));
+  hrSetBanked(banked);
+  document.getElementById('hr-banked-paste-ml').remove();
+  render_hours(document.getElementById('stage'), null);
+  hrOpenBanked();
+  alert('✓ Imported ' + parsed.length + ' banked job' + (parsed.length===1?'':'s') + '.');
+}
+
+// Shared helper — read a row of cells (any order-ish) and pull Order (long number), OP, FunctionalLoc, Desc, Short, Hours
+function hrParseBankedCells(cells) {
+  if (!cells || cells.length < 2) return null;
+  // Order = long number (6+ digits)
+  const orderIdx = cells.findIndex(v => /^\d{6,}$/.test(v));
+  const order = orderIdx >= 0 ? cells[orderIdx] : '';
+  // Hours = short pure number (1-4 digits, possibly decimal) — last such non-order cell
+  let hours = '';
+  for (let i = cells.length-1; i >= 0; i--) {
+    const v = cells[i];
+    if (i === orderIdx) continue;
+    if (/^\d{1,3}(\.\d+)?$/.test(v)) { hours = v; break; }
+  }
+  // OP = short number cell adjacent to or near the order; try the one after order
+  let op = '';
+  if (orderIdx >= 0 && cells[orderIdx+1] && /^\d{1,4}$/.test(cells[orderIdx+1])) {
+    op = cells[orderIdx+1];
+  }
+  // Functional loc = alphanumeric with mixed letters & digits (something like 2030452PU20570C)
+  let loc = '';
+  for (const v of cells) {
+    if (v && /[A-Z]/.test(v) && /\d/.test(v) && v.length >= 6 && !/\s/.test(v) && v !== order) { loc = v; break; }
+  }
+  // Description + Short Text = longest two text cells that aren't the above
+  const used = new Set([orderIdx]);
+  if (op) used.add(cells.indexOf(op));
+  if (loc) used.add(cells.indexOf(loc));
+  if (hours) used.add(cells.lastIndexOf(hours));
+  const texts = cells.map((v,i) => ({v, i}))
+    .filter(x => !used.has(x.i) && x.v && !/^\d+([\.\/]\d+)?$/.test(x.v) && x.v.length > 2)
+    .sort((a,b) => b.v.length - a.v.length);
+  const desc  = texts[0] ? texts[0].v : '';
+  const short = texts[1] ? texts[1].v : '';
+  // Must have at least an order or description to be a job
+  if (!order && !desc && !short) return null;
+  return {
+    id: 'bnk_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    bankedAt: new Date().toISOString(),
+    bankedFromWeek: 'Imported',
+    date: '', order, op, loc, desc, short,
+    hours, notes: '', planner: '',
+    status: 'white', hoursStatus: 'white', day: '', day2: '',
+    percent: '', erect: '', dismantle: '', modify: '',
+    planned: false, onTs: false, scaffoldId: '', scaffoldDone: false
+  };
 }
 
 function hrPullBanked(bid) {

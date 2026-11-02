@@ -2816,6 +2816,7 @@ function render_hours(stage, tabCfg) {
         <button class="btn-ghost" onclick="hrOpenColours()" style="margin-left:6px">🎨 Colours</button>
         <button class="btn" style="background:var(--t-hours);margin-left:6px" onclick="hrCopyIncomplete()">📧 Copy Rescheduled</button>
         <button class="btn-ghost" style="margin-left:4px;font-size:11px" title="Reset every Rescheduled (orange) flag back to Ready — use after a bad paste" onclick="hrResetRescheduled()">↺ Reset orange</button>
+        <button class="btn-ghost" style="margin-left:4px;background:#fff8e1;border-color:#ffcc80;color:#bf360c;font-weight:700" title="Open the Banked break-in jobs list — pull one back when you're ready to run its hours" onclick="hrOpenBanked()">🏦 Banked (${(hrGetBanked()||[]).length})</button>
       </div>
       <div class="att-ctrls" id="hr-ctrls-current">
         <div class="field" style="flex:1 1 220px"><label>Week label</label><input type="text" id="hr-wk" placeholder="e.g. WEEK 42 2026" value="${escHtml(HR.weekLabel)}"></div>
@@ -3266,7 +3267,7 @@ function renderHrRow(r, colours, colMap) {
     <td style="text-align:center;padding:2px;background:${r.onTs?'#1565c0':'#fafafa'};cursor:pointer;font-size:16px;user-select:none" onclick="hrToggleTs('${r.id}')" title="${r.onTs?'On time sheet — click to remove':'Click to add to Rio Tinto time sheet'}">${r.onTs?'<span style="color:#fff;font-weight:900">✓</span>':'<span style="color:var(--mute)">☐</span>'}</td>
     <td style="text-align:center">${daySel}</td>
     <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
-    <td><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err)">Del</button></td>
+    <td style="white-space:nowrap"><button class="edit-btn" title="Bank this job for later use (moves it to the Banked list — stays until you pull it back)" onclick="hrBankRow('${r.id}')" style="color:#f57c00;border-color:#f57c00;padding:2px 6px;font-size:11px">🏦</button><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err);margin-left:2px">Del</button></td>
   </tr>`;
 }
 
@@ -3358,6 +3359,121 @@ function hrEditField(id, field, val) {
   r[field] = val.trim();
   hrSave();
 }
+// ----- Banked break-in jobs (persistent across weeks) -----
+function hrGetBanked()  { try { return JSON.parse(localStorage.getItem('kaefer_v2_hr_banked') || '[]'); } catch(e) { return []; } }
+function hrSetBanked(a) { localStorage.setItem('kaefer_v2_hr_banked', JSON.stringify(a)); }
+
+function hrBankRow(id) {
+  const r = HR.rows.find(x => x.id === id); if (!r) return;
+  if (!confirm('Move this job to the Banked list?\n\n"' + (r.desc||'(no description)') + '"\n\nIt leaves the week but stays available — pull it back from the 🏦 Banked panel whenever you need it.')) return;
+  const banked = hrGetBanked();
+  banked.unshift({
+    // Fresh id so it doesn't clash with current rows if pulled back later
+    id: 'bnk_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    bankedAt: new Date().toISOString(),
+    bankedFromWeek: HR.weekLabel || '',
+    // Reset state so it comes back fresh when pulled
+    date: '', order: r.order||'', op: r.op||'', loc: r.loc||'',
+    desc: r.desc||'', short: r.short||'', hours: r.hours||'',
+    notes: r.notes||'', planner: r.planner||'',
+    status: 'white', hoursStatus: 'white', day: '', day2: '',
+    percent: '', erect: '', dismantle: '', modify: '',
+    planned: false, onTs: false, scaffoldId: '', scaffoldDone: false
+  });
+  hrSetBanked(banked);
+  // Remove the original row from the week
+  HR.rows = HR.rows.filter(x => x.id !== id);
+  hrSave();
+  render_hours(document.getElementById('stage'), null);
+}
+
+function hrOpenBanked() {
+  const banked = hrGetBanked();
+  const existing = document.getElementById('hr-banked-ml');
+  if (existing) existing.remove();
+  const ml = document.createElement('div');
+  ml.id = 'hr-banked-ml';
+  ml.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ml.innerHTML = `
+    <div style="background:#fff;border-radius:var(--r-md);max-width:900px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="background:#f57c00;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-weight:800;font-size:13px;letter-spacing:.5px">🏦 BANKED BREAK-IN JOBS · ${banked.length}</span>
+        <div style="flex:1"></div>
+        <button onclick="document.getElementById('hr-banked-ml').remove()" style="background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:14px 20px;background:#fff8e1;border-bottom:1px solid #ffe0b2;font-size:12px;color:#555;line-height:1.5">
+        Jobs you've banked instead of running the hours. Click <b>+ Pull back</b> to drop one into the current week as a break-in.
+      </div>
+      <div style="padding:12px">
+        ${banked.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:#f4f6f9">
+              <th style="text-align:left;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Order</th>
+              <th style="text-align:left;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">OP</th>
+              <th style="text-align:left;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Location</th>
+              <th style="text-align:left;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Description</th>
+              <th style="text-align:left;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Short Text</th>
+              <th style="text-align:right;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Hrs</th>
+              <th style="text-align:left;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Banked</th>
+              <th style="text-align:center;padding:7px 10px;font-size:10px;letter-spacing:.5px;color:#555;text-transform:uppercase">Action</th>
+            </tr></thead>
+            <tbody>
+              ${banked.map(b => `<tr style="border-top:1px solid #eef1f5">
+                <td style="padding:7px 10px;font-family:'SF Mono',monospace;font-size:11px;font-weight:700">${escHtml(b.order||'')}</td>
+                <td style="padding:7px 10px;font-family:'SF Mono',monospace;font-size:11px">${escHtml(b.op||'')}</td>
+                <td style="padding:7px 10px;font-family:'SF Mono',monospace;font-size:11px;color:#1565c0">${escHtml(b.loc||'')}</td>
+                <td style="padding:7px 10px;font-weight:600">${escHtml(b.desc||'')}</td>
+                <td style="padding:7px 10px;color:#555">${escHtml(b.short||'')}</td>
+                <td style="padding:7px 10px;text-align:right;font-weight:700;color:#f57c00">${escHtml(b.hours||'')}</td>
+                <td style="padding:7px 10px;font-size:11px;color:#777">${b.bankedAt?fdDisplay(b.bankedAt.slice(0,10)):''}${b.bankedFromWeek?' · '+escHtml(b.bankedFromWeek):''}</td>
+                <td style="padding:4px 10px;text-align:center;white-space:nowrap">
+                  <button class="btn" style="background:#2e7d32;padding:4px 10px;font-size:11px;font-weight:800" onclick="hrPullBanked('${b.id}')">+ Pull back</button>
+                  <button class="edit-btn" style="margin-left:4px;color:var(--err);border-color:var(--err);padding:3px 7px;font-size:10px" onclick="hrDeleteBanked('${b.id}')">Del</button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        ` : '<div style="padding:40px;text-align:center;color:var(--mute);font-style:italic">No banked jobs yet. Click the 🏦 on any row to bank it for later.</div>'}
+      </div>
+    </div>`;
+  document.body.appendChild(ml);
+}
+
+function hrPullBanked(bid) {
+  const banked = hrGetBanked();
+  const idx = banked.findIndex(b => b.id === bid);
+  if (idx < 0) return;
+  const b = banked[idx];
+  // Clone into a current-week break-in row with a fresh id
+  const newRow = Object.assign({}, b, {
+    id: 'hr_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    planned: false,          // always comes back as a break-in
+    status: 'white',          // Ready
+    hoursStatus: 'white',
+    date: '',
+    hours: b.hours || ''
+  });
+  delete newRow.bankedAt;
+  delete newRow.bankedFromWeek;
+  HR.rows.unshift(newRow);
+  // Remove from banked list
+  banked.splice(idx, 1);
+  hrSetBanked(banked);
+  hrSave();
+  // Refresh underlying HR view and the banked panel so the count updates
+  render_hours(document.getElementById('stage'), null);
+  hrOpenBanked();
+}
+
+function hrDeleteBanked(bid) {
+  const banked = hrGetBanked();
+  const b = banked.find(x => x.id === bid);
+  if (!b) return;
+  if (!confirm('Permanently delete this banked job?\n\n"' + (b.desc||'(no description)') + '"')) return;
+  hrSetBanked(banked.filter(x => x.id !== bid));
+  hrOpenBanked();
+}
+
 function hrDelete(id) {
   if (!confirm('Delete this row?')) return;
   const idx = HR.rows.findIndex(x => x.id === id);

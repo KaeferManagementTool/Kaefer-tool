@@ -9834,7 +9834,8 @@ function render_employees(stage, tabCfg) {
         <div id="emp-stats" style="font-size:11.5px;color:var(--mute);align-self:center"></div>
       </div>
 
-      <div style="overflow-x:auto">
+      <div style="display:grid;grid-template-columns:1fr 340px;gap:0;align-items:start">
+      <div style="overflow-x:auto;min-width:0">
         <table class="dm-table" id="emp-table">
           <thead><tr>
             <th>Name</th>
@@ -9856,8 +9857,12 @@ function render_employees(stage, tabCfg) {
           <tbody id="emp-tbody"></tbody>
         </table>
       </div>
+      <!-- PPE order calculator sidebar -->
+      <div id="emp-ppe-panel" style="padding:14px 14px 14px 0;border-left:1px solid var(--line);background:#fafbfc;position:sticky;top:10px;align-self:start;max-height:calc(100vh - 40px);overflow-y:auto"></div>
+      </div>
     </div>`;
   empRenderRows();
+  empRenderPpePanel();
 }
 
 function empRenderRows() {
@@ -9925,6 +9930,96 @@ function empRenderRows() {
       <td style="text-align:center"><button class="edit-btn" onclick="empDelete('${id}')" style="color:var(--err);border-color:var(--err);font-size:10px;padding:2px 6px" title="Delete">×</button></td>
     </tr>`;
   }).join('');
+  // Keep the PPE order panel in sync any time rows change
+  if (typeof empRenderPpePanel === 'function') empRenderPpePanel();
+}
+
+// --- PPE order calculator (gloves + monogoggles) ---
+function empGetMultipliers() {
+  try { return JSON.parse(localStorage.getItem('kaefer_v2_emp_ppe_multipliers') || '{}'); } catch(e) { return {}; }
+}
+function empSetMultipliers(m) { localStorage.setItem('kaefer_v2_emp_ppe_multipliers', JSON.stringify(m)); }
+function empSetMultiplier(category, size, val) {
+  const m = empGetMultipliers();
+  m[category] = m[category] || {};
+  const n = parseFloat(val);
+  if (!isFinite(n) || n <= 0) delete m[category][size];
+  else m[category][size] = n;
+  empSetMultipliers(m);
+  empRenderPpePanel();
+}
+
+function empRenderPpePanel() {
+  const panel = document.getElementById('emp-ppe-panel');
+  if (!panel) return;
+  const persons = (ATT2.persons || []).filter(p => !((typeof pIsArchived==='function') && pIsArchived(p)));
+  const multipliers = empGetMultipliers();
+
+  // Count sizes per category
+  const countBy = (field) => {
+    const counts = {};
+    persons.forEach(p => {
+      const v = (p[field]||'').toString().trim();
+      if (!v) return;
+      counts[v] = (counts[v] || 0) + 1;
+    });
+    // Sort by common order: XS, S, M, L, XL, XXL, 3XL... then numeric, then alpha
+    const sizeRank = s => {
+      const u = s.toUpperCase();
+      const order = ['XS','S','M','L','XL','XXL','2XL','3XL','4XL','5XL'];
+      const idx = order.indexOf(u);
+      if (idx >= 0) return idx;
+      const n = parseFloat(s);
+      if (isFinite(n)) return 100 + n;
+      return 1000 + u.charCodeAt(0);
+    };
+    return Object.entries(counts).sort((a,b) => sizeRank(a[0]) - sizeRank(b[0]));
+  };
+
+  const renderBlock = (title, field, category, defaultMult, headerBg) => {
+    const rows = countBy(field);
+    const unassigned = persons.filter(p => !(p[field]||'').toString().trim()).length;
+    const cat = multipliers[category] || {};
+    let subtotal = 0;
+    const rowHtml = rows.length ? rows.map(([size, count]) => {
+      const mult = cat[size] != null ? cat[size] : defaultMult;
+      const total = Math.round(count * mult);
+      subtotal += total;
+      return `<tr>
+        <td style="padding:5px 8px;font-weight:700;font-size:12px">${escHtml(size)}</td>
+        <td style="padding:5px 8px;text-align:right;font-size:12px;color:#555">${count}</td>
+        <td style="padding:3px 4px;text-align:center"><input type="number" min="0" step="0.5" value="${mult}" onchange="empSetMultiplier('${category}','${escHtml(size).replace(/'/g,"\\'")}',this.value)" style="width:50px;padding:3px 5px;border:1px solid var(--line);border-radius:3px;font-size:11px;text-align:right"></td>
+        <td style="padding:5px 8px;text-align:right;font-weight:800;font-size:13px;color:${headerBg}">${total}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--mute);font-style:italic;font-size:11.5px">No sizes entered yet</td></tr>`;
+    return `
+      <div style="background:#fff;border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:12px;overflow:hidden">
+        <div style="background:${headerBg};color:#fff;padding:7px 11px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase">${title}</span>
+          <div style="flex:1"></div>
+          <span style="background:rgba(255,255,255,.2);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:800">Order: ${subtotal}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#f4f6f9">
+            <th style="padding:5px 8px;text-align:left;font-size:9.5px;letter-spacing:.5px;color:#555;text-transform:uppercase">Size</th>
+            <th style="padding:5px 8px;text-align:right;font-size:9.5px;letter-spacing:.5px;color:#555;text-transform:uppercase" title="Number of employees with this size">#</th>
+            <th style="padding:5px 4px;text-align:center;font-size:9.5px;letter-spacing:.5px;color:#555;text-transform:uppercase" title="Multiplier — how many pairs/each per person for the month">×</th>
+            <th style="padding:5px 8px;text-align:right;font-size:9.5px;letter-spacing:.5px;color:#555;text-transform:uppercase">Order</th>
+          </tr></thead>
+          <tbody>${rowHtml}</tbody>
+        </table>
+        ${unassigned ? `<div style="padding:6px 11px;background:#fff8e1;font-size:10.5px;color:#bf360c;border-top:1px solid #ffe0b2">⚠ ${unassigned} ${unassigned===1?'person has':'people have'} no ${title.toLowerCase()} size yet</div>` : ''}
+      </div>`;
+  };
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #6a1b9a">
+      <h3 style="margin:0;font-size:11px;letter-spacing:1.5px;color:#6a1b9a;font-weight:800">PPE ORDER CALCULATOR</h3>
+    </div>
+    <div style="font-size:11px;color:var(--mute);margin-bottom:10px;line-height:1.4">Edit the <b>×</b> column to adjust how many per person for the month. Totals update live.</div>
+    ${renderBlock('Gloves',       'gloveSize',     'gloves',  2, '#2e7d32')}
+    ${renderBlock('Monogoggles',  'monoggleType',  'mono',    1, '#1565c0')}
+  `;
 }
 
 function empFindById(id) { return (ATT2.persons || []).find(p => String(p.id) === String(id)); }

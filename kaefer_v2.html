@@ -4990,7 +4990,9 @@ function rptMetricsForMonth(monthKey) {
   const planned   = unique.filter(r =>  r.planned);
   const unplanned = unique.filter(r => !r.planned);
   const isCancelled   = r => r.status === 'grey';
-  const isExecuted    = r => r.status === 'green' || (parseFloat(r.hours)||0) > 0;
+  // Executed = row EXPLICITLY marked Complete (green). The hours field holds the PLANNED hours
+  // from the Excel paste, so it's always > 0 — using that as a fallback would make every row look executed.
+  const isExecuted    = r => r.status === 'green';
   const isRescheduled = r => r.status === 'orange';            // explicitly flagged (either manually, or auto on Archive)
   const sumHrs = list => list.reduce((n,r) => n + (parseFloat(r.hours)||0), 0);
 

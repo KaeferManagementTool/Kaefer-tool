@@ -221,7 +221,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Wide-table tabs benefit from full window width — drop the max cap when inside them.
    #reg-table-wrap covers EVERY Registers tab including the wide-pivot Training view (which has no #reg-table). */
 .stage:has(#hr-table),
-.stage:has(#reg-table-wrap) {
+.stage:has(#reg-table-wrap),
+.stage:has(#emp-table) {
   max-width: none;
 }
 .card {
@@ -9843,6 +9844,12 @@ function render_employees(stage, tabCfg) {
             <th>Phone</th>
             <th>Start</th>
             <th title="End date — fill to archive someone who's left">End</th>
+            <th style="background:#6a1b9a;color:#fff" title="Glove size">Glove</th>
+            <th style="background:#6a1b9a;color:#fff" title="Monogoggles type">Monogoggle</th>
+            <th style="background:#6a1b9a;color:#fff" title="Shirt size">Shirt</th>
+            <th style="background:#6a1b9a;color:#fff" title="Pant size">Pants</th>
+            <th style="background:#6a1b9a;color:#fff" title="Overall size">Overall</th>
+            <th style="background:#6a1b9a;color:#fff" title="Boot size">Boot</th>
             <th>Notes</th>
             <th>&nbsp;</th>
           </tr></thead>
@@ -9886,7 +9893,7 @@ function empRenderRows() {
   }
 
   if (!people.length) {
-    tb.innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No employees match that filter. Click <b>+ Add employee</b> to start.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="15" style="padding:30px;text-align:center;color:var(--mute);font-style:italic">No employees match that filter. Click <b>+ Add employee</b> to start.</td></tr>';
     return;
   }
 
@@ -9908,6 +9915,12 @@ function empRenderRows() {
       <td contenteditable="true" oninput="empEditField('${id}','phone',this.textContent)" style="font-family:'SF Mono',Menlo,monospace;font-size:11px">${escHtml(p.phone||'')}</td>
       <td style="padding:3px"><input type="date" value="${p.start||''}" onchange="empEditField('${id}','start',this.value);empRenderRows()" style="border:0;background:transparent;font-size:11px;width:120px"></td>
       <td style="padding:3px"><input type="date" value="${p.end||''}" onchange="empEditField('${id}','end',this.value);empRenderRows()" style="border:0;background:transparent;font-size:11px;width:120px" title="Fill in to archive"></td>
+      <td contenteditable="true" oninput="empEditField('${id}','gloveSize',this.textContent)" style="font-size:11px;text-align:center;min-width:50px;background:#f3e5f5">${escHtml(p.gloveSize||'')}</td>
+      <td contenteditable="true" oninput="empEditField('${id}','monoggleType',this.textContent)" style="font-size:11px;text-align:center;min-width:70px;background:#f3e5f5">${escHtml(p.monoggleType||'')}</td>
+      <td contenteditable="true" oninput="empEditField('${id}','shirtSize',this.textContent)" style="font-size:11px;text-align:center;min-width:50px;background:#f3e5f5">${escHtml(p.shirtSize||'')}</td>
+      <td contenteditable="true" oninput="empEditField('${id}','pantSize',this.textContent)" style="font-size:11px;text-align:center;min-width:50px;background:#f3e5f5">${escHtml(p.pantSize||'')}</td>
+      <td contenteditable="true" oninput="empEditField('${id}','overallSize',this.textContent)" style="font-size:11px;text-align:center;min-width:50px;background:#f3e5f5">${escHtml(p.overallSize||'')}</td>
+      <td contenteditable="true" oninput="empEditField('${id}','bootSize',this.textContent)" style="font-size:11px;text-align:center;min-width:50px;background:#f3e5f5">${escHtml(p.bootSize||'')}</td>
       <td contenteditable="true" oninput="empEditField('${id}','notes',this.textContent)" style="font-size:11px;color:#555;text-align:left">${escHtml(p.notes||'')}</td>
       <td style="text-align:center"><button class="edit-btn" onclick="empDelete('${id}')" style="color:var(--err);border-color:var(--err);font-size:10px;padding:2px 6px" title="Delete">×</button></td>
     </tr>`;
@@ -9918,7 +9931,7 @@ function empFindById(id) { return (ATT2.persons || []).find(p => String(p.id) ==
 
 // Local extras store — fields the backend doesn't know about yet.
 // Keyed by person id. Survives ATT2 reloads from server because we re-merge them in.
-const EMP_EXTRA_FIELDS = ['rtId','position','phone','notes'];
+const EMP_EXTRA_FIELDS = ['rtId','position','phone','notes','gloveSize','monoggleType','shirtSize','pantSize','overallSize','bootSize'];
 function empGetExtras() {
   try { return JSON.parse(localStorage.getItem('kaefer_v2_employee_extras') || '{}'); }
   catch(e) { return {}; }
@@ -10136,7 +10149,7 @@ async function empImportFromTemplate() {
 
 function empExportCsv() {
   const esc = v => { v = v==null?'':String(v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
-  const cols = ['name','rtId','group','position','phone','start','end','notes'];
+  const cols = ['name','rtId','group','position','phone','start','end','gloveSize','monoggleType','shirtSize','pantSize','overallSize','bootSize','notes'];
   const rows = (ATT2.persons||[]).map(p => cols.map(c => esc(p[c])).join(','));
   const csv = '﻿' + cols.join(',') + '\n' + rows.join('\n');
   const a = document.createElement('a');

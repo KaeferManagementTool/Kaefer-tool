@@ -8680,9 +8680,15 @@ function tsRenderMain(stage) {
       TS.jobs[j.id].description = j.desc  || '';
     }
   });
-  // Remove jobs that no longer have TS ticked
-  const live = new Set(hrJobs.map(j => j.id));
-  Object.keys(TS.jobs).forEach(k => { if (!live.has(k)) delete TS.jobs[k]; });
+  // Clean up: drop TS.jobs entries whose HR row no longer exists OR has had its TS tick removed.
+  // Previously this also dropped entries whose date fell outside the current week, which wiped
+  // crew assignments when flicking between weeks. Keep them — tsRenderBody filters by date, so
+  // they just stay hidden until you flip back to their week.
+  const liveHrIds = new Set((HR.rows||[]).map(r => r && r.id));
+  Object.keys(TS.jobs).forEach(k => {
+    const hr = (HR.rows||[]).find(r => r && r.id === k);
+    if (!hr || !hr.onTs) delete TS.jobs[k];
+  });
 
   tsSaveCurrent();
 
@@ -9080,12 +9086,11 @@ function tsConfirmToHr(jk) {
   // Everything else (Ongoing, Complete, Laydown etc.) defaults to erect — adjust manually if needed
 
   const prevBucket = hr[bucket];
-  const prevHours  = hr.hours;
   const prevStatus = hr.hoursStatus;
   const prevPct    = hr.percent;
 
   hr[bucket] = scaffHrs > 0 ? String(scaffHrs) : hr[bucket];
-  hr.hours = scaffHrs > 0 ? String(scaffHrs) : hr.hours;
+  // Planned Hrs stays as-is — only edit it manually in the HR grid if needed.
   hr.hoursStatus = 'green';
   if (prog.indexOf('complete') >= 0) hr.percent = '100';
 
@@ -9095,7 +9100,7 @@ function tsConfirmToHr(jk) {
   const bucketLabel = bucket.charAt(0).toUpperCase() + bucket.slice(1);
   alert('✓ Pushed to Hours Register:\n\n'
     + '  • ' + bucketLabel + ' hours: ' + prevBucket + ' → ' + hr[bucket] + '\n'
-    + '  • Total hours: ' + prevHours + ' → ' + hr.hours + '\n'
+    + '  • Planned Hrs: unchanged (' + (hr.hours||'blank') + ')\n'
     + '  • Hours status: ' + (prevStatus||'(blank)') + ' → green\n'
     + (prog.indexOf('complete') >= 0 ? '  • Percent: ' + (prevPct||'(blank)') + ' → 100%\n' : '')
     + '  • Scaffolders counted: ' + scaffCount + '  (Office/Yard excluded)');

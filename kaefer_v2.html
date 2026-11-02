@@ -218,6 +218,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   max-width: 1400px;
   margin: 0 auto;
 }
+/* Hours Register benefits from the full window width — drop the max cap when inside it */
+.stage:has(#hr-table) {
+  max-width: none;
+}
 .card {
   background: var(--surface);
   border-radius: var(--r-lg);
@@ -2865,7 +2869,7 @@ function render_hours(stage, tabCfg) {
             <th style="background:#1565c0;color:#fff;text-align:center;min-width:40px" title="Tick to add this job to the Time Sheet tab for Rio Tinto submission">📝 TS</th>
             <th style="min-width:80px">Day</th>
             <th>Plan?</th>
-            <th>&nbsp;</th>
+            <th style="position:sticky;right:0;background:var(--surface-2);box-shadow:-3px 0 6px rgba(0,0,0,.06);min-width:92px">Actions</th>
           </tr></thead>
           <tbody id="hr-tbody"></tbody>
         </table>
@@ -3267,7 +3271,7 @@ function renderHrRow(r, colours, colMap) {
     <td style="text-align:center;padding:2px;background:${r.onTs?'#1565c0':'#fafafa'};cursor:pointer;font-size:16px;user-select:none" onclick="hrToggleTs('${r.id}')" title="${r.onTs?'On time sheet — click to remove':'Click to add to Rio Tinto time sheet'}">${r.onTs?'<span style="color:#fff;font-weight:900">✓</span>':'<span style="color:var(--mute)">☐</span>'}</td>
     <td style="text-align:center">${daySel}</td>
     <td><span style="background:${r.planned?'var(--t-attendance)':'var(--warn)'};color:#fff;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700">${r.planned?'PLAN':'BREAK'}</span></td>
-    <td style="white-space:nowrap"><button class="edit-btn" title="Bank this job for later use (moves it to the Banked list — stays until you pull it back)" onclick="hrBankRow('${r.id}')" style="color:#f57c00;border-color:#f57c00;padding:2px 6px;font-size:11px">🏦</button><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err);margin-left:2px">Del</button></td>
+    <td style="white-space:nowrap;position:sticky;right:0;background:#fff;border-left:2px solid var(--line);box-shadow:-3px 0 6px rgba(0,0,0,.06);padding:4px 6px"><button class="edit-btn" title="Bank this job for later use (moves it to the Banked list — stays until you pull it back)" onclick="hrBankRow('${r.id}')" style="color:#f57c00;border-color:#f57c00;padding:2px 6px;font-size:11px">🏦</button><button class="edit-btn" onclick="hrDelete('${r.id}')" style="color:var(--err);border-color:var(--err);margin-left:2px">Del</button></td>
   </tr>`;
 }
 

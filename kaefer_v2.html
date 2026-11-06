@@ -2783,6 +2783,8 @@ function hrLoad() {
   HR.loaded = true;
   hrSetActiveSet();
   if (ACTIVE === 'hours') hrRender();
+  // Kick off a cloud pull in the background — if remote is newer, it overwrites local
+  if (typeof hrSyncPull === 'function') setTimeout(() => hrSyncPull({showStatus:true}), 400);
 }
 function hrSave() {
   // Keep the active alias pointing at the right backing array
@@ -2791,6 +2793,8 @@ function hrSave() {
   // Always persist BOTH buckets — otherwise the inactive one goes stale and reappears on refresh
   localStorage.setItem('kaefer_v2_hours',      JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel }));
   localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next,    weekLabel: HR.weekLabelNext }));
+  // Push both to the cloud so Boz sees the change
+  if (typeof hrSyncSchedulePush === 'function') { hrSyncSchedulePush('current'); hrSyncSchedulePush('next'); }
 }
 function hrGetColours() {
   try {
@@ -2812,6 +2816,7 @@ function render_hours(stage, tabCfg) {
     <div class="card">
       <div class="card-h"><span class="accent" style="--accent:var(--t-hours)"></span>
         <h2>Hours Register</h2>
+        <span id="hr-sync-indicator" style="font-size:11px;margin-left:10px"></span>
         <span class="sub" id="hr-sub">Weekly plan · pasted from your Excel register</span>
         <div style="margin-left:auto;display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;border:1px solid var(--line)">
           <button id="hr-mode-cur"  onclick="hrSetMode('current')" style="padding:5px 12px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:12px;cursor:pointer;background:var(--t-hours);color:#fff">Current week</button>
@@ -2885,6 +2890,7 @@ function render_hours(stage, tabCfg) {
   if (wkNextEl) wkNextEl.onchange = () => { HR.weekLabelNext = wkNextEl.value.trim(); hrSave(); };
   HR.viewMode = HR.viewMode || 'current';
   hrSetMode(HR.viewMode);
+  if (typeof hrSyncUpdateIndicator === 'function') hrSyncUpdateIndicator();
 }
 
 function hrSetMode(mode) {
@@ -2983,7 +2989,7 @@ function hrPromoteNext() {
 function hrGetArchive() {
   try { return JSON.parse(localStorage.getItem('kaefer_v2_hours_archive') || '[]'); } catch(e) { return []; }
 }
-function hrSetArchive(a) { localStorage.setItem('kaefer_v2_hours_archive', JSON.stringify(a)); }
+function hrSetArchive(a) { localStorage.setItem('kaefer_v2_hours_archive', JSON.stringify(a)); if (typeof hrSyncSchedulePush === 'function') hrSyncSchedulePush('archive'); }
 
 function hrArchiveCurrent() {
   if (!HR.rows.length) { alert('Nothing to archive — the week is empty.'); return; }
@@ -3368,7 +3374,145 @@ function hrEditField(id, field, val) {
 }
 // ----- Banked break-in jobs (persistent across weeks) -----
 function hrGetBanked()  { try { return JSON.parse(localStorage.getItem('kaefer_v2_hr_banked') || '[]'); } catch(e) { return []; } }
-function hrSetBanked(a) { localStorage.setItem('kaefer_v2_hr_banked', JSON.stringify(a)); }
+function hrSetBanked(a) { localStorage.setItem('kaefer_v2_hr_banked', JSON.stringify(a)); hrSyncSchedulePush('banked'); }
+
+// ============================================================
+// HR cloud sync — lets Steve + Boz share HR state via the Apps Script backend
+// Last-write-wins per bucket (current/next/banked/archive). 2-second debounced push on edit,
+// 30-second poll for remote changes. Falls back silently if the backend is unreachable.
+// ============================================================
+const HR_SYNC = {
+  enabled: true,
+  status: 'idle',          // idle | syncing | synced | error | off
+  statusMsg: '',
+  lastSyncAt: 0,
+  lastRemoteTimes: {},     // per-bucket remote timestamps we've absorbed
+  pendingPushTimer: null,
+  dirty: { current:false, next:false, banked:false, archive:false }
+};
+
+function hrSyncSchedulePush(bucket) {
+  if (!HR_SYNC.enabled) return;
+  if (typeof workerUrl !== 'function' || !workerUrl()) return;
+  if (bucket && HR_SYNC.dirty[bucket] !== undefined) HR_SYNC.dirty[bucket] = true;
+  clearTimeout(HR_SYNC.pendingPushTimer);
+  HR_SYNC.pendingPushTimer = setTimeout(hrSyncPushNow, 1500);
+  HR_SYNC.status = 'syncing';
+  hrSyncUpdateIndicator();
+}
+
+async function hrSyncPushNow() {
+  if (!HR_SYNC.enabled || !workerUrl()) return;
+  const dirty = Object.assign({}, HR_SYNC.dirty);
+  HR_SYNC.dirty = { current:false, next:false, banked:false, archive:false };
+  const payload = {};
+  if (dirty.current) payload.current = { rows: HR.current || [], weekLabel: HR.weekLabel || '' };
+  if (dirty.next)    payload.next    = { rows: HR.next || [],    weekLabel: HR.weekLabelNext || '' };
+  if (dirty.banked)  payload.banked  = hrGetBanked();
+  if (dirty.archive) payload.archive = hrGetArchive();
+  if (!Object.keys(payload).length) return;
+  HR_SYNC.status = 'syncing';
+  hrSyncUpdateIndicator();
+  try {
+    const resp = await apiCall('hr_push', payload);
+    HR_SYNC.lastSyncAt = Date.now();
+    HR_SYNC.status = 'synced';
+    HR_SYNC.statusMsg = '';
+    Object.assign(HR_SYNC.lastRemoteTimes, (resp && resp.data) || {});
+  } catch(e) {
+    // Mark these buckets dirty again for a later retry
+    Object.keys(dirty).forEach(k => { if (dirty[k]) HR_SYNC.dirty[k] = true; });
+    HR_SYNC.status = 'error';
+    HR_SYNC.statusMsg = e.message || 'push failed';
+    console.warn('[HR sync] push failed:', HR_SYNC.statusMsg);
+  }
+  hrSyncUpdateIndicator();
+}
+
+async function hrSyncPull(options) {
+  options = options || {};
+  if (!HR_SYNC.enabled || !workerUrl()) return;
+  if (options.showStatus) { HR_SYNC.status = 'syncing'; hrSyncUpdateIndicator(); }
+  try {
+    const resp = await apiCall('hr_pull');
+    const d = (resp && resp.data) || {};
+    let changed = false;
+    const absorb = (key, apply) => {
+      const remoteTs = d[key + '_updated_at'];
+      const localTs = HR_SYNC.lastRemoteTimes[key + '_updated_at'];
+      if (!remoteTs) return;
+      if (HR_SYNC.dirty[key]) return;   // local has unsynced edits — don't overwrite, let the push win first
+      if (!localTs || remoteTs > localTs) {
+        apply();
+        HR_SYNC.lastRemoteTimes[key + '_updated_at'] = remoteTs;
+        changed = true;
+      }
+    };
+    absorb('current', () => {
+      if (!d.current) return;
+      HR.current = Array.isArray(d.current.rows) ? d.current.rows : [];
+      HR.weekLabel = d.current.weekLabel || '';
+      localStorage.setItem('kaefer_v2_hours', JSON.stringify({ rows: HR.current, weekLabel: HR.weekLabel }));
+    });
+    absorb('next', () => {
+      if (!d.next) return;
+      HR.next = Array.isArray(d.next.rows) ? d.next.rows : [];
+      HR.weekLabelNext = d.next.weekLabel || '';
+      localStorage.setItem('kaefer_v2_hours_next', JSON.stringify({ rows: HR.next, weekLabel: HR.weekLabelNext }));
+    });
+    absorb('banked', () => {
+      if (!Array.isArray(d.banked)) return;
+      localStorage.setItem('kaefer_v2_hr_banked', JSON.stringify(d.banked));
+    });
+    absorb('archive', () => {
+      if (!Array.isArray(d.archive)) return;
+      localStorage.setItem('kaefer_v2_hours_archive', JSON.stringify(d.archive));
+    });
+    if (changed) {
+      hrSetActiveSet();
+      if (ACTIVE === 'hours' && typeof render_hours === 'function') render_hours(document.getElementById('stage'), null);
+    }
+    HR_SYNC.status = 'synced';
+    HR_SYNC.statusMsg = '';
+    HR_SYNC.lastSyncAt = Date.now();
+  } catch(e) {
+    HR_SYNC.status = 'error';
+    HR_SYNC.statusMsg = e.message || 'pull failed';
+    console.warn('[HR sync] pull failed:', HR_SYNC.statusMsg);
+  }
+  hrSyncUpdateIndicator();
+}
+
+function hrSyncUpdateIndicator() {
+  const el = document.getElementById('hr-sync-indicator');
+  if (!el) return;
+  const ago = HR_SYNC.lastSyncAt ? Math.round((Date.now() - HR_SYNC.lastSyncAt)/1000) + 's ago' : '';
+  let html = '';
+  if (!workerUrl())           html = '<span style="color:#999" title="Backend URL not set — only local storage">⚪ local only</span>';
+  else if (!HR_SYNC.enabled)  html = '<span style="color:#999" title="Click to re-enable sync" onclick="hrSyncToggle()">🔘 sync off</span>';
+  else if (HR_SYNC.status === 'syncing') html = '<span style="color:#f57c00">🟡 syncing…</span>';
+  else if (HR_SYNC.status === 'synced')  html = '<span style="color:#2e7d32" title="Last synced ' + ago + '">🟢 synced · ' + ago + '</span>';
+  else if (HR_SYNC.status === 'error')   html = '<span style="color:#c62828" title="' + escHtml(HR_SYNC.statusMsg||'') + '">🔴 sync error</span>';
+  else                                   html = '<span style="color:#999">⚪ idle</span>';
+  el.innerHTML = html + ' <button class="btn-ghost" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="hrSyncPull({showStatus:true})">↻</button>';
+}
+
+function hrSyncToggle() {
+  HR_SYNC.enabled = !HR_SYNC.enabled;
+  localStorage.setItem('kaefer_v2_hr_sync_enabled', HR_SYNC.enabled ? '1' : '0');
+  hrSyncUpdateIndicator();
+}
+
+// Restore the on/off preference
+try { HR_SYNC.enabled = (localStorage.getItem('kaefer_v2_hr_sync_enabled') ?? '1') === '1'; } catch(e) {}
+
+// Poll backend every 30s for remote changes
+setInterval(() => {
+  if (HR_SYNC.enabled && typeof workerUrl === 'function' && workerUrl()) hrSyncPull();
+}, 30000);
+
+// Refresh the "N seconds ago" label every 10s
+setInterval(() => hrSyncUpdateIndicator(), 10000);
 
 function hrBankRow(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;

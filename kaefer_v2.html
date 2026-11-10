@@ -1904,6 +1904,7 @@ function render_offsite(stage, tabCfg) {
         <div class="field"><label>To</label><input type="date" id="off-to"></div>
         <div class="field"><label>Search</label><input type="text" id="off-filter" placeholder="Name / reason / WO" oninput="offRender()"></div>
         <div class="spacer"></div>
+        <button class="btn" style="background:var(--t-offsite);margin-left:4px" onclick="offCopyForEmail()" title="Copy the visible rows (and OFFSITE REGISTER banner) to clipboard — paste into an email or Teams">📋 Copy</button>
         <button class="btn-ghost" onclick="offOpenBulkPaste()" title="Backfill many entries at once from Excel">📚 Bulk paste</button>
         <button class="btn-ghost" style="margin-left:4px" onclick="offExport()">📥 CSV</button>
         <button class="btn-ghost btn-danger" style="margin-left:4px" onclick="offClearAll()" title="Delete ALL offsite entries">🗑 Clear all</button>
@@ -1997,6 +1998,62 @@ function offDelete(id) {
   OFF.items = OFF.items.filter(o => o.id !== id);
   offSave(); offRender();
 }
+function offCopyForEmail() {
+  // Honour whatever the From / To / Search filters have narrowed down to
+  const from = document.getElementById('off-from').value;
+  const to   = document.getElementById('off-to').value;
+  const filter = (document.getElementById('off-filter').value||'').toLowerCase().trim();
+  let items = OFF.items.slice();
+  if (from) items = items.filter(o => (o.date||'') >= from);
+  if (to)   items = items.filter(o => (o.date||'') <= to);
+  if (filter) items = items.filter(o => ((o.name||'')+' '+(o.reason||'')+' '+(o.wo||'')).toLowerCase().includes(filter));
+  items.sort((a,b) => (a.date||'').localeCompare(b.date||'') || (a.name||'').localeCompare(b.name||''));
+  if (!items.length) { alert('No offsite entries match the current filter — nothing to copy.'); return; }
+  const DAYNAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const TEAL = '#1b5e4f';
+  const htmlRows = items.map(o => {
+    const dayN = o.date ? DAYNAMES[new Date(o.date+'T00:00:00').getDay()] : '';
+    return `<tr>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px">${escHtml(fdDisplay(o.date))}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px;color:#1b5e4f;font-style:italic">${escHtml(dayN)}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px;font-weight:700">${escHtml(o.name||'')}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px;text-align:center">${escHtml(o.out||'')}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px;text-align:center">${escHtml(o.in||'')}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px">${escHtml(o.reason||'')}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px;font-family:'Courier New',monospace">${escHtml(o.wo||'')}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #eee;font-family:Arial,sans-serif;font-size:12px">${escHtml(o.rep||'')}</td>
+    </tr>`;
+  }).join('');
+  const htmlTable = `<div style="font-family:Arial,sans-serif">
+    <div style="background:${TEAL};color:#fff;padding:14px 20px;text-align:center;font-size:24px;font-weight:900;letter-spacing:6px">OFFSITE REGISTER</div>
+    <table style="width:100%;border-collapse:collapse;background:#fff">
+      <thead><tr style="background:#f5f5f5">
+        <th style="padding:8px 14px;text-align:left;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">Date</th>
+        <th style="padding:8px 14px;text-align:left;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">Day</th>
+        <th style="padding:8px 14px;text-align:left;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">Person</th>
+        <th style="padding:8px 14px;text-align:center;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">Out</th>
+        <th style="padding:8px 14px;text-align:center;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">In</th>
+        <th style="padding:8px 14px;text-align:left;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">Reason</th>
+        <th style="padding:8px 14px;text-align:left;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">Work Order</th>
+        <th style="padding:8px 14px;text-align:left;font-size:10px;letter-spacing:1px;color:#555;text-transform:uppercase;border-bottom:2px solid #ddd">RTAY Rep</th>
+      </tr></thead>
+      <tbody>${htmlRows}</tbody>
+    </table>
+  </div>`;
+  // Plain text fallback for clients that don't take HTML
+  const textRows = items.map(o => {
+    const dayN = o.date ? DAYNAMES[new Date(o.date+'T00:00:00').getDay()] : '';
+    return [fdDisplay(o.date), dayN, o.name||'', o.out||'', o.in||'', o.reason||'', o.wo||'', o.rep||''].join('\t');
+  });
+  const text = 'OFFSITE REGISTER\n\nDate\tDay\tPerson\tOut\tIn\tReason\tWork Order\tRTAY Rep\n' + textRows.join('\n');
+  if (navigator.clipboard && window.ClipboardItem) {
+    const item = new ClipboardItem({ 'text/html': new Blob([htmlTable], {type:'text/html'}), 'text/plain': new Blob([text], {type:'text/plain'}) });
+    navigator.clipboard.write([item]).then(() => alert('✓ Copied ' + items.length + ' offsite entr' + (items.length===1?'y':'ies') + '. Paste into your email.')).catch(() => navigator.clipboard.writeText(text).then(()=>alert('✓ Copied as plain text.')));
+  } else {
+    navigator.clipboard.writeText(text).then(() => alert('✓ Copied ' + items.length + ' offsite entr' + (items.length===1?'y':'ies') + ' (plain text).'));
+  }
+}
+
 function offExport() {
   const items = OFF.items.slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
   const DAYNAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];

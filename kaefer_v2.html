@@ -9092,7 +9092,9 @@ function tsRenderBody() {
     const job = TS.jobs[jk];
     const hr = HR.rows.find(r => r.id === jk);
     const title = (hr && hr.desc) || job.description || 'Job';
-    const assignRows = (job.assignments || []).map((a, idx) => {
+    const assignRows = (job.assignments || []).map((a, idx) => ({a, idx}))
+      .filter(x => tsAssignmentOnDay(x.a, TS.selectedDay))
+      .map(({a, idx}) => {
       const dayCells = dayList.map(d => {
         const v = (a.hrs && a.hrs[d] != null) ? a.hrs[d] : '';
         const w = TS.selectedDay ? '80' : '48';
@@ -9168,15 +9170,31 @@ function tsRenderBody() {
   }).join('');
 }
 
+// A missing or empty .days means "shared across every day of the job" (legacy behaviour).
+// Once we scope an assignment to a specific day, .days becomes an explicit list.
+function tsAssignmentOnDay(a, day) {
+  if (!day) return true;                        // ALL-day view → every assignment shows
+  if (!a.days || !a.days.length) return true;   // legacy / unscoped → shows everywhere
+  return a.days.indexOf(day) >= 0;
+}
+
 function tsAddTeamCrew(jk, teamId) {
   if (!teamId || typeof ATT2 === 'undefined' || !ATT2.persons) return;
   const dmHome = (typeof dmGetHome === 'function') ? dmGetHome() : {};
   const members = ATT2.persons.filter(p => dmHome[p.id] === teamId);
   if (!members.length) { alert('Nobody is currently assigned to that team in Daily Meeting.'); return; }
   const job = TS.jobs[jk];
+  const day = TS.selectedDay;
   members.forEach(p => {
-    if (!(job.assignments||[]).find(a => a.personId === p.id)) {
-      (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+    let existing = (job.assignments||[]).find(a => a.personId === p.id);
+    if (!existing) {
+      const a = { personId: p.id, name: p.name, hrs:{} };
+      if (day) a.days = [day];   // scope to the current day tab
+      (job.assignments = job.assignments || []).push(a);
+    } else if (day) {
+      // Scope: add this day to their existing day list so they appear on this tab too
+      existing.days = existing.days && existing.days.length ? existing.days : [];
+      if (existing.days.indexOf(day) < 0) existing.days.push(day);
     }
   });
   tsSaveCurrent();
@@ -9187,8 +9205,20 @@ function tsAddPerson(jk, personId) {
   const p = ATT2.persons.find(x => x.id === personId);
   if (!p) return;
   const job = TS.jobs[jk];
-  if ((job.assignments||[]).find(a => a.personId === personId)) return;
-  (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+  const day = TS.selectedDay;
+  let existing = (job.assignments||[]).find(a => a.personId === personId);
+  if (existing) {
+    if (day) {
+      existing.days = existing.days && existing.days.length ? existing.days : [];
+      if (existing.days.indexOf(day) < 0) existing.days.push(day);
+      tsSaveCurrent();
+      tsRenderBody();
+    }
+    return;
+  }
+  const a = { personId: p.id, name: p.name, hrs:{} };
+  if (day) a.days = [day];
+  (job.assignments = job.assignments || []).push(a);
   tsSaveCurrent();
   tsRenderBody();
 }
@@ -9255,21 +9285,55 @@ function tsAddOfficeYard(jk) {
   if (typeof ATT2 === 'undefined' || !ATT2.persons) return;
   const job = TS.jobs[jk];
   if (!job) return;
-  const existing = new Set((job.assignments||[]).map(a => a.personId));
+  const day = TS.selectedDay;
+  const assignments = job.assignments || [];
   const picks = ATT2.persons.filter(p =>
     (p.group === 'OFFICE STAFF' || p.group === 'YARD STAFF')
     && !(typeof pIsArchived === 'function' && pIsArchived(p))
-    && !existing.has(p.id)
   );
-  if (!picks.length) { alert('No active Office or Yard staff to add — everyone already on this job.'); return; }
+  let added = 0;
   picks.forEach(p => {
-    (job.assignments = job.assignments || []).push({ personId: p.id, name: p.name, hrs:{} });
+    const existing = assignments.find(a => a.personId === p.id);
+    if (!existing) {
+      const a = { personId: p.id, name: p.name, hrs:{} };
+      if (day) a.days = [day];
+      assignments.push(a); added++;
+    } else if (day) {
+      existing.days = existing.days && existing.days.length ? existing.days : [];
+      if (existing.days.indexOf(day) < 0) { existing.days.push(day); added++; }
+    }
   });
+  job.assignments = assignments;
+  if (!added) { alert('No active Office or Yard staff to add — everyone already on this job for this day.'); return; }
   tsSaveCurrent();
   tsRenderBody();
 }
+// When a day filter is active, "remove" just un-scopes the person from THAT day — keeps them on other days.
+// When ALL days view is active, remove them from the job entirely.
 function tsRemovePerson(jk, idx) {
-  TS.jobs[jk].assignments.splice(idx, 1);
+  const a = TS.jobs[jk].assignments[idx];
+  if (!a) return;
+  const day = TS.selectedDay;
+  if (!day) {
+    // All-day view: full removal
+    TS.jobs[jk].assignments.splice(idx, 1);
+  } else {
+    // Day-filtered view: remove this day only
+    if (!a.days || !a.days.length) {
+      // Legacy "shared across every day" → convert to explicit list of all other days of this job
+      const hr = (HR.rows||[]).find(r => r.id === jk);
+      const jobDays = [];
+      if (hr) { if (hr.day) jobDays.push(hr.day); if (hr.day2 && hr.day2 !== hr.day) jobDays.push(hr.day2); }
+      if (!jobDays.length) { TS.jobs[jk].assignments.splice(idx, 1); tsSaveCurrent(); tsRenderBody(); return; }
+      a.days = jobDays.filter(d => d !== day);
+    } else {
+      a.days = a.days.filter(d => d !== day);
+    }
+    // Also clear the hours stored for this day since they no longer apply here
+    if (a.hrs) delete a.hrs[day];
+    // If they're not on any day anymore, remove entirely
+    if (!a.days.length) TS.jobs[jk].assignments.splice(idx, 1);
+  }
   tsSaveCurrent();
   tsRenderBody();
 }

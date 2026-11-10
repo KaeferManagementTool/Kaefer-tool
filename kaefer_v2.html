@@ -8876,7 +8876,11 @@ function tsRenderMain(stage) {
           const tabs = ['', ...TS_DAYS];
           return tabs.map(d => {
             const on  = TS.selectedDay === d;
-            const lbl = d ? (TS_DAYS_UP[TS_DAYS.indexOf(d)].slice(0,3) + ' ' + tsFmtDisplay(tsDateForDay(ws, TS_DAYS.indexOf(d)).toISOString().slice(0,10)).slice(0,5)) : 'ALL';
+            const lbl = d ? (() => {
+              const dt = tsDateForDay(ws, TS_DAYS.indexOf(d));
+              const iso = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+              return TS_DAYS_UP[TS_DAYS.indexOf(d)].slice(0,3) + ' ' + tsFmtDisplay(iso).slice(0,5);
+            })() : 'ALL';
             const cnt = d ? (dayCounts[d] || 0) : total;
             return `<button onclick="tsSelectDay('${d}')" style="padding:6px 12px;border:2px solid ${on?'#1565c0':'var(--line)'};background:${on?'#1565c0':'#fff'};color:${on?'#fff':'#333'};border-radius:6px;font-size:11.5px;font-weight:800;cursor:pointer;letter-spacing:.3px">${lbl} <span style="opacity:.8;font-size:10px;font-weight:600">· ${cnt}</span></button>`;
           }).join('');

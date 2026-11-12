@@ -3571,6 +3571,141 @@ setInterval(() => {
 // Refresh the "N seconds ago" label every 10s
 setInterval(() => hrSyncUpdateIndicator(), 10000);
 
+// ============================================================
+// TIME SHEET cloud sync — same pattern as HR, scoped to the current-week jobs object
+// ============================================================
+const TS_SYNC = { enabled:true, status:'idle', lastSyncAt:0, lastRemoteTs:null, pendingTimer:null, dirty:false };
+function tsSyncSchedulePush() {
+  if (!TS_SYNC.enabled || typeof workerUrl !== 'function' || !workerUrl()) return;
+  TS_SYNC.dirty = true;
+  clearTimeout(TS_SYNC.pendingTimer);
+  TS_SYNC.pendingTimer = setTimeout(tsSyncPushNow, 1500);
+  TS_SYNC.status = 'syncing';
+  tsSyncUpdateIndicator();
+}
+async function tsSyncPushNow() {
+  if (!TS_SYNC.enabled || !workerUrl()) return;
+  if (!TS_SYNC.dirty) return;
+  TS_SYNC.dirty = false;
+  TS_SYNC.status = 'syncing';
+  tsSyncUpdateIndicator();
+  try {
+    const payload = { weekStart: TS.weekStart, jobs: TS.jobs };
+    const resp = await apiCall('ts_push', payload);
+    TS_SYNC.lastSyncAt = Date.now();
+    TS_SYNC.lastRemoteTs = (resp && resp.updated_at) || TS_SYNC.lastRemoteTs;
+    TS_SYNC.status = 'synced';
+  } catch(e) {
+    TS_SYNC.dirty = true;
+    TS_SYNC.status = 'error';
+    console.warn('[TS sync] push failed:', e.message);
+  }
+  tsSyncUpdateIndicator();
+}
+async function tsSyncPull(options) {
+  options = options || {};
+  if (!TS_SYNC.enabled || !workerUrl()) return;
+  if (options.showStatus) { TS_SYNC.status = 'syncing'; tsSyncUpdateIndicator(); }
+  try {
+    const resp = await apiCall('ts_pull');
+    const remoteData = resp && resp.data;
+    const remoteTs = resp && resp.updated_at;
+    if (!remoteData) { TS_SYNC.status='synced'; TS_SYNC.lastSyncAt=Date.now(); tsSyncUpdateIndicator(); return; }
+    if (TS_SYNC.dirty) { TS_SYNC.status='synced'; tsSyncUpdateIndicator(); return; }
+    if (TS_SYNC.lastRemoteTs && remoteTs <= TS_SYNC.lastRemoteTs) { TS_SYNC.status='synced'; TS_SYNC.lastSyncAt=Date.now(); tsSyncUpdateIndicator(); return; }
+    // Adopt remote
+    if (remoteData.weekStart) TS.weekStart = remoteData.weekStart;
+    if (remoteData.jobs)      TS.jobs      = remoteData.jobs;
+    localStorage.setItem(TS_LS.CURRENT, JSON.stringify({ weekStart: TS.weekStart, jobs: TS.jobs }));
+    TS_SYNC.lastRemoteTs = remoteTs;
+    TS_SYNC.lastSyncAt = Date.now();
+    TS_SYNC.status = 'synced';
+    if (ACTIVE === 'timesheet' && typeof tsRenderMain === 'function') tsRenderMain(document.getElementById('stage'));
+  } catch(e) {
+    TS_SYNC.status = 'error';
+    console.warn('[TS sync] pull failed:', e.message);
+  }
+  tsSyncUpdateIndicator();
+}
+function tsSyncUpdateIndicator() {
+  const el = document.getElementById('ts-sync-indicator');
+  if (!el) return;
+  const ago = TS_SYNC.lastSyncAt ? Math.round((Date.now() - TS_SYNC.lastSyncAt)/1000) + 's ago' : '';
+  let html = '';
+  if (!workerUrl())                       html = '<span style="color:#999">⚪ local only</span>';
+  else if (TS_SYNC.status === 'syncing')  html = '<span style="color:#f57c00">🟡 syncing…</span>';
+  else if (TS_SYNC.status === 'synced')   html = '<span style="color:#2e7d32">🟢 synced · '+ago+'</span>';
+  else if (TS_SYNC.status === 'error')    html = '<span style="color:#c62828">🔴 sync error</span>';
+  else                                    html = '<span style="color:#999">⚪ idle</span>';
+  el.innerHTML = html + ' <button class="btn-ghost" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="tsSyncPull({showStatus:true})">↻</button>';
+}
+setInterval(() => { if (TS_SYNC.enabled && workerUrl()) tsSyncPull(); }, 30000);
+setInterval(() => tsSyncUpdateIndicator(), 10000);
+
+// ============================================================
+// TAB PREFS cloud sync — order + nesting, so your layout follows you between machines
+// ============================================================
+const TABS_SYNC = { enabled:true, status:'idle', lastSyncAt:0, lastRemoteTs:null, pendingTimer:null, dirty:false };
+function tabsSyncSchedulePush() {
+  if (!TABS_SYNC.enabled || typeof workerUrl !== 'function' || !workerUrl()) return;
+  TABS_SYNC.dirty = true;
+  clearTimeout(TABS_SYNC.pendingTimer);
+  TABS_SYNC.pendingTimer = setTimeout(tabsSyncPushNow, 1500);
+}
+async function tabsSyncPushNow() {
+  if (!TABS_SYNC.enabled || !workerUrl()) return;
+  if (!TABS_SYNC.dirty) return;
+  TABS_SYNC.dirty = false;
+  TABS_SYNC.status = 'syncing';
+  try {
+    const payload = {
+      order:   TABS.map(t => t.id),
+      parents: (typeof tabGetParents === 'function') ? tabGetParents() : {},
+      lastchild: (() => { try { return JSON.parse(localStorage.getItem('kaefer_v2_tab_lastchild') || '{}'); } catch(e) { return {}; } })()
+    };
+    const resp = await apiCall('tabs_push', payload);
+    TABS_SYNC.lastSyncAt = Date.now();
+    TABS_SYNC.lastRemoteTs = (resp && resp.updated_at) || TABS_SYNC.lastRemoteTs;
+    TABS_SYNC.status = 'synced';
+  } catch(e) {
+    TABS_SYNC.dirty = true;
+    TABS_SYNC.status = 'error';
+    console.warn('[Tabs sync] push failed:', e.message);
+  }
+}
+async function tabsSyncPull() {
+  if (!TABS_SYNC.enabled || !workerUrl()) return;
+  try {
+    const resp = await apiCall('tabs_pull');
+    const remoteData = resp && resp.data;
+    const remoteTs = resp && resp.updated_at;
+    if (!remoteData) return;
+    if (TABS_SYNC.dirty) return;
+    if (TABS_SYNC.lastRemoteTs && remoteTs <= TABS_SYNC.lastRemoteTs) return;
+    let changed = false;
+    if (Array.isArray(remoteData.order)) {
+      localStorage.setItem('kaefer_v2_tab_order', JSON.stringify(remoteData.order));
+      if (typeof loadTabOrder === 'function') loadTabOrder();
+      changed = true;
+    }
+    if (remoteData.parents) {
+      localStorage.setItem('kaefer_v2_tab_parents', JSON.stringify(remoteData.parents));
+      changed = true;
+    }
+    if (remoteData.lastchild) {
+      localStorage.setItem('kaefer_v2_tab_lastchild', JSON.stringify(remoteData.lastchild));
+    }
+    TABS_SYNC.lastRemoteTs = remoteTs;
+    TABS_SYNC.lastSyncAt = Date.now();
+    TABS_SYNC.status = 'synced';
+    if (changed && typeof renderTabs === 'function') renderTabs();
+  } catch(e) {
+    TABS_SYNC.status = 'error';
+    console.warn('[Tabs sync] pull failed:', e.message);
+  }
+}
+setInterval(() => { if (TABS_SYNC.enabled && workerUrl()) tabsSyncPull(); }, 60000);
+
 function hrBankRow(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
   if (!confirm('Move this job to the Banked list?\n\n"' + (r.desc||'(no description)') + '"\n\nIt leaves the week but stays available — pull it back from the 🏦 Banked panel whenever you need it.')) return;
@@ -8765,7 +8900,7 @@ function tsSetTemplate(b64) { localStorage.setItem(TS_LS.TEMPLATE, b64); }
 function tsClearTemplate() { localStorage.removeItem(TS_LS.TEMPLATE); }
 function tsGetArchive() { try { return JSON.parse(localStorage.getItem(TS_LS.ARCHIVE) || '[]'); } catch(e) { return []; } }
 function tsSetArchive(a) { localStorage.setItem(TS_LS.ARCHIVE, JSON.stringify(a)); }
-function tsSaveCurrent() { localStorage.setItem(TS_LS.CURRENT, JSON.stringify({ weekStart: TS.weekStart, jobs: TS.jobs })); }
+function tsSaveCurrent() { localStorage.setItem(TS_LS.CURRENT, JSON.stringify({ weekStart: TS.weekStart, jobs: TS.jobs })); if (typeof tsSyncSchedulePush === 'function') tsSyncSchedulePush(); }
 function tsLoadCurrent() {
   try {
     const d = JSON.parse(localStorage.getItem(TS_LS.CURRENT) || '{}');
@@ -8811,6 +8946,8 @@ function render_timesheet(stage, tabCfg) {
   const tmpl = tsGetTemplate();
   if (!tmpl) { tsRenderUpload(stage); return; }
   tsRenderMain(stage);
+  if (typeof tsSyncUpdateIndicator === 'function') tsSyncUpdateIndicator();
+  if (typeof tsSyncPull === 'function') setTimeout(() => tsSyncPull({showStatus:true}), 300);
 }
 
 function tsRenderUpload(stage) {
@@ -8818,7 +8955,7 @@ function tsRenderUpload(stage) {
     <div class="card">
       <div class="card-h">
         <span class="accent" style="--accent:#1565c0"></span>
-        <h2>Time Sheet</h2>
+        <h2>Time Sheet</h2><span id="ts-sync-indicator" style="font-size:11px;margin-left:10px"></span>
         <span class="sub">Rio Tinto time sheet builder</span>
       </div>
       <div style="padding:40px 30px;text-align:center;background:#fafafa">
@@ -8897,7 +9034,7 @@ function tsRenderMain(stage) {
     <div class="card" style="overflow:visible">
       <div class="card-h">
         <span class="accent" style="--accent:#1565c0"></span>
-        <h2>Time Sheet</h2>
+        <h2>Time Sheet</h2><span id="ts-sync-indicator" style="font-size:11px;margin-left:10px"></span>
         <span class="sub">Rio Tinto — fills day sheets from your Hours Register</span>
         <div style="flex:1"></div>
         <button class="btn-ghost" onclick="tsShowArchive()">📦 Archive (${archive.length})</button>
@@ -10566,6 +10703,7 @@ function loadTabOrder() {
 }
 function saveTabOrder() {
   try { localStorage.setItem('kaefer_v2_tab_order', JSON.stringify(TABS.map(t => t.id))); } catch(e) {}
+  if (typeof tabsSyncSchedulePush === 'function') tabsSyncSchedulePush();
 }
 
 /* ----- Nested tabs: user-defined parent-child relationships ----- */
@@ -10583,6 +10721,7 @@ function tabSetParent(childId, parentId) {
     map[childId] = parentId;
   }
   localStorage.setItem('kaefer_v2_tab_parents', JSON.stringify(map));
+  if (typeof tabsSyncSchedulePush === 'function') tabsSyncSchedulePush();
   return true;
 }
 function tabParentOf(id) { return tabGetParents()[id] || ''; }
@@ -10903,6 +11042,8 @@ loadTabOrder();
 renderTabs();
 renderStage();
 updateSync();
+// Pull cloud tab prefs right after local load so the layout follows the user between machines
+if (typeof tabsSyncPull === 'function') setTimeout(tabsSyncPull, 500);
 
 /* On desktop show tab bar; on mobile keep collapsed until tapped */
 if (window.innerWidth > 820) {

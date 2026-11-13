@@ -3756,6 +3756,86 @@ async function tabsSyncPull() {
 }
 setInterval(() => { if (TABS_SYNC.enabled && workerUrl()) tabsSyncPull(); }, 60000);
 
+// ============================================================
+// DAILY MEETING cloud sync — team homes, per-date overrides, leaders, shift focus, custom teams
+// ============================================================
+const DM_SYNC = { enabled:true, status:'idle', lastSyncAt:0, lastRemoteTs:null, pendingTimer:null, dirty:false };
+function dmSyncSchedulePush() {
+  if (!DM_SYNC.enabled || typeof workerUrl !== 'function' || !workerUrl()) return;
+  DM_SYNC.dirty = true;
+  clearTimeout(DM_SYNC.pendingTimer);
+  DM_SYNC.pendingTimer = setTimeout(dmSyncPushNow, 1500);
+  DM_SYNC.status = 'syncing';
+  dmSyncUpdateIndicator();
+}
+async function dmSyncPushNow() {
+  if (!DM_SYNC.enabled || !workerUrl()) return;
+  if (!DM_SYNC.dirty) return;
+  DM_SYNC.dirty = false;
+  DM_SYNC.status = 'syncing';
+  dmSyncUpdateIndicator();
+  try {
+    const payload = {
+      home:         dmGetHome(),
+      overrides:    dmGetOverride(),
+      leaders:      dmGetLeaders(),
+      focus:        dmGetFocus(),
+      customTeams:  dmGetCustomTeams()
+    };
+    const resp = await apiCall('dm_push', payload);
+    DM_SYNC.lastSyncAt = Date.now();
+    DM_SYNC.lastRemoteTs = (resp && resp.updated_at) || DM_SYNC.lastRemoteTs;
+    DM_SYNC.status = 'synced';
+  } catch(e) {
+    DM_SYNC.dirty = true;
+    DM_SYNC.status = 'error';
+    console.warn('[DM sync] push failed:', e.message);
+  }
+  dmSyncUpdateIndicator();
+}
+async function dmSyncPull(options) {
+  options = options || {};
+  if (!DM_SYNC.enabled || !workerUrl()) return;
+  if (options.showStatus) { DM_SYNC.status = 'syncing'; dmSyncUpdateIndicator(); }
+  try {
+    const resp = await apiCall('dm_pull');
+    const remoteData = resp && resp.data;
+    const remoteTs = resp && resp.updated_at;
+    if (!remoteData) { DM_SYNC.status='synced'; DM_SYNC.lastSyncAt=Date.now(); dmSyncUpdateIndicator(); return; }
+    if (DM_SYNC.dirty) { DM_SYNC.status='synced'; dmSyncUpdateIndicator(); return; }
+    if (DM_SYNC.lastRemoteTs && remoteTs <= DM_SYNC.lastRemoteTs) { DM_SYNC.status='synced'; DM_SYNC.lastSyncAt=Date.now(); dmSyncUpdateIndicator(); return; }
+    // Write all 5 buckets to localStorage directly (bypass setters to avoid re-triggering push)
+    if (remoteData.home)        localStorage.setItem(DAILY_LS.HOME,     JSON.stringify(remoteData.home));
+    if (remoteData.overrides)   localStorage.setItem(DAILY_LS.OVERRIDE, JSON.stringify(remoteData.overrides));
+    if (remoteData.leaders)     localStorage.setItem(DAILY_LS.LEADERS,  JSON.stringify(remoteData.leaders));
+    if (remoteData.focus)       localStorage.setItem(DAILY_LS.FOCUS,    JSON.stringify(remoteData.focus));
+    if (Array.isArray(remoteData.customTeams)) localStorage.setItem('kaefer_v2_custom_teams', JSON.stringify(remoteData.customTeams));
+    DM_SYNC.lastRemoteTs = remoteTs;
+    DM_SYNC.lastSyncAt = Date.now();
+    DM_SYNC.status = 'synced';
+    if (typeof dmRefreshTeams === 'function') dmRefreshTeams();
+    if (ACTIVE === 'daily' && typeof render_daily === 'function') render_daily(document.getElementById('stage'));
+  } catch(e) {
+    DM_SYNC.status = 'error';
+    console.warn('[DM sync] pull failed:', e.message);
+  }
+  dmSyncUpdateIndicator();
+}
+function dmSyncUpdateIndicator() {
+  const el = document.getElementById('dm-sync-indicator');
+  if (!el) return;
+  const ago = DM_SYNC.lastSyncAt ? Math.round((Date.now() - DM_SYNC.lastSyncAt)/1000) + 's ago' : '';
+  let html = '';
+  if (!workerUrl())                       html = '<span style="color:#999">⚪ local only</span>';
+  else if (DM_SYNC.status === 'syncing')  html = '<span style="color:#f57c00">🟡 syncing…</span>';
+  else if (DM_SYNC.status === 'synced')   html = '<span style="color:#2e7d32">🟢 synced · '+ago+'</span>';
+  else if (DM_SYNC.status === 'error')    html = '<span style="color:#c62828">🔴 sync error</span>';
+  else                                    html = '<span style="color:#999">⚪ idle</span>';
+  el.innerHTML = html + ' <button class="btn-ghost" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="dmSyncPull({showStatus:true})">↻</button>';
+}
+setInterval(() => { if (DM_SYNC.enabled && workerUrl()) dmSyncPull(); }, 30000);
+setInterval(() => dmSyncUpdateIndicator(), 10000);
+
 function hrBankRow(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
   if (!confirm('Move this job to the Banked list?\n\n"' + (r.desc||'(no description)') + '"\n\nIt leaves the week but stays available — pull it back from the 🏦 Banked panel whenever you need it.')) return;
@@ -4472,7 +4552,7 @@ const TEAMS_BASE = [
 ];
 let TEAMS = TEAMS_BASE.slice();
 function dmGetCustomTeams()  { try { return JSON.parse(localStorage.getItem('kaefer_v2_custom_teams') || '[]'); } catch(e) { return []; } }
-function dmSetCustomTeams(v) { localStorage.setItem('kaefer_v2_custom_teams', JSON.stringify(v)); }
+function dmSetCustomTeams(v) { localStorage.setItem('kaefer_v2_custom_teams', JSON.stringify(v)); if (typeof dmSyncSchedulePush === 'function') dmSyncSchedulePush(); }
 function dmRefreshTeams() {
   // UNASSIGNED must always be last. Custom teams insert before it.
   const customs = dmGetCustomTeams();
@@ -4544,7 +4624,7 @@ const DAILY_LS = {
   FOCUS:    'kaefer_v2_daily_focus'
 };
 function dmReadLS(k)   { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch(e) { return {}; } }
-function dmWriteLS(k,v){ localStorage.setItem(k, JSON.stringify(v)); }
+function dmWriteLS(k,v){ localStorage.setItem(k, JSON.stringify(v)); if (typeof dmSyncSchedulePush === 'function') dmSyncSchedulePush(); }
 function dmGetHome()     { return dmReadLS(DAILY_LS.HOME); }
 function dmSetHome(v)    { dmWriteLS(DAILY_LS.HOME, v); }
 function dmGetOverride() { return dmReadLS(DAILY_LS.OVERRIDE); }
@@ -4621,6 +4701,8 @@ function render_daily(stage, tabCfg) {
   // Load supporting data; show a loading state until attendance arrives (one-shot, no recursion)
   if (!HR.loaded)   hrLoad();
   if (!OFF.loaded)  offLoad();
+  if (typeof dmSyncUpdateIndicator === 'function') setTimeout(dmSyncUpdateIndicator, 50);
+  if (typeof dmSyncPull === 'function' && !DM_SYNC._initialPulled) { DM_SYNC._initialPulled = true; setTimeout(() => dmSyncPull({showStatus:true}), 400); }
   if (!ATT2.loaded) {
     stage.innerHTML = '<div class="card"><div class="card-h"><span class="accent" style="--accent:'+KAEFER_RED+'"></span><h2>Daily Meeting</h2></div><div style="padding:40px;text-align:center;color:var(--mute)"><div style="font-size:30px">⟳</div><p style="margin:10px 0 0">Loading attendance data...</p><p style="font-size:11px;margin-top:14px">If this stays here, open the <b>Attendance</b> tab once to sync, then come back.</p></div></div>';
     if (!ATT2.loading && !DAILY._attAttempted) {
@@ -4695,6 +4777,7 @@ function render_daily(stage, tabCfg) {
       <div class="card-h" style="background:${DAILY.bigScreen?'#1a1a1a':'var(--surface-2)'}">
         <span class="accent" style="--accent:${KAEFER_RED}"></span>
         <h2 style="${DAILY.bigScreen?'color:#fff;font-size:20px':''}">Daily Meeting · <span style="color:${KAEFER_RED}">${dayUp}</span>${DAILY.weekSource==='next'?' <span style="background:#f57c00;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">NEXT WEEK</span>':''}${DAILY.weekSource==='last'?' <span style="background:#546e7a;color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;margin-left:8px;vertical-align:middle">LAST WEEK · READ ONLY</span>':''}</h2>
+        <span id="dm-sync-indicator" style="font-size:11px;margin-left:10px"></span>
         <!-- Week source toggle -->
         <div style="display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;border:1px solid var(--line);margin-left:12px">
           <button onclick="dmSetWeekSource('last')"    style="padding:4px 10px;border:0;border-radius:var(--r-sm);font-weight:700;font-size:11px;cursor:pointer;background:${DAILY.weekSource==='last'?'#546e7a':'transparent'};color:${DAILY.weekSource==='last'?'#fff':'var(--mute)'}" title="Read-only snapshot of last week — who was on which crew, which jobs ran. Gets replaced each Monday when Next → Current.">Last week${(hrGetArchive()[0]?.rows?.length)?` (${hrGetArchive()[0].rows.length})`:''}</button>

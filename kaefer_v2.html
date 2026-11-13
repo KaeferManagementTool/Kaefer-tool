@@ -1303,7 +1303,7 @@ function attRender() {
 // Local order overlay — per-person position within their group, persisted to localStorage.
 // Written on move, read on every render so the manual order sticks across refreshes.
 function attGetOrderMap()   { try { return JSON.parse(localStorage.getItem('kaefer_v2_att_order') || '{}'); } catch(e) { return {}; } }
-function attSetOrderMap(m)  { localStorage.setItem('kaefer_v2_att_order', JSON.stringify(m)); }
+function attSetOrderMap(m)  { localStorage.setItem('kaefer_v2_att_order', JSON.stringify(m)); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 function attApplyLocalOrder() {
   // Rewrite .order on each person using the stored map, so the same sort key everything else uses
   const map = attGetOrderMap();
@@ -1894,13 +1894,13 @@ function offLoad() {
   OFF.loaded = true;
   if (ACTIVE === 'offsite') offRender();
 }
-function offSave() { localStorage.setItem('kaefer_v2_offsite', JSON.stringify(OFF.items)); }
+function offSave() { localStorage.setItem('kaefer_v2_offsite', JSON.stringify(OFF.items)); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 
 function offGetDefaultRep() {
   const v = localStorage.getItem('kaefer_v2_offsite_default_rep');
   return v == null ? 'Jason Voss' : v;
 }
-function offSetDefaultRep(v) { localStorage.setItem('kaefer_v2_offsite_default_rep', v); }
+function offSetDefaultRep(v) { localStorage.setItem('kaefer_v2_offsite_default_rep', v); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 
 function offEditField(id, field, val) {
   const o = OFF.items.find(x => x.id === id);
@@ -2914,7 +2914,7 @@ function hrGetColours() {
   } catch(e) {}
   return HR_DEFAULT_COLOURS;
 }
-function hrSetColours(c) { localStorage.setItem('kaefer_v2_hr_colours', JSON.stringify(c)); }
+function hrSetColours(c) { localStorage.setItem('kaefer_v2_hr_colours', JSON.stringify(c)); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 
 function render_hours(stage, tabCfg) {
   if (!HR.loaded) hrLoad();
@@ -3835,6 +3835,89 @@ function dmSyncUpdateIndicator() {
 }
 setInterval(() => { if (DM_SYNC.enabled && workerUrl()) dmSyncPull(); }, 30000);
 setInterval(() => dmSyncUpdateIndicator(), 10000);
+
+// ============================================================
+// MISC cloud sync — catch-all for everything else that was browser-local:
+// Offsite Register, Employees extras (RT IDs + PPE sizes), PPE multipliers,
+// HR colour palette, Attendance row order, Submission local overlay edits.
+// Hooked into every setter for those stores; backend stores it under one 'misc_prefs' blob.
+// ============================================================
+const MISC_SYNC = { enabled:true, status:'idle', lastSyncAt:0, lastRemoteTs:null, pendingTimer:null, dirty:false };
+function miscReadLocalJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
+  catch(e) { return fallback; }
+}
+function miscBuildPayload() {
+  return {
+    offsite:        miscReadLocalJson('kaefer_v2_offsite', []),
+    offsiteRep:     localStorage.getItem('kaefer_v2_offsite_default_rep') || '',
+    empExtras:      miscReadLocalJson('kaefer_v2_employee_extras', {}),
+    ppeMultipliers: miscReadLocalJson('kaefer_v2_emp_ppe_multipliers', {}),
+    hrColours:      miscReadLocalJson('kaefer_v2_hr_colours', null),
+    attOrder:       miscReadLocalJson('kaefer_v2_att_order', {}),
+    subEdits:       miscReadLocalJson('kaefer_v2_sub_edits', {})
+  };
+}
+function miscSyncSchedulePush() {
+  if (!MISC_SYNC.enabled || typeof workerUrl !== 'function' || !workerUrl()) return;
+  MISC_SYNC.dirty = true;
+  clearTimeout(MISC_SYNC.pendingTimer);
+  MISC_SYNC.pendingTimer = setTimeout(miscSyncPushNow, 1500);
+}
+async function miscSyncPushNow() {
+  if (!MISC_SYNC.enabled || !workerUrl()) return;
+  if (!MISC_SYNC.dirty) return;
+  MISC_SYNC.dirty = false;
+  MISC_SYNC.status = 'syncing';
+  try {
+    const resp = await apiCall('misc_push', miscBuildPayload());
+    MISC_SYNC.lastSyncAt = Date.now();
+    MISC_SYNC.lastRemoteTs = (resp && resp.updated_at) || MISC_SYNC.lastRemoteTs;
+    MISC_SYNC.status = 'synced';
+  } catch(e) {
+    MISC_SYNC.dirty = true;
+    MISC_SYNC.status = 'error';
+    console.warn('[Misc sync] push failed:', e.message);
+  }
+}
+async function miscSyncPull() {
+  if (!MISC_SYNC.enabled || !workerUrl()) return;
+  try {
+    const resp = await apiCall('misc_pull');
+    const d = resp && resp.data;
+    const remoteTs = resp && resp.updated_at;
+    if (!d) { MISC_SYNC.status='synced'; MISC_SYNC.lastSyncAt=Date.now(); return; }
+    if (MISC_SYNC.dirty) return;
+    if (MISC_SYNC.lastRemoteTs && remoteTs <= MISC_SYNC.lastRemoteTs) return;
+    // Adopt remote — write each key straight to localStorage (bypass setters so push doesn't fire)
+    if (Array.isArray(d.offsite))   localStorage.setItem('kaefer_v2_offsite', JSON.stringify(d.offsite));
+    if (typeof d.offsiteRep === 'string') localStorage.setItem('kaefer_v2_offsite_default_rep', d.offsiteRep);
+    if (d.empExtras)                localStorage.setItem('kaefer_v2_employee_extras', JSON.stringify(d.empExtras));
+    if (d.ppeMultipliers)           localStorage.setItem('kaefer_v2_emp_ppe_multipliers', JSON.stringify(d.ppeMultipliers));
+    if (d.hrColours)                localStorage.setItem('kaefer_v2_hr_colours', JSON.stringify(d.hrColours));
+    if (d.attOrder)                 localStorage.setItem('kaefer_v2_att_order', JSON.stringify(d.attOrder));
+    if (d.subEdits)                 localStorage.setItem('kaefer_v2_sub_edits', JSON.stringify(d.subEdits));
+    MISC_SYNC.lastRemoteTs = remoteTs;
+    MISC_SYNC.lastSyncAt = Date.now();
+    MISC_SYNC.status = 'synced';
+    // Refresh any in-memory caches that mirror these stores
+    if (typeof OFF !== 'undefined')  { try { OFF.items = JSON.parse(localStorage.getItem('kaefer_v2_offsite') || '[]'); } catch(e) {} }
+    if (typeof empMergeExtras === 'function' && typeof ATT2 !== 'undefined' && ATT2.loaded) empMergeExtras();
+    if (typeof attApplyLocalOrder === 'function' && typeof ATT2 !== 'undefined' && ATT2.loaded) attApplyLocalOrder();
+    // Re-render the currently open tab if it depends on any of these
+    if (ACTIVE === 'offsite' && typeof offRender === 'function') offRender();
+    if (ACTIVE === 'attendance' && typeof attRender === 'function') attRender();
+    if (ACTIVE === 'employees' && typeof empRenderRows === 'function') { empRenderRows(); if (typeof empRenderPpePanel === 'function') empRenderPpePanel(); }
+    if (ACTIVE === 'submissions' && typeof subRender === 'function') subRender();
+    if (ACTIVE === 'hours' && typeof hrRender === 'function') hrRender();
+  } catch(e) {
+    MISC_SYNC.status = 'error';
+    console.warn('[Misc sync] pull failed:', e.message);
+  }
+}
+setInterval(() => { if (MISC_SYNC.enabled && workerUrl()) miscSyncPull(); }, 30000);
+// First pull on startup after a short delay so the initial render completes
+setTimeout(() => { if (MISC_SYNC.enabled && workerUrl()) miscSyncPull(); }, 1200);
 
 function hrBankRow(id) {
   const r = HR.rows.find(x => x.id === id); if (!r) return;
@@ -8445,10 +8528,11 @@ function subSaveLocalEdits(id, updates) {
   const all = subGetLocalEdits();
   all[id] = Object.assign(all[id] || {}, updates);
   localStorage.setItem('kaefer_v2_sub_edits', JSON.stringify(all));
+  if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush();
 }
 function subClearLocalEdits(id) {
   const all = subGetLocalEdits();
-  if (all[id]) { delete all[id]; localStorage.setItem('kaefer_v2_sub_edits', JSON.stringify(all)); }
+  if (all[id]) { delete all[id]; localStorage.setItem('kaefer_v2_sub_edits', JSON.stringify(all)); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 }
 function subMergeLocalEdits() {
   const all = subGetLocalEdits();
@@ -10511,7 +10595,7 @@ function empRenderRows() {
 function empGetMultipliers() {
   try { return JSON.parse(localStorage.getItem('kaefer_v2_emp_ppe_multipliers') || '{}'); } catch(e) { return {}; }
 }
-function empSetMultipliers(m) { localStorage.setItem('kaefer_v2_emp_ppe_multipliers', JSON.stringify(m)); }
+function empSetMultipliers(m) { localStorage.setItem('kaefer_v2_emp_ppe_multipliers', JSON.stringify(m)); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 function empSetMultiplier(category, size, val) {
   const m = empGetMultipliers();
   m[category] = m[category] || {};
@@ -10621,7 +10705,7 @@ function empGetExtras() {
   try { return JSON.parse(localStorage.getItem('kaefer_v2_employee_extras') || '{}'); }
   catch(e) { return {}; }
 }
-function empSetExtras(x) { localStorage.setItem('kaefer_v2_employee_extras', JSON.stringify(x)); }
+function empSetExtras(x) { localStorage.setItem('kaefer_v2_employee_extras', JSON.stringify(x)); if (typeof miscSyncSchedulePush === 'function') miscSyncSchedulePush(); }
 function empMergeExtras() {
   // Layer local extras onto every ATT2 person
   const extras = empGetExtras();

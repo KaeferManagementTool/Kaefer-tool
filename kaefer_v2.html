@@ -4169,8 +4169,8 @@ function hrParseRowFromCells(cells, mode, idSeed) {
     if (!raw) continue;
     // Strip optional weekday prefix (Mon/Tue/.../Monday) and any trailing time component
     const v = raw.replace(/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*[\s,]+/i, '').trim();
-    // dd/mm/yyyy or dd-mm-yyyy (2 or 4 digit year), ignore anything after
-    let m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    // dd/mm/yyyy, dd-mm-yyyy OR dd.mm.yyyy (2 or 4 digit year), ignore anything after
+    let m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
     if (m) {
       const yr = m[3].length === 2 ? '20' + m[3] : m[3];
       date = yr + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
@@ -4337,7 +4337,7 @@ function hrParsePaste() {
     for (const raw of vals.slice(0, 8)) {
       if (!raw) continue;
       const v = raw.replace(/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*[\s,]+/i, '').trim();
-      let m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+      let m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
       if (m) {
         const yr = m[3].length === 2 ? '20' + m[3] : m[3];
         date = yr + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');

@@ -6332,13 +6332,25 @@ function regDelete(id) {
   regRender();
 }
 
+// Load ExcelJS from CDN (used for a styled PPE register export)
+function regLoadExcelJs() {
+  return new Promise((resolve, reject) => {
+    if (typeof ExcelJS !== 'undefined') return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load ExcelJS from CDN. Check internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+
 // Export PPE register to an Excel workbook styled like the KAEFER PPE ORDERS template.
 // Groups by person+date, pivots items into BOOTS / OVERALLS / PANTS / SHIRTS columns with totals.
 async function regExportPpeExcel() {
   const items = (REG.items.ppe || []).slice();
   if (!items.length) { alert('No PPE entries to export.'); return; }
-  try { if (typeof tsLoadSheetJs === 'function') await tsLoadSheetJs(); } catch(e) { alert('Could not load Excel library: ' + e.message); return; }
-  if (typeof XLSX === 'undefined') { alert('Excel library not available.'); return; }
+  try { await regLoadExcelJs(); } catch(e) { alert(e.message); return; }
+  if (typeof ExcelJS === 'undefined') { alert('Excel library not available.'); return; }
 
   // Map register item labels into the four Excel columns
   const mapCol = (item) => {
@@ -6362,17 +6374,59 @@ async function regExportPpeExcel() {
   // Sort newest first
   const rows = [...groups.values()].sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
-  // Build the AOA (array of arrays)
+  // Helper to combine item entries into "size list, total qty" pair
+  const combine = (list) => {
+    if (!list.length) return ['', ''];
+    const sizes = list.map(x => x.size).filter(Boolean).join(', ') || list.map(x=>x.item).filter(Boolean).join(', ');
+    return [sizes, list.length];
+  };
+
   const year = new Date().getFullYear();
   const title = 'PPE ORDERS ' + year;
-  const header = ['NAME','DATE','BOOTS','OVERALLS','Total','PANTS','Total','SHIRTS','Total','OTHER','Notes'];
-  const aoa = [[title], header];
-  rows.forEach(g => {
-    const combine = (list) => {
-      if (!list.length) return ['', ''];
-      const sizes = list.map(x => x.size).filter(Boolean).join(', ') || list.map(x=>x.item).filter(Boolean).join(', ');
-      return [sizes, list.length];
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'KAEFER Safety Tool';
+  wb.created = new Date();
+
+  // ============================================================
+  // Sheet 1: PPE ORDERS (pivoted layout)
+  // ============================================================
+  const ws = wb.addWorksheet('PPE ORDERS', { properties: { tabColor: { argb: 'FFC00000' } } });
+
+  // Title row — red bold centered, merged
+  ws.mergeCells(1, 1, 1, 11);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.value = title;
+  titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FFC00000' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  ws.getRow(1).height = 28;
+
+  // Header row — dark fill, white bold
+  const headers = ['NAME','DATE','BOOTS','OVERALLS','Total','PANTS','Total','SHIRTS','Total','OTHER','Notes'];
+  const hdrRow = ws.getRow(2);
+  headers.forEach((h, i) => {
+    const c = hdrRow.getCell(i+1);
+    c.value = h;
+    c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2A4A' } };
+    c.alignment = { vertical: 'middle', horizontal: 'center' };
+    c.border = {
+      top:    { style: 'thin', color: { argb: 'FF000000' } },
+      bottom: { style: 'thin', color: { argb: 'FF000000' } },
+      left:   { style: 'thin', color: { argb: 'FF000000' } },
+      right:  { style: 'thin', color: { argb: 'FF000000' } }
     };
+  });
+  hdrRow.height = 20;
+  ws.views = [{ state: 'frozen', ySplit: 2 }];
+
+  // Data rows
+  const thinBorder = {
+    top:    { style: 'thin', color: { argb: 'FFBFBFBF' } },
+    bottom: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+    left:   { style: 'thin', color: { argb: 'FFBFBFBF' } },
+    right:  { style: 'thin', color: { argb: 'FFBFBFBF' } }
+  };
+  rows.forEach((g, idx) => {
     const [bSize, bQty] = combine(g.BOOTS);
     const [oSize, oQty] = combine(g.OVERALLS);
     const [pSize, pQty] = combine(g.PANTS);
@@ -6380,50 +6434,86 @@ async function regExportPpeExcel() {
     const other = g.OTHER.map(x => (x.item + (x.size?' ('+x.size+')':''))).join(', ');
     const notes = [...g.BOOTS, ...g.OVERALLS, ...g.PANTS, ...g.SHIRTS, ...g.OTHER].map(x => x.notes).filter(Boolean).join(' | ');
     const d = g.date ? new Date(g.date + 'T00:00:00') : null;
-    aoa.push([ g.name, d, bSize, oSize, oQty||'', pSize, pQty||'', sSize, sQty||'', other, notes ]);
+    const row = ws.addRow([ g.name, d, bSize, oSize, oQty||'', pSize, pQty||'', sSize, sQty||'', other, notes ]);
+    row.eachCell({ includeEmpty: true }, (cell, colNum) => {
+      cell.border = thinBorder;
+      cell.alignment = { vertical: 'middle', horizontal: colNum === 1 || colNum === 10 || colNum === 11 ? 'left' : 'center' };
+      if (colNum === 1) cell.font = { bold: true };
+    });
+    // Date column formatting
+    if (d) { row.getCell(2).numFmt = 'dd/mm/yyyy'; }
+    // Alternating row shading for readability
+    if (idx % 2 === 1) {
+      row.eachCell({ includeEmpty: true }, c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F6F9' } };
+      });
+    }
   });
 
-  // Build the sheet with styling
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  // Merge the title row across all columns
-  ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:header.length-1} }];
   // Column widths
-  ws['!cols'] = [{wch:22},{wch:12},{wch:10},{wch:14},{wch:7},{wch:10},{wch:7},{wch:10},{wch:7},{wch:24},{wch:30}];
-  // Format the date column cells as dates
-  for (let r = 2; r < aoa.length; r++) {
-    const cell = ws[XLSX.utils.encode_cell({r, c:1})];
-    if (cell && cell.v instanceof Date) { cell.t = 'd'; cell.z = 'dd/mm/yyyy'; }
-  }
-  // Header row styling (bold black fill, white text) — requires SheetJS Pro for real styling;
-  // the free build ignores cell-level styles but the structure is still correct.
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'PPE ORDERS');
+  const widths = [22, 12, 10, 14, 7, 10, 7, 10, 7, 24, 30];
+  widths.forEach((w, i) => { ws.getColumn(i+1).width = w; });
 
-  // Also add a SIZING-style summary sheet pulling from Employees extras
+  // ============================================================
+  // Sheet 2: SIZING (master sizing from Employees tab)
+  // ============================================================
   if (typeof ATT2 !== 'undefined' && ATT2.persons) {
-    const sizingAoA = [['NAME','FULLTIME / CASUAL','GLOVES','MONOS','BOOTS','OVERALLS','PANTS','SHIRTS']];
-    ATT2.persons.slice()
+    const ws2 = wb.addWorksheet('SIZING', { properties: { tabColor: { argb: 'FF2E7D32' } } });
+    ws2.mergeCells(1, 1, 1, 8);
+    const t2 = ws2.getCell(1, 1);
+    t2.value = 'KAEFER SIZING REGISTER';
+    t2.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FF2E7D32' } };
+    t2.alignment = { vertical: 'middle', horizontal: 'center' };
+    ws2.getRow(1).height = 28;
+    const hdr2 = ws2.getRow(2);
+    ['NAME','POSITION','GLOVES','MONOS','BOOTS','OVERALLS','PANTS','SHIRTS'].forEach((h, i) => {
+      const c = hdr2.getCell(i+1);
+      c.value = h;
+      c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2A4A' } };
+      c.alignment = { vertical: 'middle', horizontal: 'center' };
+      c.border = thinBorder;
+    });
+    hdr2.height = 20;
+    ws2.views = [{ state: 'frozen', ySplit: 2 }];
+    const activePersons = ATT2.persons
       .filter(p => !(typeof pIsArchived === 'function' && pIsArchived(p)))
-      .sort((a,b) => (a.name||'').localeCompare(b.name||''))
-      .forEach(p => {
-        sizingAoA.push([
-          p.name || '',
-          p.position || '',
-          p.gloveSize || '',
-          p.monoggleType || '',
-          p.bootSize || '',
-          p.overallSize || '',
-          p.pantSize || '',
-          p.shirtSize || ''
-        ]);
+      .slice()
+      .sort((a,b) => (a.name||'').localeCompare(b.name||''));
+    activePersons.forEach((p, idx) => {
+      const row = ws2.addRow([
+        p.name || '',
+        p.position || '',
+        p.gloveSize || '',
+        p.monoggleType || '',
+        p.bootSize || '',
+        p.overallSize || '',
+        p.pantSize || '',
+        p.shirtSize || ''
+      ]);
+      row.eachCell({ includeEmpty: true }, (cell, colNum) => {
+        cell.border = thinBorder;
+        cell.alignment = { vertical: 'middle', horizontal: colNum === 1 || colNum === 2 ? 'left' : 'center' };
+        if (colNum === 1) cell.font = { bold: true };
       });
-    const ws2 = XLSX.utils.aoa_to_sheet(sizingAoA);
-    ws2['!cols'] = [{wch:22},{wch:16},{wch:10},{wch:12},{wch:10},{wch:12},{wch:10},{wch:10}];
-    XLSX.utils.book_append_sheet(wb, ws2, 'SIZING');
+      if (idx % 2 === 1) {
+        row.eachCell({ includeEmpty: true }, c => {
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F6F9' } };
+        });
+      }
+    });
+    [22, 20, 10, 12, 10, 12, 10, 10].forEach((w, i) => { ws2.getColumn(i+1).width = w; });
   }
 
-  const today = todayIso();
-  XLSX.writeFile(wb, 'PPE_REGISTER_' + today + '.xlsx');
+  // Write to browser
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'PPE_REGISTER_' + todayIso() + '.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function regExportCsv() {

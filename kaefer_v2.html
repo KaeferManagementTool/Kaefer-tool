@@ -6102,6 +6102,7 @@ function regRender() {
         <button class="btn-ghost" onclick="regOpenBulkPaste()" title="Paste rows from Excel or CSV">📚 Bulk paste</button>
         ${REG.activeType === 'ppe' ? '<button class="btn-ghost" style="margin-left:4px" onclick="regImportPpeV1()" title="Pull PPE entries from the v1 tool\'s localStorage">↙ Import PPE from v1</button>' : ''}
         <button class="btn-ghost" style="margin-left:4px" onclick="regExportCsv()">📥 CSV</button>
+        ${REG.activeType==='ppe' ? `<button class="btn" style="background:#1b7f3a;margin-left:4px" onclick="regExportPpeExcel()" title="Export PPE orders to an Excel file formatted like the KAEFER PPE ORDERS template">📊 Excel</button>` : ''}
       </div>
 
       <!-- Register sub-tab bar -->
@@ -6329,6 +6330,100 @@ function regDelete(id) {
   REG.items[REG.activeType] = (REG.items[REG.activeType] || []).filter(x => x.id !== id);
   regSave(REG.activeType);
   regRender();
+}
+
+// Export PPE register to an Excel workbook styled like the KAEFER PPE ORDERS template.
+// Groups by person+date, pivots items into BOOTS / OVERALLS / PANTS / SHIRTS columns with totals.
+async function regExportPpeExcel() {
+  const items = (REG.items.ppe || []).slice();
+  if (!items.length) { alert('No PPE entries to export.'); return; }
+  try { if (typeof tsLoadSheetJs === 'function') await tsLoadSheetJs(); } catch(e) { alert('Could not load Excel library: ' + e.message); return; }
+  if (typeof XLSX === 'undefined') { alert('Excel library not available.'); return; }
+
+  // Map register item labels into the four Excel columns
+  const mapCol = (item) => {
+    const s = (item||'').toLowerCase();
+    if (/boot|gumboot/.test(s))                       return 'BOOTS';
+    if (/overall/.test(s))                            return 'OVERALLS';
+    if (/pant/.test(s))                               return 'PANTS';
+    if (/shirt|long sleeve|hi-?vis|vest/.test(s))     return 'SHIRTS';
+    return 'OTHER';
+  };
+  // Group by (person, date) — one row per group, columns filled based on items
+  const groups = new Map();
+  items.forEach(it => {
+    const name = (it.person && (it.person.name || it.personName)) || it.personName || it.person || 'Unknown';
+    const date = it.issued || '';
+    const key = name + '|' + date;
+    if (!groups.has(key)) groups.set(key, { name, date, BOOTS:[], OVERALLS:[], PANTS:[], SHIRTS:[], OTHER:[] });
+    const g = groups.get(key);
+    g[mapCol(it.item)].push({ size: it.size||'', qty: 1, item: it.item||'', notes: it.notes||'', status: it.status||'' });
+  });
+  // Sort newest first
+  const rows = [...groups.values()].sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  // Build the AOA (array of arrays)
+  const year = new Date().getFullYear();
+  const title = 'PPE ORDERS ' + year;
+  const header = ['NAME','DATE','BOOTS','OVERALLS','Total','PANTS','Total','SHIRTS','Total','OTHER','Notes'];
+  const aoa = [[title], header];
+  rows.forEach(g => {
+    const combine = (list) => {
+      if (!list.length) return ['', ''];
+      const sizes = list.map(x => x.size).filter(Boolean).join(', ') || list.map(x=>x.item).filter(Boolean).join(', ');
+      return [sizes, list.length];
+    };
+    const [bSize, bQty] = combine(g.BOOTS);
+    const [oSize, oQty] = combine(g.OVERALLS);
+    const [pSize, pQty] = combine(g.PANTS);
+    const [sSize, sQty] = combine(g.SHIRTS);
+    const other = g.OTHER.map(x => (x.item + (x.size?' ('+x.size+')':''))).join(', ');
+    const notes = [...g.BOOTS, ...g.OVERALLS, ...g.PANTS, ...g.SHIRTS, ...g.OTHER].map(x => x.notes).filter(Boolean).join(' | ');
+    const d = g.date ? new Date(g.date + 'T00:00:00') : null;
+    aoa.push([ g.name, d, bSize, oSize, oQty||'', pSize, pQty||'', sSize, sQty||'', other, notes ]);
+  });
+
+  // Build the sheet with styling
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Merge the title row across all columns
+  ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:header.length-1} }];
+  // Column widths
+  ws['!cols'] = [{wch:22},{wch:12},{wch:10},{wch:14},{wch:7},{wch:10},{wch:7},{wch:10},{wch:7},{wch:24},{wch:30}];
+  // Format the date column cells as dates
+  for (let r = 2; r < aoa.length; r++) {
+    const cell = ws[XLSX.utils.encode_cell({r, c:1})];
+    if (cell && cell.v instanceof Date) { cell.t = 'd'; cell.z = 'dd/mm/yyyy'; }
+  }
+  // Header row styling (bold black fill, white text) — requires SheetJS Pro for real styling;
+  // the free build ignores cell-level styles but the structure is still correct.
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'PPE ORDERS');
+
+  // Also add a SIZING-style summary sheet pulling from Employees extras
+  if (typeof ATT2 !== 'undefined' && ATT2.persons) {
+    const sizingAoA = [['NAME','FULLTIME / CASUAL','GLOVES','MONOS','BOOTS','OVERALLS','PANTS','SHIRTS']];
+    ATT2.persons.slice()
+      .filter(p => !(typeof pIsArchived === 'function' && pIsArchived(p)))
+      .sort((a,b) => (a.name||'').localeCompare(b.name||''))
+      .forEach(p => {
+        sizingAoA.push([
+          p.name || '',
+          p.position || '',
+          p.gloveSize || '',
+          p.monoggleType || '',
+          p.bootSize || '',
+          p.overallSize || '',
+          p.pantSize || '',
+          p.shirtSize || ''
+        ]);
+      });
+    const ws2 = XLSX.utils.aoa_to_sheet(sizingAoA);
+    ws2['!cols'] = [{wch:22},{wch:16},{wch:10},{wch:12},{wch:10},{wch:12},{wch:10},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws2, 'SIZING');
+  }
+
+  const today = todayIso();
+  XLSX.writeFile(wb, 'PPE_REGISTER_' + today + '.xlsx');
 }
 
 function regExportCsv() {

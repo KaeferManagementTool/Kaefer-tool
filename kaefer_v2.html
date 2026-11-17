@@ -6101,6 +6101,7 @@ function regRender() {
         <div style="flex:1"></div>
         <button class="btn-ghost" onclick="regOpenBulkPaste()" title="Paste rows from Excel or CSV">📚 Bulk paste</button>
         ${REG.activeType === 'ppe' ? '<button class="btn-ghost" style="margin-left:4px" onclick="regImportPpeV1()" title="Pull PPE entries from the v1 tool\'s localStorage">↙ Import PPE from v1</button>' : ''}
+        ${REG.activeType === 'ppe' ? '<button class="btn-ghost" style="margin-left:4px" onclick="regImportPpeJson()" title="Import PPE entries from a JSON file (bulk-add from an external source)">📄 Import JSON</button>' : ''}
         <button class="btn-ghost" style="margin-left:4px" onclick="regExportCsv()">📥 CSV</button>
         ${REG.activeType==='ppe' ? `<button class="btn" style="background:#1b7f3a;margin-left:4px" onclick="regExportPpeExcel()" title="Export PPE orders to an Excel file formatted like the KAEFER PPE ORDERS template">📊 Excel</button>` : ''}
       </div>
@@ -7207,6 +7208,95 @@ function regImportPpeV1() {
   regSave('ppe');
   alert('✓ Imported ' + entries.length + ' PPE entries from v1.');
   regRender();
+}
+
+/* ---- Import PPE from JSON file (bulk from external source) ---- */
+function regImportPpeJson() {
+  if (REG.activeType !== 'ppe') { alert('Switch to the PPE register tab first.'); return; }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    let payload;
+    try {
+      const text = await file.text();
+      payload = JSON.parse(text);
+    } catch (e) { alert('Could not parse JSON file: ' + e.message); return; }
+    const src = Array.isArray(payload) ? payload : (payload.entries || payload.records || []);
+    if (!Array.isArray(src) || !src.length) {
+      alert('No entries found in that JSON. Expected either a top-level array, or an object with an "entries" array.');
+      return;
+    }
+    const existing = REG.items.ppe || [];
+    const existingKeys = new Set(existing.map(x => (x.person||'').toLowerCase()+'|'+(x.item||'').toLowerCase()+'|'+(x.size||'')+'|'+(x.issued||'')));
+    const peopleByName = {};
+    if (typeof ATT2 !== 'undefined' && ATT2.persons) {
+      ATT2.persons.forEach(p => { peopleByName[(p.name||'').toLowerCase().trim()] = p.id; });
+    }
+    const entries = [];
+    let skipped = 0, dupSkipped = 0;
+    src.forEach((entry, idx) => {
+      if (!entry || typeof entry !== 'object') return;
+      const rawName = (entry.name || entry.person || '').toString().trim();
+      const date = (entry.date || entry.issued || '').toString().trim();
+      const role = (entry.role || '').toString().trim();
+      const note = (entry.note || entry.notes || '').toString().trim();
+      const source = (entry.source || '').toString().trim();
+      const approvedBy = (entry.approved_by || entry.approvedBy || '').toString().trim();
+      const items = Array.isArray(entry.items) ? entry.items : [];
+      if (!rawName || !items.length) { skipped++; return; }
+      const noteParts = [];
+      if (role)       noteParts.push('Role: ' + role);
+      if (note)       noteParts.push(note);
+      if (source)     noteParts.push(source);
+      if (approvedBy) noteParts.push('Approved: ' + approvedBy);
+      const combinedNotes = noteParts.join(' · ');
+      items.forEach((it, i2) => {
+        if (!it || typeof it !== 'object') return;
+        const itemDesc = (it.item || it.desc || '').toString().trim();
+        if (!itemDesc) return;
+        const colour = (it.colour || it.color || '').toString().trim();
+        const size = (it.size || '').toString().trim();
+        const qty = Math.max(1, parseInt(it.qty || it.quantity || 1, 10) || 1);
+        const status = (it.status || entry.status || 'Collected').toString();
+        const fullDesc = colour ? (itemDesc + ' (' + colour + ')') : itemDesc;
+        for (let q = 0; q < qty; q++) {
+          const k = rawName.toLowerCase()+'|'+fullDesc.toLowerCase()+'|'+size+'|'+date;
+          // Allow duplicates within this batch (qty > 1) but skip if already in register
+          if (q === 0 && existingKeys.has(k)) { dupSkipped += qty; return; }
+          existingKeys.add(k);
+          entries.push({
+            id: 'r_json_' + Date.now() + '_' + idx + '_' + i2 + '_' + q,
+            person: rawName,
+            item:   fullDesc,
+            size:   size,
+            status: status,
+            issued: date,
+            expiry: '',
+            signedBy: '',
+            notes:  combinedNotes,
+            _personId: peopleByName[rawName.toLowerCase()] || ''
+          });
+        }
+      });
+    });
+    if (!entries.length) {
+      alert('Nothing imported — ' + (dupSkipped?dupSkipped+' row(s) already in register. ':'') + (skipped?skipped+' entry group(s) had no items.':'No valid entries.'));
+      return;
+    }
+    const msg = 'Ready to import ' + entries.length + ' PPE row(s) from ' + src.length + ' request group(s)' +
+      (dupSkipped ? '\n(' + dupSkipped + ' duplicate row(s) will be skipped)' : '') +
+      (skipped ? '\n(' + skipped + ' entry group(s) had no items)' : '') +
+      '\n\nProceed?';
+    if (!confirm(msg)) return;
+    REG.items.ppe = entries.concat(existing);
+    regSave('ppe');
+    alert('✓ Imported ' + entries.length + ' PPE row(s) from JSON.');
+    regRender();
+  };
+  input.click();
 }
 
 /* ============================================================

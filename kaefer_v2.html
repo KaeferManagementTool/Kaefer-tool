@@ -10662,6 +10662,22 @@ async function tsBuildFilledBase64() {
     zip.file(path, newXml);
   }
 
+  // Remove /xl/calcChain.xml — it's a cached list of formula cells that gets out of sync
+  // the moment we touch any cells on a formula sheet. Excel rebuilds it automatically on open.
+  // Leaving the stale file in triggers the "Excel found problems… Removed Records: Formula from
+  // /xl/calcChain.xml" repair dialog every time the user opens the exported timesheet.
+  if (zip.file('xl/calcChain.xml')) {
+    zip.remove('xl/calcChain.xml');
+  }
+  // Also strip the <Relationship> that points to calcChain.xml from workbook.xml.rels,
+  // otherwise some Excel builds still warn about the missing part.
+  const relsPath = 'xl/_rels/workbook.xml.rels';
+  if (zip.file(relsPath)) {
+    let relsXmlOut = await zip.file(relsPath).async('string');
+    relsXmlOut = relsXmlOut.replace(/<Relationship\b[^>]*Target="calcChain\.xml"[^/>]*\/>/g, '');
+    zip.file(relsPath, relsXmlOut);
+  }
+
   const outArr = await zip.generateAsync({
     type:'uint8array',
     compression:'DEFLATE',
